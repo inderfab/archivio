@@ -1,0 +1,41 @@
+{% if error %}
+  <div class="search-error">Fehler: {{ error }}</div>
+
+{% elif not results %}
+  <div class="empty-state">
+    <p>Keine Dokumente gefunden für <strong>„{{ query }}"</strong>.</p>
+  </div>
+
+{% else %}
+  <div class="result-count">{{ total }} Ergebnis{{ "se" if total != 1 else "" }} für „{{ query }}"</div>
+
+  {% for r in results %}
+  {% set ext = r.extension.lstrip('.') %}
+  <div class="result">
+
+    <div class="result-header">
+      {# Dateiname öffnet die Datei via macOS open-Kommando #}
+      <button
+        class="result-title"
+        hx-get="/open?path={{ r.filepath | urlencode }}"
+        hx-swap="none"
+        title="{{ r.filepath }}"
+      >{{ r.filename }}</button>
+      <span class="badge badge-{{ ext }}">{{ ext | upper }}</span>
+    </div>
+
+    <div class="result-meta">
+      <span>{{ r.project_name }}</span>
+      <span>{{ r.filesize | fmt_size }}</span>
+      <span>{{ r.modified_at | fmt_date }}</span>
+    </div>
+
+    <div class="result-path">{{ r.filepath }}</div>
+
+    {% if r.excerpt %}
+    <div class="result-excerpt">{{ r.excerpt | safe }}</div>
+    {% endif %}
+
+  </div>
+  {% endfor %}
+{% endif %}

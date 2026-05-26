@@ -1,0 +1,24 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Projekte{% endblock %}
+
+{% block content %}
+<div style="padding: 40px 0 24px;">
+  <h1 style="font-size:20px; font-weight:700; color:var(--accent);">Projekte</h1>
+</div>
+
+{% for p in projects %}
+<div style="padding:16px 0; border-bottom:1px solid var(--border);">
+  <div style="font-weight:600; margin-bottom:4px;">
+    {{ p.name }}
+    {% if not p.active %}
+    <span class="badge badge-txt" style="margin-left:8px;">inaktiv</span>
+    {% endif %}
+  </div>
+  <div style="font-family:'SF Mono','Menlo',monospace; font-size:12px; color:var(--text-3);">
+    {{ p.path }}
+  </div>
+</div>
+{% else %}
+<div class="empty-state"><p>Keine Projekte angelegt.</p></div>
+{% endfor %}
+{% endblock %}

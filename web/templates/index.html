@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Suche{% endblock %}
+
+{% block content %}
+
+{# Alle Inputs in einem div — hx-include="#search-form" erfasst alle #}
+<div id="search-form">
+
+  <div class="search-wrap">
+    <input
+      class="search-input"
+      id="q"
+      name="q"
+      type="search"
+      placeholder="Dokumente durchsuchen…"
+      autocomplete="off"
+      autofocus
+      hx-get="/search"
+      hx-trigger="input changed delay:300ms, search"
+      hx-target="#results"
+      hx-include="#search-form"
+      hx-indicator="#spinner"
+    >
+  </div>
+
+  <div class="filters">
+    <select
+      name="project_id"
+      hx-get="/search"
+      hx-trigger="change"
+      hx-target="#results"
+      hx-include="#search-form"
+    >
+      <option value="">Alle Projekte</option>
+      {% for p in projects %}
+      <option value="{{ p.id }}">{{ p.name }}</option>
+      {% endfor %}
+    </select>
+
+    <select
+      name="type"
+      hx-get="/search"
+      hx-trigger="change"
+      hx-target="#results"
+      hx-include="#search-form"
+    >
+      <option value="">Alle Typen</option>
+      <option value=".pdf">PDF</option>
+      <option value=".docx">DOCX</option>
+      <option value=".doc">DOC</option>
+      <option value=".xlsx">XLSX</option>
+      <option value=".eml">EML</option>
+      <option value=".txt">TXT</option>
+      <option value=".rtf">RTF</option>
+    </select>
+  </div>
+
+</div>
+
+<div id="spinner" class="spinner htmx-indicator">Suche…</div>
+
+<div id="results">
+  <div class="empty-state">
+    <p>Suchbegriff eingeben um Dokumente zu finden.</p>
+  </div>
+</div>
+
+{% endblock %}
