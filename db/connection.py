@@ -24,8 +24,10 @@ def get_connection() -> sqlite3.Connection:
 
 
 def init_schema():
+    from db import migrations
     schema = Path(__file__).parent / "schema.sql"
     conn = get_connection()
     with conn:
         conn.executescript(schema.read_text(encoding="utf-8"))
+    migrations.run(conn)
     conn.close()

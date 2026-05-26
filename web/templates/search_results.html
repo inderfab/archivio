@@ -33,7 +33,11 @@
     <div class="result-path">{{ r.filepath }}</div>
 
     {% if r.excerpt %}
-    <div class="result-excerpt">{{ r.excerpt | safe }}</div>
+      <div class="result-excerpt">{{ r.excerpt | safe }}</div>
+    {% elif r.extraction_status == 'unsupported' %}
+      <div class="no-content-hint">Kein Textinhalt — Datei direkt öffnen</div>
+    {% elif r.extraction_status == 'error' %}
+      <div class="no-content-hint">Textextraktion fehlgeschlagen</div>
     {% endif %}
 
   </div>

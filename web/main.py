@@ -124,6 +124,7 @@ def _search(conn, q: str, project_id: str, ext: str):
             d.extension,
             d.filesize,
             d.modified_at,
+            d.extraction_status,
             p.name   AS project_name,
             dp.path  AS filepath,
             dc.content AS raw_content
