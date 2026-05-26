@@ -2,10 +2,11 @@
 SICHERHEIT — READ-ONLY-POLICY:
 Der Scanner darf das NAS ausschliesslich lesen.
 Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb'), Path.unlink, Path.rename.
-Erlaubt:  open(..., 'rb'), open(..., 'r'), Path.stat(), Path.rglob(), Path.is_file().
+Erlaubt:  open(..., 'rb'), open(..., 'r'), Path.stat(), os.walk(), Path.is_file().
 """
 
 import logging
+import os
 from pathlib import Path
 
 from config import settings
@@ -19,25 +20,41 @@ def _supported_extensions() -> set[str]:
     return {e.lower() for e in settings.get("scanner.supported_extensions", [])}
 
 
+def _excluded_folders() -> set[str]:
+    # Case-insensitiv vergleichen für Robustheit
+    return {f.lower() for f in settings.get("scanner.excluded_folders", [])}
+
+
 def scan_project(project_id: int, root: Path):
     """Walk root, hash every supported file, extract text, persist to DB."""
     supported = _supported_extensions()
-    conn = connection.get_connection()
+    excluded = _excluded_folders()
 
     batch: list[Path] = []
-    # READ-ONLY: NAS darf nie verändert werden — rglob() ist rein lesend
-    for path in root.rglob("*"):
-        if not path.is_file():   # READ-ONLY: Metadaten-Abfrage, kein Schreiben
-            continue
-        if path.suffix.lower() not in supported:
-            continue
-        batch.append(path)
 
-    log.info("Scanning %d files under %s", len(batch), root)
+    # READ-ONLY: NAS darf nie verändert werden — os.walk() ist rein lesend.
+    # dirnames[:] = [...] beschneidet nur die Walk-Liste, schreibt nichts auf das FS.
+    for dirpath, dirnames, filenames in os.walk(root):
+        # Ausgeschlossene Ordner in-place entfernen → os.walk steigt nicht hinein
+        dirnames[:] = [
+            d for d in dirnames
+            if d.lower() not in excluded
+        ]
+        for filename in filenames:
+            path = Path(dirpath) / filename
+            if path.suffix.lower() not in supported:
+                continue
+            batch.append(path)
 
+    log.info(
+        "Scan: %d Dateien gefunden (ohne Ordner: %s)",
+        len(batch),
+        ", ".join(settings.get("scanner.excluded_folders", [])),
+    )
+
+    conn = connection.get_connection()
     for path in batch:
         _process_file(conn, project_id, path)
-
     conn.close()
 
 
@@ -46,7 +63,7 @@ def _process_file(conn, project_id: int, path: Path):
         # READ-ONLY: NAS darf nie verändert werden — sha256 öffnet nur mit 'rb'
         file_hash = hasher.sha256(path)
     except OSError as exc:
-        log.warning("Cannot read %s: %s", path, exc)
+        log.warning("Kann nicht lesen %s: %s", path, exc)
         return
 
     # READ-ONLY: NAS darf nie verändert werden — stat() liest nur Metadaten
@@ -76,10 +93,10 @@ def _extract_and_store(conn, doc_id: int, path: Path):
     except extractors.UnsupportedFormat:
         text, lang, status = "", "", "unsupported"
     except extractors.ExtractionError as exc:
-        log.warning("Extraction failed for %s: %s", path, exc)
+        log.warning("Extraktion fehlgeschlagen %s: %s", path, exc)
         text, lang, status = "", "", "error"
     except Exception as exc:
-        log.error("Unexpected error for %s: %s", path, exc)
+        log.error("Unerwarteter Fehler %s: %s", path, exc)
         text, lang, status = "", "", "error"
 
     with conn:

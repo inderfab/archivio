@@ -7,3 +7,9 @@ aiofiles==24.1.0
 httpx==0.28.0          # für FastAPI TestClient
 pytest==8.3.4
 pytest-asyncio==0.24.0
+
+# Extraktion
+pypdf>=4.0
+python-docx>=1.1
+openpyxl>=3.1
+striprtf>=0.0.26
