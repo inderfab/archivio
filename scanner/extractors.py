@@ -2,6 +2,9 @@
 Extraktoren pro Dateityp. Jeder Extraktor nimmt einen Path und gibt (text, language) zurück.
 Bei nicht unterstützten Typen: raise UnsupportedFormat.
 Bei Fehler in der Extraktion: raise ExtractionError.
+
+SICHERHEIT: Alle Extraktoren öffnen Dateien ausschliesslich lesend.
+Niemals os.remove, shutil.delete, os.rename oder schreibende open()-Modi verwenden.
 """
 
 from pathlib import Path
@@ -16,9 +19,10 @@ class ExtractionError(Exception):
 
 
 def extract_txt(path: Path) -> tuple[str, str]:
+    # READ-ONLY: NAS darf nie verändert werden
     for enc in ("utf-8", "latin-1", "cp1252"):
         try:
-            return path.read_text(encoding=enc), ""
+            return path.read_text(encoding=enc), ""  # read_text öffnet nur lesend
         except UnicodeDecodeError:
             continue
     raise ExtractionError(f"Cannot decode {path}")
@@ -30,6 +34,7 @@ def extract_pdf(path: Path) -> tuple[str, str]:
     except ImportError:
         raise UnsupportedFormat("pypdf not installed")
     try:
+        # READ-ONLY: NAS darf nie verändert werden — PdfReader öffnet nur lesend
         reader = pypdf.PdfReader(str(path))
         parts = []
         for page in reader.pages:
@@ -47,6 +52,7 @@ def extract_docx(path: Path) -> tuple[str, str]:
     except ImportError:
         raise UnsupportedFormat("python-docx not installed")
     try:
+        # READ-ONLY: NAS darf nie verändert werden — Document() öffnet nur lesend
         doc = docx.Document(str(path))
         return "\n".join(p.text for p in doc.paragraphs if p.text), ""
     except Exception as exc:
@@ -54,9 +60,9 @@ def extract_docx(path: Path) -> tuple[str, str]:
 
 
 _REGISTRY: dict[str, callable] = {
-    ".txt": extract_txt,
-    ".md":  extract_txt,
-    ".pdf": extract_pdf,
+    ".txt":  extract_txt,
+    ".md":   extract_txt,
+    ".pdf":  extract_pdf,
     ".docx": extract_docx,
 }
 
