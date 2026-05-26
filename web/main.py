@@ -102,10 +102,22 @@ async def open_file(path: str = Query(...)):
 # ── Such-Logik ────────────────────────────────────────────────────────────────
 
 def _search(conn, q: str, project_id: str, ext: str):
-    fts_q  = _make_fts_query(q)
-    params: list = [fts_q]
-    filters = ""
+    filters, filter_params = _build_filters(project_id, ext)
 
+    # Schritt 1: FTS5 Prefix-Suche
+    results, error = _search_fts(conn, q, filters, filter_params)
+    if results or error:
+        return results, error
+
+    # Schritt 2: LIKE-Fallback wenn FTS nichts liefert
+    results, error = _search_like(conn, q, filters, filter_params)
+    for r in results:
+        r["fallback"] = True
+    return results, error
+
+
+def _build_filters(project_id: str, ext: str) -> tuple[str, list]:
+    filters, params = "", []
     if project_id:
         try:
             filters += " AND d.project_id = ?"
@@ -116,14 +128,14 @@ def _search(conn, q: str, project_id: str, ext: str):
         e = ext if ext.startswith(".") else f".{ext}"
         filters += " AND d.extension = ?"
         params.append(e)
+    return filters, params
 
+
+def _search_fts(conn, q: str, filters: str, filter_params: list):
+    fts_q = _make_fts_query(q)
     sql = f"""
         SELECT
-            d.id,
-            d.filename,
-            d.extension,
-            d.filesize,
-            d.modified_at,
+            d.id, d.filename, d.extension, d.filesize, d.modified_at,
             d.extraction_status,
             p.name   AS project_name,
             dp.path  AS filepath,
@@ -139,10 +151,52 @@ def _search(conn, q: str, project_id: str, ext: str):
         LIMIT 50
     """
     try:
-        rows = conn.execute(sql, params).fetchall()
+        rows = conn.execute(sql, [fts_q] + filter_params).fetchall()
         results = []
         for r in rows:
             d = dict(r)
+            d["fallback"] = False
+            d["excerpt"] = _excerpt(d.pop("raw_content") or "", q)
+            results.append(d)
+        return results, None
+    except Exception as exc:
+        return [], str(exc)
+
+
+def _search_like(conn, q: str, filters: str, filter_params: list):
+    """LIKE-Fallback: langsamer, findet aber Teilbegriffe mitten im Wort."""
+    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split() if w]
+    if not words:
+        return [], None
+
+    # Jedes Wort muss in content ODER filename vorkommen
+    like_clauses = " AND ".join(
+        "(COALESCE(dc.content,'') LIKE ? OR d.filename LIKE ?)"
+        for _ in words
+    )
+    like_params = [p for w in words for p in (f"%{w}%", f"%{w}%")]
+
+    sql = f"""
+        SELECT
+            d.id, d.filename, d.extension, d.filesize, d.modified_at,
+            d.extraction_status,
+            p.name   AS project_name,
+            dp.path  AS filepath,
+            dc.content AS raw_content
+        FROM documents d
+        JOIN projects       p  ON p.id = d.project_id
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content dc ON dc.document_id = d.id
+        WHERE {like_clauses}
+        {filters}
+        LIMIT 50
+    """
+    try:
+        rows = conn.execute(sql, like_params + filter_params).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["fallback"] = True
             d["excerpt"] = _excerpt(d.pop("raw_content") or "", q)
             results.append(d)
         return results, None
@@ -182,8 +236,13 @@ def _excerpt(text: str, query: str, window: int = 220) -> str:
 
 
 def _make_fts_query(q: str) -> str:
+    """Jedes Wort als Prefix-Query, mit AND verknüpft.
+
+    'Flurhof Statik' → 'Flurhof* AND Statik*'
+    Einzelwort ohne Quotes vermeidet Phrase-Query-Interpretation durch FTS5.
+    """
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split()]
     words = [w for w in words if w]
     if not words:
         return '""'
-    return " ".join(f'"{w}"*' for w in words)
+    return " AND ".join(f"{w}*" for w in words)
