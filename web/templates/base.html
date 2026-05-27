@@ -53,13 +53,21 @@
       color: var(--accent);
       text-decoration: none;
     }
+    nav {
+      display: flex;
+      align-items: center;
+      gap: 2px;
+      margin-left: auto;
+    }
     nav a {
-      font-size: 14px;
+      font-size: 13px;
       color: var(--text-2);
       text-decoration: none;
-      padding: 4px 0;
+      padding: 5px 10px;
+      border-radius: var(--radius);
     }
-    nav a:hover { color: var(--text); }
+    nav a:hover { color: var(--text); background: var(--bg-2); }
+    nav a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
 
     /* ── Suchfeld ── */
     .search-wrap { padding: 48px 0 16px; }
@@ -375,8 +383,8 @@
     <div class="header-inner">
       <a class="logo" href="/">Archivio</a>
       <nav>
-        <a href="/dashboard">Dashboard</a>
-        <a href="/projects">Projekte</a>
+        <a href="/dashboard" class="{{ 'active' if request.url.path.startswith('/dashboard') else '' }}">Dashboard</a>
+        <a href="/projects" class="{{ 'active' if request.url.path == '/projects' else '' }}">Projekte</a>
       </nav>
     </div>
   </div>
