@@ -1,72 +1,114 @@
-<div class="section-title" style="padding-top:4px;">Projekte auf dem NAS</div>
+{% for group in groups %}
 
-{% for p in projects %}
-<div class="project-row">
+<div class="section-title" style="padding-top:{% if loop.first %}4px{% else %}28px{% endif %};">{{ group.label }}</div>
 
-  {# Toggle-Button #}
-  <form hx-post="/dashboard/projects/toggle"
-        hx-target="#project-list"
-        hx-swap="innerHTML"
-        style="display:contents;">
-    <input type="hidden" name="path" value="{{ p.path }}">
-    <input type="hidden" name="name" value="{{ p.name }}">
-    <button type="submit"
-            class="project-toggle {{ 'on' if p.active else '' }}"
-            title="{{ 'Deaktivieren' if p.active else 'Aktivieren' }}">
-    </button>
-  </form>
+{% for p in group.projects %}
+<div class="project-entry">
 
-  {# Projektinfo #}
-  <div style="flex:1; min-width:0;">
-    <div class="project-name">{{ p.name }}</div>
-    {% if p.active %}
-      <div class="project-meta">
-        {{ p.doc_count }} Dokumente
-        {% if p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
-      </div>
-    {% else %}
-      <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
-    {% endif %}
-    <div class="project-path">{{ p.path }}</div>
-  </div>
+  <div class="project-row">
 
-  {# Aktionen #}
-  <div class="project-actions">
-    {% if p.active and p.in_db %}
-
-      {# Scan-Badge oder Scan-Button #}
-      {% if p.scan_status == 'running' %}
-        <span class="scan-badge running"
-              hx-get="/dashboard/projects/{{ p.id }}/scan-status"
-              hx-trigger="every 3s"
-              hx-swap="outerHTML">Scannt…</span>
-      {% elif p.scan_status == 'done' %}
-        <span class="scan-badge done">✓ fertig</span>
-      {% elif p.scan_status == 'error' %}
-        <span class="scan-badge error">Fehler</span>
-      {% else %}
-        <form hx-post="/dashboard/projects/{{ p.id }}/scan"
-              hx-swap="outerHTML"
-              hx-target="find button[type=submit]"
-              style="display:contents;">
-          <button type="submit" class="btn btn-primary">Jetzt scannen</button>
-        </form>
-      {% endif %}
-
-      {# Browser-Button #}
-      <button class="btn"
-              onclick="openBrowser({{ p.id }}, '{{ p.path | replace("'", "\\'") }}', '{{ p.name | replace("'", "\\'") }}')">
-        Browser ▸
+    {# Toggle-Button #}
+    <form hx-post="/dashboard/projects/toggle"
+          hx-target="#project-list"
+          hx-swap="innerHTML"
+          style="display:contents;">
+      <input type="hidden" name="path" value="{{ p.path }}">
+      <input type="hidden" name="name" value="{{ p.name }}">
+      <button type="submit"
+              class="project-toggle {{ 'on' if p.active else '' }}"
+              title="{{ 'Deaktivieren' if p.active else 'Aktivieren' }}">
       </button>
+    </form>
 
-    {% elif not p.active %}
-      <span style="font-size:12px; color:var(--text-3);">Aktivieren um zu scannen</span>
-    {% endif %}
+    {# Projektinfo #}
+    <div style="flex:1; min-width:0;">
+      <div class="project-name">{{ p.name }}</div>
+      {% if p.active %}
+        <div class="project-meta">
+          {{ p.doc_count }} Dokumente
+          {% if p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+        </div>
+      {% else %}
+        <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
+      {% endif %}
+      <div class="project-path">{{ p.path }}</div>
+    </div>
+
+    {# Aktionen #}
+    <div class="project-actions">
+      {% if p.active and p.in_db %}
+
+        {% if p.scan_status == 'running' %}
+          <span class="scan-badge running"
+                hx-get="/dashboard/projects/{{ p.id }}/scan-status"
+                hx-trigger="every 3s"
+                hx-swap="outerHTML">Scannt…</span>
+        {% elif p.scan_status == 'done' %}
+          <span class="scan-badge done">✓ fertig</span>
+        {% elif p.scan_status == 'error' %}
+          <span class="scan-badge error">Fehler</span>
+        {% else %}
+          <form hx-post="/dashboard/projects/{{ p.id }}/scan"
+                hx-swap="outerHTML"
+                hx-target="find button[type=submit]"
+                style="display:contents;">
+            <button type="submit" class="btn btn-primary">Jetzt scannen</button>
+          </form>
+        {% endif %}
+
+        <button class="btn"
+                onclick="toggleBrowser({{ p.id }}, '{{ p.path | replace("'", "\\'") }}', '{{ p.name | replace("'", "\\'") }}')">
+          Browser ▸
+        </button>
+
+      {% endif %}
+    </div>
+
   </div>
+
+  {# Inline Ordner-Browser #}
+  {% if p.active and p.in_db %}
+  <div id="browser-{{ p.id }}" style="display:none; border-top:1px solid var(--border);">
+    <div class="browser-body">
+      <div id="browse-cols-{{ p.id }}" class="browse-cols"></div>
+      <div id="detail-panel-{{ p.id }}" class="detail-panel" style="display:none;"></div>
+    </div>
+  </div>
+  {% endif %}
+
+  {# Matched Postfächer #}
+  {% if p.mailboxes %}
+  <div style="border-top:1px solid var(--border); padding:8px 0 4px;">
+    {% for mb in p.mailboxes %}
+    <div style="display:flex; align-items:center; gap:10px; padding:4px 0;">
+      <form hx-post="/dashboard/mail/toggle"
+            hx-target="#project-list"
+            hx-swap="innerHTML"
+            style="display:contents;">
+        <input type="hidden" name="mailbox_name" value="{{ mb.mailbox_name }}">
+        <button type="submit"
+                class="project-toggle {{ 'on' if mb.active else '' }}"
+                style="width:28px; height:16px;"
+                title="{{ 'Mail-Scan deaktivieren' if mb.active else 'Mail-Scan aktivieren' }}">
+        </button>
+      </form>
+      <span style="font-size:12px; color:var(--text-2);">✉ {{ mb.mailbox_name }}</span>
+      {% if mb.mail_count %}
+        <span style="font-size:11px; color:var(--text-3);">{{ mb.mail_count }} Mails</span>
+      {% endif %}
+      {% if mb.last_scanned_at %}
+        <span style="font-size:11px; color:var(--text-3);">· {{ mb.last_scanned_at[:10] }}</span>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
 </div>
 {% else %}
 <div class="empty-state">
-  <p>Kein Ordner in <code>{{ base_path }}</code> gefunden.</p>
+  <p>Kein Ordner in <code>{{ group.path }}</code> gefunden.</p>
 </div>
+{% endfor %}
+
 {% endfor %}

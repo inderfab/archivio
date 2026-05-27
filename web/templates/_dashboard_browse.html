@@ -4,19 +4,16 @@
     <button
       class="browse-entry {{ 'ignored' if d.ignored else '' }}"
       onclick="
-        clearFromDepth({{ depth + 1 }});
+        clearFromDepth({{ project_id }}, {{ depth + 1 }});
         selectEntry(this, {{ project_id }}, '{{ d.path | replace("'", "\\'") | replace('\\', '\\\\') }}');
         {% if d.has_children %}
         htmx.ajax('GET',
           '/dashboard/browse?path={{ d.path | urlencode }}&project_id={{ project_id }}&depth={{ depth + 1 }}',
-          { target: '#browse-cols', swap: 'beforeend' }
+          { target: '#browse-cols-{{ project_id }}', swap: 'beforeend' }
         );
         {% endif %}
       "
     >
-      {% if d.ignored %}
-        <span class="browse-ignored-badge">ignoriert</span>
-      {% endif %}
       <span style="flex:1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
         {{ d.name }}
       </span>

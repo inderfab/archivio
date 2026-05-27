@@ -15,27 +15,31 @@
   </div>
 
   {% for r in results %}
-  {% set ext = r.extension.lstrip('.') %}
+  {% set ext = r.extension.lstrip('.') if r.extension else 'eml' %}
+  {% set is_mail = r.source_type == 'email' %}
   <div class="result">
 
     <div class="result-header">
-      {# Dateiname öffnet die Datei via macOS open-Kommando #}
-      <button
-        class="result-title"
-        hx-get="/open?path={{ r.filepath | urlencode }}"
-        hx-swap="none"
-        title="{{ r.filepath }}"
-      >{{ r.filename }}</button>
-      <span class="badge badge-{{ ext }}">{{ ext | upper }}</span>
+      <button class="preview-toggle"
+        onclick="togglePreview(this, {{ r.id }}, document.getElementById('q').value)">▶</button>
+      <span class="result-title">{{ r.filename }}</span>
+      <span class="badge badge-{{ ext }}">{{ 'MAIL' if is_mail else ext | upper }}</span>
     </div>
 
     <div class="result-meta">
       <span>{{ r.project_name }}</span>
-      <span>{{ r.filesize | fmt_size }}</span>
-      <span>{{ r.modified_at | fmt_date }}</span>
+      {% if is_mail %}
+        {% if r.mail_sender %}<span>✉ {{ r.mail_sender }}</span>{% endif %}
+        {% if r.mail_date %}<span>{{ r.mail_date[:10] }}</span>{% endif %}
+      {% else %}
+        <span>{{ r.filesize | fmt_size }}</span>
+        <span>{{ r.modified_at | fmt_date }}</span>
+      {% endif %}
     </div>
 
+    {% if not is_mail and r.filepath %}
     <div class="result-path">{{ r.filepath }}</div>
+    {% endif %}
 
     {% if r.excerpt %}
       <div class="result-excerpt">{{ r.excerpt | safe }}</div>
@@ -44,6 +48,34 @@
     {% elif r.extraction_status == 'error' %}
       <div class="no-content-hint">Textextraktion fehlgeschlagen</div>
     {% endif %}
+
+    <div class="result-actions">
+      {% if is_mail %}
+        <button class="btn-sm" data-id="{{ r.id }}"
+          onclick="fetch('/open/mail/'+this.dataset.id).then(function(res){if(!res.ok)alert('Fehler beim Öffnen in Apple Mail')})">
+          In Apple Mail öffnen ↗
+        </button>
+        <button class="btn-sm" data-text="{{ r.filename }}"
+          onclick="copyPath(this, this.dataset.text)">
+          Betreff kopieren
+        </button>
+      {% else %}
+        <button class="btn-sm" data-path="{{ r.filepath }}"
+          onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path)).then(function(res){if(!res.ok)alert('Fehler beim Öffnen')})">
+          Öffnen
+        </button>
+        <button class="btn-sm" data-path="{{ r.filepath }}"
+          onclick="fetch('/reveal?path='+encodeURIComponent(this.dataset.path)).then(function(res){if(!res.ok)alert('Fehler')})">
+          Im Finder zeigen
+        </button>
+        <button class="btn-sm" data-path="{{ r.filepath }}"
+          onclick="copyPath(this, this.dataset.path)">
+          Pfad kopieren
+        </button>
+      {% endif %}
+    </div>
+
+    <div id="preview-{{ r.id }}" class="preview-box" style="display:none;"></div>
 
   </div>
   {% endfor %}

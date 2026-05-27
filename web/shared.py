@@ -10,7 +10,11 @@ templates = Jinja2Templates(directory="web/templates")
 def _fmt_date(iso: str | None) -> str:
     if not iso:
         return "—"
-    return iso[:10]
+    try:
+        y, m, d = iso[:10].split("-")
+        return f"{d}.{m}.{y}"
+    except ValueError:
+        return iso[:10]
 
 
 def _fmt_size(n: int) -> str:

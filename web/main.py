@@ -30,17 +30,17 @@ async def index(request: Request):
     ).fetchall()
     conn.close()
     return templates.TemplateResponse("index.html", {
-        "request": request,
+        "request":  request,
         "projects": projects,
     })
 
 
 @app.get("/search", response_class=HTMLResponse)
 async def search(
-    request: Request,
-    q: str          = Query(default=""),
+    request:    Request,
+    q:          str = Query(default=""),
     project_id: str = Query(default=""),
-    type: str       = Query(default=""),
+    type:       str = Query(default=""),
 ):
     results, error, total = [], None, 0
     if q.strip():
@@ -51,9 +51,9 @@ async def search(
     return templates.TemplateResponse("search_results.html", {
         "request": request,
         "results": results,
-        "query": q,
-        "total": total,
-        "error": error,
+        "query":   q,
+        "total":   total,
+        "error":   error,
     })
 
 
@@ -65,14 +65,13 @@ async def projects_page(request: Request):
     ).fetchall()
     conn.close()
     return templates.TemplateResponse("projects.html", {
-        "request": request,
+        "request":  request,
         "projects": rows,
     })
 
 
 @app.get("/open")
 async def open_file(path: str = Query(...)):
-    """Öffnet eine lokale Datei mit dem Standard-Programm (macOS open)."""
     try:
         subprocess.run(["open", path], check=True, timeout=5)
         return JSONResponse({"ok": True})
@@ -80,17 +79,75 @@ async def open_file(path: str = Query(...)):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+@app.get("/reveal")
+async def reveal_file(path: str = Query(...)):
+    try:
+        subprocess.run(["open", "-R", path], check=True, timeout=5)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/open/mail/{document_id}")
+async def open_mail(document_id: int):
+    """Öffnet Mail in Apple Mail via message:// URL-Schema."""
+    conn = connection.get_connection()
+    row  = conn.execute(
+        "SELECT hash FROM documents WHERE id=? AND source_type='email'",
+        (document_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"ok": False, "error": "Mail nicht gefunden"}, status_code=404)
+    mid = row["hash"].strip("<>").strip()
+    url = f"message://%3C{quote(mid, safe='')}%3E"
+    try:
+        subprocess.run(["open", url], check=True, timeout=5)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
+@app.get("/preview/{document_id}", response_class=HTMLResponse)
+async def preview(request: Request, document_id: int, q: str = Query(default="")):
+    """Lazy-Vorschau für ein Suchergebnis."""
+    conn = connection.get_connection()
+    doc  = conn.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+    if not doc:
+        conn.close()
+        return HTMLResponse("")
+    doc = dict(doc)
+    content_row = conn.execute(
+        "SELECT content FROM document_content WHERE document_id=?", (document_id,)
+    ).fetchone()
+    raw     = (content_row["content"] if content_row else "") or ""
+    excerpt = raw[:600].rstrip() + ("…" if len(raw) > 600 else "")
+    if q:
+        for w in [re.sub(r'["\(\)\*\:\^]', "", x) for x in q.split() if x]:
+            excerpt = re.sub(
+                f"({re.escape(w)})", r"<mark>\1</mark>",
+                excerpt, flags=re.IGNORECASE,
+            )
+
+    ctx: dict = {"request": request, "doc": doc, "excerpt": excerpt, "q": q}
+
+    if doc["source_type"] == "email":
+        mail = conn.execute(
+            "SELECT * FROM mails WHERE document_id=?", (document_id,)
+        ).fetchone()
+        ctx["mail"] = dict(mail) if mail else {}
+
+    conn.close()
+    return templates.TemplateResponse("_preview.html", ctx)
+
+
 # ── Such-Logik ────────────────────────────────────────────────────────────────
 
 def _search(conn, q: str, project_id: str, ext: str):
     filters, filter_params = _build_filters(project_id, ext)
-
-    # Schritt 1: FTS5 Prefix-Suche
     results, error = _search_fts(conn, q, filters, filter_params)
     if results or error:
         return results, error
-
-    # Schritt 2: LIKE-Fallback wenn FTS nichts liefert
     results, error = _search_like(conn, q, filters, filter_params)
     for r in results:
         r["fallback"] = True
@@ -117,27 +174,30 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
     sql = f"""
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
-            d.extraction_status,
-            p.name   AS project_name,
-            dp.path  AS filepath,
-            dc.content AS raw_content
+            d.extraction_status, d.source_type,
+            p.name      AS project_name,
+            dp.path     AS filepath,
+            dc.content  AS raw_content,
+            m.sender    AS mail_sender,
+            m.date      AS mail_date
         FROM documents_fts
-        JOIN documents      d  ON documents_fts.rowid = d.id
-        JOIN projects       p  ON p.id = d.project_id
-        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        JOIN  documents       d  ON documents_fts.rowid = d.id
+        JOIN  projects        p  ON p.id  = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN document_content dc ON dc.document_id = d.id
+        LEFT JOIN mails       m  ON m.document_id = d.id
         WHERE documents_fts MATCH ?
         {filters}
         ORDER BY rank
         LIMIT 50
     """
     try:
-        rows = conn.execute(sql, [fts_q] + filter_params).fetchall()
+        rows    = conn.execute(sql, [fts_q] + filter_params).fetchall()
         results = []
         for r in rows:
             d = dict(r)
             d["fallback"] = False
-            d["excerpt"] = _excerpt(d.pop("raw_content") or "", q)
+            d["excerpt"]  = _excerpt(d.pop("raw_content") or "", q)
             results.append(d)
         return results, None
     except Exception as exc:
@@ -145,12 +205,10 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
 
 
 def _search_like(conn, q: str, filters: str, filter_params: list):
-    """LIKE-Fallback: langsamer, findet aber Teilbegriffe mitten im Wort."""
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split() if w]
     if not words:
         return [], None
 
-    # Jedes Wort muss in content ODER filename vorkommen
     like_clauses = " AND ".join(
         "(COALESCE(dc.content,'') LIKE ? OR d.filename LIKE ?)"
         for _ in words
@@ -160,25 +218,28 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
     sql = f"""
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
-            d.extraction_status,
-            p.name   AS project_name,
-            dp.path  AS filepath,
-            dc.content AS raw_content
+            d.extraction_status, d.source_type,
+            p.name      AS project_name,
+            dp.path     AS filepath,
+            dc.content  AS raw_content,
+            m.sender    AS mail_sender,
+            m.date      AS mail_date
         FROM documents d
-        JOIN projects       p  ON p.id = d.project_id
-        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        JOIN  projects        p  ON p.id  = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN document_content dc ON dc.document_id = d.id
+        LEFT JOIN mails       m  ON m.document_id = d.id
         WHERE {like_clauses}
         {filters}
         LIMIT 50
     """
     try:
-        rows = conn.execute(sql, like_params + filter_params).fetchall()
+        rows    = conn.execute(sql, like_params + filter_params).fetchall()
         results = []
         for r in rows:
             d = dict(r)
             d["fallback"] = True
-            d["excerpt"] = _excerpt(d.pop("raw_content") or "", q)
+            d["excerpt"]  = _excerpt(d.pop("raw_content") or "", q)
             results.append(d)
         return results, None
     except Exception as exc:
@@ -186,7 +247,6 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
 
 
 def _excerpt(text: str, query: str, window: int = 220) -> str:
-    """Kurzen Ausschnitt mit <mark>-Hervorhebungen erzeugen."""
     if not text:
         return ""
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in query.split()]
@@ -201,27 +261,20 @@ def _excerpt(text: str, query: str, window: int = 220) -> str:
         if idx != -1:
             pos = min(pos, idx)
 
-    start = max(0, pos - 60)
-    end   = min(len(text), start + window)
+    start   = max(0, pos - 60)
+    end     = min(len(text), start + window)
     snippet = text[start:end]
 
     for w in words:
         snippet = re.sub(
-            f"({re.escape(w)})",
-            r"<mark>\1</mark>",
-            snippet,
-            flags=re.IGNORECASE,
+            f"({re.escape(w)})", r"<mark>\1</mark>",
+            snippet, flags=re.IGNORECASE,
         )
 
     return ("…" if start > 0 else "") + snippet + ("…" if end < len(text) else "")
 
 
 def _make_fts_query(q: str) -> str:
-    """Jedes Wort als Prefix-Query, mit AND verknüpft.
-
-    'Flurhof Statik' → 'Flurhof* AND Statik*'
-    Einzelwort ohne Quotes vermeidet Phrase-Query-Interpretation durch FTS5.
-    """
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split()]
     words = [w for w in words if w]
     if not words:

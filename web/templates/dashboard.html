@@ -29,55 +29,46 @@
     {% include "_dashboard_projects.html" %}
   </div>
 
-  {# ── Ordner-Browser (erscheint nach Klick) ── #}
-  <div id="browser-area" style="display:none; margin-top: 28px;">
-    <div class="browser-area">
-      <div class="browser-header">
-        <span>📁</span>
-        <span id="browser-title">Ordner-Browser</span>
-      </div>
-      <div class="browser-body">
-        <div id="browse-cols"></div>
-        <div id="detail-panel" class="detail-panel" style="display:none;"></div>
-      </div>
-    </div>
-  </div>
+  {# ── Mail-Integration ── #}
+  {% include "_dashboard_mail.html" %}
 
 </div>
 
 <script>
-  // Öffnet den Browser für ein Projekt
-  function openBrowser(projectId, projectPath, projectName) {
-    document.getElementById('browser-area').style.display = 'block';
-    document.getElementById('browser-title').textContent = projectName;
-    document.getElementById('browse-cols').innerHTML = '';
-    document.getElementById('detail-panel').style.display = 'none';
-
-    htmx.ajax('GET',
-      '/dashboard/browse?path=' + encodeURIComponent(projectPath) +
-      '&project_id=' + projectId + '&depth=0',
-      { target: '#browse-cols', swap: 'beforeend' }
-    );
+  function toggleBrowser(projectId, projectPath, projectName) {
+    var browserDiv = document.getElementById('browser-' + projectId);
+    if (!browserDiv) return;
+    if (browserDiv.style.display === 'none') {
+      browserDiv.style.display = 'block';
+      document.getElementById('browse-cols-' + projectId).innerHTML = '';
+      document.getElementById('detail-panel-' + projectId).style.display = 'none';
+      htmx.ajax('GET',
+        '/dashboard/browse?path=' + encodeURIComponent(projectPath) +
+        '&project_id=' + projectId + '&depth=0',
+        { target: '#browse-cols-' + projectId, swap: 'beforeend' }
+      );
+    } else {
+      browserDiv.style.display = 'none';
+    }
   }
 
-  // Entfernt alle Spalten ab einer bestimmten Tiefe
-  function clearFromDepth(depth) {
-    document.querySelectorAll('#browse-cols [data-depth]').forEach(function(el) {
+  function clearFromDepth(projectId, depth) {
+    document.querySelectorAll('#browse-cols-' + projectId + ' [data-depth]').forEach(function(el) {
       if (parseInt(el.dataset.depth) >= depth) el.remove();
     });
   }
 
-  // Zeigt Detail-Panel und markiert gewählten Eintrag
   function selectEntry(el, projectId, path) {
     document.querySelectorAll('.browse-entry').forEach(function(e) {
       e.classList.remove('selected');
     });
     el.classList.add('selected');
-    document.getElementById('detail-panel').style.display = 'block';
+    var detailPanel = document.getElementById('detail-panel-' + projectId);
+    detailPanel.style.display = 'block';
     htmx.ajax('GET',
       '/dashboard/detail?path=' + encodeURIComponent(path) +
       '&project_id=' + projectId,
-      { target: '#detail-panel', swap: 'innerHTML' }
+      { target: '#detail-panel-' + projectId, swap: 'innerHTML' }
     );
   }
 </script>

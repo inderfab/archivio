@@ -1,0 +1,40 @@
+{% if doc.source_type == 'email' %}
+
+  <div class="preview-meta">
+    {% if mail.sender %}
+    <span><span class="preview-label">Von</span> {{ mail.sender }}</span>
+    {% endif %}
+    {% if mail.recipients %}
+    <span><span class="preview-label">An</span> {{ mail.recipients }}</span>
+    {% endif %}
+    {% if mail.cc %}
+    <span><span class="preview-label">CC</span> {{ mail.cc }}</span>
+    {% endif %}
+    {% if mail.date %}
+    <span><span class="preview-label">Datum</span> {{ mail.date[:10] }}</span>
+    {% endif %}
+  </div>
+
+  {% if excerpt %}
+  <div class="preview-text">{{ excerpt | safe }}</div>
+  {% else %}
+  <div style="color:var(--text-3); font-style:italic; font-size:12px;">Kein Textinhalt</div>
+  {% endif %}
+
+  <div style="margin-top:10px;">
+    <button class="btn btn-sm"
+            hx-get="/open/mail/{{ doc.id }}"
+            hx-swap="none">In Apple Mail öffnen ↗</button>
+  </div>
+
+{% else %}
+
+  {% if excerpt %}
+  <div class="preview-text">{{ excerpt | safe }}</div>
+  {% elif doc.extraction_status == 'unsupported' %}
+  <div style="color:var(--text-3); font-style:italic; font-size:12px;">Kein Textinhalt ({{ doc.extension }})</div>
+  {% else %}
+  <div style="color:var(--text-3); font-style:italic; font-size:12px;">Kein Textinhalt verfügbar</div>
+  {% endif %}
+
+{% endif %}

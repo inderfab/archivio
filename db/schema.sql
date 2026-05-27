@@ -25,7 +25,8 @@ CREATE TABLE IF NOT EXISTS documents (
     extraction_status  TEXT    NOT NULL DEFAULT 'pending'
                            CHECK (extraction_status IN ('pending', 'ok', 'error', 'unsupported')),
     source_type        TEXT    NOT NULL DEFAULT 'filesystem'
-                           CHECK (source_type IN ('filesystem', 'email', 'archive'))
+                           CHECK (source_type IN ('filesystem', 'email', 'archive')),
+    metadata           TEXT    NOT NULL DEFAULT '{}'
 );
 
 -- Eine Datei kann an mehreren Orten liegen (Duplikat, Spiegelung)
@@ -50,9 +51,20 @@ CREATE TABLE IF NOT EXISTS mails (
     document_id INTEGER NOT NULL UNIQUE REFERENCES documents(id) ON DELETE CASCADE,
     sender      TEXT    NOT NULL DEFAULT '',
     recipients  TEXT    NOT NULL DEFAULT '',
+    cc          TEXT    NOT NULL DEFAULT '',
     subject     TEXT    NOT NULL DEFAULT '',
     date        TEXT,
     thread_id   TEXT
+);
+
+-- Postfach-Konfiguration für Mail-Integration
+CREATE TABLE IF NOT EXISTS mail_scan_config (
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id      INTEGER REFERENCES projects(id),
+    mailbox_name    TEXT    NOT NULL UNIQUE,
+    active          INTEGER NOT NULL DEFAULT 0,
+    last_scanned_at TEXT,
+    mail_count      INTEGER NOT NULL DEFAULT 0
 );
 
 -- FTS5 Volltextsuche: eigenständige Tabelle (kein content=), speichert eigene Kopien.

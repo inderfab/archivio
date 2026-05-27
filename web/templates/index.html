@@ -80,6 +80,33 @@
 
 <div id="spinner" class="spinner htmx-indicator">Suche…</div>
 
+<script>
+function togglePreview(btn, docId, q) {
+  var box = document.getElementById('preview-' + docId);
+  if (!box) return;
+  if (box.style.display !== 'none') {
+    box.style.display = 'none';
+    btn.textContent = '▶';
+  } else {
+    box.style.display = 'block';
+    btn.textContent = '▼';
+    if (!btn.dataset.loaded) {
+      btn.dataset.loaded = '1';
+      htmx.ajax('GET', '/preview/' + docId + '?q=' + encodeURIComponent(q),
+        { target: '#preview-' + docId, swap: 'innerHTML' });
+    }
+  }
+}
+
+function copyPath(btn, text) {
+  navigator.clipboard.writeText(text).then(function() {
+    var orig = btn.textContent;
+    btn.textContent = 'Kopiert ✓';
+    setTimeout(function() { btn.textContent = orig; }, 1500);
+  });
+}
+</script>
+
 <div id="results">
   <div class="empty-state">
     <p>Suchbegriff eingeben um Dokumente zu finden.</p>

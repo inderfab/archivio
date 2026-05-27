@@ -16,6 +16,7 @@ def run(conn: sqlite3.Connection):
     conn.commit()
     _apply(conn, "001_fts_rebuild_standalone", _m001)
     _apply(conn, "002_ignored_paths", _m002)
+    _apply(conn, "003_mail_integration", _m003)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -32,13 +33,7 @@ def _apply(conn: sqlite3.Connection, migration_id: str, fn):
 
 
 def _m001(conn: sqlite3.Connection):
-    """FTS-Tabelle von content= auf eigenständig umstellen.
-
-    content= verlangt dass alle FTS-Spalten (filename, content) in der
-    referenzierten Tabelle existieren — document_content hat aber kein
-    filename-Feld. Die FTS-Tabelle wird daher als eigenständige Tabelle
-    neu aufgebaut, die ihre eigenen Kopien speichert.
-    """
+    """FTS-Tabelle von content= auf eigenständig umstellen."""
     conn.executescript("""
         DROP TRIGGER IF EXISTS documents_fts_insert;
         DROP TRIGGER IF EXISTS documents_fts_update;
@@ -87,7 +82,6 @@ def _m001(conn: sqlite3.Connection):
         END;
     """)
 
-    # Alle bestehenden Dokumente mit ihrem Inhalt neu befüllen
     n = conn.execute("""
         INSERT INTO documents_fts(rowid, filename, content)
         SELECT d.id, d.filename, COALESCE(dc.content, '')
@@ -109,3 +103,25 @@ def _m002(conn: sqlite3.Connection):
         );
         CREATE INDEX IF NOT EXISTS idx_ignored_paths_project ON ignored_paths(project_id);
     """)
+
+
+def _m003(conn: sqlite3.Connection):
+    """Mail-Integration: metadata/cc-Spalten + mail_scan_config."""
+    for stmt in [
+        "ALTER TABLE documents ADD COLUMN metadata TEXT NOT NULL DEFAULT '{}'",
+        "ALTER TABLE mails ADD COLUMN cc TEXT NOT NULL DEFAULT ''",
+        """CREATE TABLE IF NOT EXISTS mail_scan_config (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id      INTEGER REFERENCES projects(id),
+            mailbox_name    TEXT    NOT NULL UNIQUE,
+            active          INTEGER NOT NULL DEFAULT 0,
+            last_scanned_at TEXT,
+            mail_count      INTEGER NOT NULL DEFAULT 0
+        )""",
+    ]:
+        try:
+            conn.execute(stmt)
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+    conn.commit()

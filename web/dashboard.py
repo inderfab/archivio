@@ -1,6 +1,7 @@
 """Dashboard: Projektverwaltung und Ordner-Browser."""
 from __future__ import annotations
 
+import logging
 import os
 import threading
 from datetime import datetime, timezone
@@ -15,9 +16,12 @@ from scanner.walker import scan_project
 from web.shared import templates
 
 router = APIRouter(prefix="/dashboard")
+log = logging.getLogger(__name__)
 
 # In-Memory Scan-Status  {project_id: {status, count, started_at, ...}}
 _scans: dict[int, dict] = {}
+# Mail-Scan-Status
+_mail_scan: dict = {}
 
 
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
@@ -25,15 +29,14 @@ _scans: dict[int, dict] = {}
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
     conn = connection.get_connection()
-    connection.init_schema()          # stellt sicher dass Migration 002 läuft
-    projects = _discovered_projects(conn)
-    stats    = _global_stats(conn)
+    connection.init_schema()
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
     conn.close()
     return templates.TemplateResponse("dashboard.html", {
-        "request":   request,
-        "projects":  projects,
-        "stats":     stats,
-        "base_path": settings.get("scanner.base_path", ""),
+        "request": request,
+        "groups":  groups,
+        "stats":   stats,
     })
 
 
@@ -41,12 +44,12 @@ async def dashboard(request: Request):
 
 @router.post("/projects/toggle", response_class=HTMLResponse)
 async def toggle_project(
-    request:    Request,
-    path:       str = Form(...),
-    name:       str = Form(...),
+    request: Request,
+    path:    str = Form(...),
+    name:    str = Form(...),
 ):
     conn = connection.get_connection()
-    row = conn.execute("SELECT * FROM projects WHERE path=?", (path,)).fetchone()
+    row  = conn.execute("SELECT * FROM projects WHERE path=?", (path,)).fetchone()
     if row is None:
         with conn:
             conn.execute(
@@ -59,13 +62,13 @@ async def toggle_project(
                 "UPDATE projects SET active=? WHERE id=?",
                 (0 if row["active"] else 1, row["id"]),
             )
-    projects = _discovered_projects(conn)
-    stats    = _global_stats(conn)
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
     conn.close()
     return templates.TemplateResponse("_dashboard_projects.html", {
-        "request":  request,
-        "projects": projects,
-        "stats":    stats,
+        "request": request,
+        "groups":  groups,
+        "stats":   stats,
     })
 
 
@@ -93,6 +96,95 @@ async def scan_status(project_id: int):
     return HTMLResponse(_scan_badge(project_id, status))
 
 
+# ── Mail-Integration ──────────────────────────────────────────────────────────
+
+@router.get("/mail", response_class=HTMLResponse)
+async def mail_dashboard(request: Request):
+    conn    = connection.get_connection()
+    configs = conn.execute("""
+        SELECT msc.id, msc.mailbox_name, msc.active, msc.last_scanned_at, msc.mail_count,
+               p.name AS project_name, p.id AS project_id
+        FROM mail_scan_config msc
+        LEFT JOIN projects p ON p.id = msc.project_id
+        ORDER BY msc.mailbox_name
+    """).fetchall()
+    conn.close()
+    return templates.TemplateResponse("_dashboard_mail.html", {
+        "request":     request,
+        "configs":     [dict(r) for r in configs],
+        "scan_status": _mail_scan.get("status"),
+        "scan_new":    _mail_scan.get("total_new"),
+        "scan_error":  _mail_scan.get("error"),
+    })
+
+
+@router.get("/mail/refresh", response_class=HTMLResponse)
+async def mail_refresh(request: Request):
+    from scanner.mail_scanner import connect_imap, list_mailboxes, match_mailbox_to_project
+    try:
+        client    = connect_imap()
+        mailboxes = list_mailboxes(client)
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+        conn = connection.get_connection()
+        for mb in mailboxes:
+            pid = match_mailbox_to_project(conn, mb)
+            conn.execute(
+                """INSERT INTO mail_scan_config (mailbox_name, project_id, active)
+                   VALUES (?, ?, 0)
+                   ON CONFLICT(mailbox_name) DO UPDATE SET project_id=excluded.project_id""",
+                (mb, pid),
+            )
+        conn.commit()
+        conn.close()
+    except Exception as exc:
+        return HTMLResponse(
+            f'<div class="search-error" style="padding:12px;">IMAP-Fehler: {exc}</div>'
+        )
+    return await mail_dashboard(request)
+
+
+@router.post("/mail/toggle", response_class=HTMLResponse)
+async def mail_toggle(request: Request, mailbox_name: str = Form(...)):
+    conn = connection.get_connection()
+    row  = conn.execute(
+        "SELECT active FROM mail_scan_config WHERE mailbox_name=?", (mailbox_name,)
+    ).fetchone()
+    if row:
+        with conn:
+            conn.execute(
+                "UPDATE mail_scan_config SET active=? WHERE mailbox_name=?",
+                (0 if row["active"] else 1, mailbox_name),
+            )
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request,
+        "groups":  groups,
+        "stats":   stats,
+    })
+
+
+@router.post("/mail/scan", response_class=HTMLResponse)
+async def mail_scan_start(request: Request):
+    if _mail_scan.get("status") == "running":
+        return await mail_dashboard(request)
+    _mail_scan.clear()
+    _mail_scan["status"]     = "running"
+    _mail_scan["started_at"] = _now()
+    threading.Thread(target=_run_mail_scan, daemon=True).start()
+    return await mail_dashboard(request)
+
+
+@router.get("/mail/scan-status", response_class=HTMLResponse)
+async def mail_scan_status(request: Request):
+    return await mail_dashboard(request)
+
+
 # ── Ordner-Browser ────────────────────────────────────────────────────────────
 
 @router.get("/browse", response_class=HTMLResponse)
@@ -102,7 +194,6 @@ async def browse(
     project_id: int = Query(...),
     depth:      int = Query(0),
 ):
-    # READ-ONLY: NAS darf nie verändert werden — nur os.scandir, nur Verzeichnisse
     conn = connection.get_connection()
     ignored = {
         r["path"] for r in conn.execute(
@@ -113,14 +204,14 @@ async def browse(
 
     subdirs: list[dict] = []
     try:
-        with os.scandir(path) as it:       # READ-ONLY: nur lesend
+        with os.scandir(path) as it:
             for entry in sorted(it, key=lambda e: e.name.lower()):
-                if not entry.is_dir():     # READ-ONLY: nur Verzeichnisse
+                if not entry.is_dir():
                     continue
                 subdirs.append({
-                    "name":        entry.name,
-                    "path":        entry.path,
-                    "ignored":     entry.path in ignored,
+                    "name":         entry.name,
+                    "path":         entry.path,
+                    "ignored":      entry.path in ignored,
                     "has_children": _has_subdirs(entry.path),
                 })
     except PermissionError:
@@ -156,7 +247,6 @@ async def folder_detail(
 
     file_count = 0
     try:
-        # READ-ONLY: NAS darf nie verändert werden
         with os.scandir(path) as it:
             file_count = sum(1 for e in it if e.is_file())
     except PermissionError:
@@ -207,20 +297,26 @@ async def unignore_path(
 
 # ── Interne Helpers ───────────────────────────────────────────────────────────
 
-def _discovered_projects(conn) -> list[dict]:
-    """Scannt base_path eine Ebene tief; READ-ONLY."""
-    base = settings.get("scanner.base_path", "")
-    if not base or not Path(base).exists():
-        return []
-
-    db_by_path = {
+def _project_groups(conn) -> list[dict]:
+    base_folders = settings.get("scanner.base_folders", [])
+    db_by_path   = {
         r["path"]: dict(r)
         for r in conn.execute("SELECT * FROM projects").fetchall()
     }
+    groups = []
+    for folder in base_folders:
+        label    = folder.get("label", "")
+        base     = folder.get("path", "")
+        projects = _discovered_projects_for_base(conn, base, db_by_path)
+        groups.append({"label": label, "path": base, "projects": projects})
+    return groups
 
+
+def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dict]:
+    if not base or not Path(base).exists():
+        return []
     results: list[dict] = []
     try:
-        # READ-ONLY: NAS darf nie verändert werden — nur os.scandir
         with os.scandir(base) as it:
             for entry in sorted(it, key=lambda e: e.name.lower()):
                 if not entry.is_dir():
@@ -236,6 +332,10 @@ def _discovered_projects(conn) -> list[dict]:
                         "SELECT MAX(indexed_at) FROM documents WHERE project_id=?",
                         (db["id"],),
                     ).fetchone()[0]
+                    mailboxes = conn.execute(
+                        "SELECT * FROM mail_scan_config WHERE project_id=?",
+                        (db["id"],),
+                    ).fetchall()
                     results.append({
                         "name":        db["name"],
                         "path":        path,
@@ -243,8 +343,9 @@ def _discovered_projects(conn) -> list[dict]:
                         "id":          db["id"],
                         "active":      bool(db["active"]),
                         "doc_count":   count,
-                        "last_scan":   (last_scan or "")[:10] or None,
+                        "last_scan":   _fmt_iso_date(last_scan),
                         "scan_status": _scans.get(db["id"], {}).get("status"),
+                        "mailboxes":   [dict(m) for m in mailboxes],
                     })
                 else:
                     results.append({
@@ -256,6 +357,7 @@ def _discovered_projects(conn) -> list[dict]:
                         "doc_count":   0,
                         "last_scan":   None,
                         "scan_status": None,
+                        "mailboxes":   [],
                     })
     except PermissionError:
         pass
@@ -263,30 +365,60 @@ def _discovered_projects(conn) -> list[dict]:
 
 
 def _global_stats(conn) -> dict:
-    total    = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-    active   = conn.execute("SELECT COUNT(*) FROM projects WHERE active=1").fetchone()[0]
-    dupes    = conn.execute("""
+    total  = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    active = conn.execute("SELECT COUNT(*) FROM projects WHERE active=1").fetchone()[0]
+    dupes  = conn.execute("""
         SELECT COUNT(*) FROM (
             SELECT document_id FROM document_paths
             GROUP BY document_id HAVING COUNT(*) > 1
         )
     """).fetchone()[0]
-    last     = conn.execute("SELECT MAX(indexed_at) FROM documents").fetchone()[0]
+    last   = conn.execute("SELECT MAX(indexed_at) FROM documents").fetchone()[0]
     return {
         "total":           total,
         "active_projects": active,
         "duplicates":      dupes,
-        "last_scan":       (last or "")[:10] or "—",
+        "last_scan":       _fmt_iso_date(last) or "—",
     }
 
 
 def _has_subdirs(path: str) -> bool:
-    # READ-ONLY: NAS darf nie verändert werden
     try:
         with os.scandir(path) as it:
             return any(e.is_dir() for e in it)
     except PermissionError:
         return False
+
+
+def _run_mail_scan():
+    from scanner.mail_scanner import connect_imap, scan_mailbox
+    try:
+        client = connect_imap()
+        conn   = connection.get_connection()
+        active = conn.execute(
+            "SELECT * FROM mail_scan_config WHERE active=1 AND project_id IS NOT NULL"
+        ).fetchall()
+        conn.close()
+
+        total_new = 0
+        for row in active:
+            try:
+                stats      = scan_mailbox(client, row["mailbox_name"], row["project_id"])
+                total_new += stats["new"]
+            except Exception as exc:
+                log.error("Postfach '%s' fehlgeschlagen: %s", row["mailbox_name"], exc)
+
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+        _mail_scan["status"]      = "done"
+        _mail_scan["total_new"]   = total_new
+        _mail_scan["finished_at"] = _now()
+    except Exception as exc:
+        _mail_scan["status"] = "error"
+        _mail_scan["error"]  = str(exc)
 
 
 def _run_scan(project_id: int, path: str):
@@ -300,6 +432,16 @@ def _run_scan(project_id: int, path: str):
         _scans[project_id] = {"status": "done", "count": count, "finished_at": _now()}
     except Exception as exc:
         _scans[project_id] = {"status": "error", "error": str(exc), "finished_at": _now()}
+
+
+def _fmt_iso_date(iso: str | None) -> str | None:
+    if not iso:
+        return None
+    try:
+        y, m, d = iso[:10].split("-")
+        return f"{d}.{m}.{y}"
+    except ValueError:
+        return iso[:10]
 
 
 def _now() -> str:
