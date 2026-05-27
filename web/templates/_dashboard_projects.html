@@ -1,0 +1,72 @@
+<div class="section-title" style="padding-top:4px;">Projekte auf dem NAS</div>
+
+{% for p in projects %}
+<div class="project-row">
+
+  {# Toggle-Button #}
+  <form hx-post="/dashboard/projects/toggle"
+        hx-target="#project-list"
+        hx-swap="innerHTML"
+        style="display:contents;">
+    <input type="hidden" name="path" value="{{ p.path }}">
+    <input type="hidden" name="name" value="{{ p.name }}">
+    <button type="submit"
+            class="project-toggle {{ 'on' if p.active else '' }}"
+            title="{{ 'Deaktivieren' if p.active else 'Aktivieren' }}">
+    </button>
+  </form>
+
+  {# Projektinfo #}
+  <div style="flex:1; min-width:0;">
+    <div class="project-name">{{ p.name }}</div>
+    {% if p.active %}
+      <div class="project-meta">
+        {{ p.doc_count }} Dokumente
+        {% if p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+      </div>
+    {% else %}
+      <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
+    {% endif %}
+    <div class="project-path">{{ p.path }}</div>
+  </div>
+
+  {# Aktionen #}
+  <div class="project-actions">
+    {% if p.active and p.in_db %}
+
+      {# Scan-Badge oder Scan-Button #}
+      {% if p.scan_status == 'running' %}
+        <span class="scan-badge running"
+              hx-get="/dashboard/projects/{{ p.id }}/scan-status"
+              hx-trigger="every 3s"
+              hx-swap="outerHTML">Scannt…</span>
+      {% elif p.scan_status == 'done' %}
+        <span class="scan-badge done">✓ fertig</span>
+      {% elif p.scan_status == 'error' %}
+        <span class="scan-badge error">Fehler</span>
+      {% else %}
+        <form hx-post="/dashboard/projects/{{ p.id }}/scan"
+              hx-swap="outerHTML"
+              hx-target="find button[type=submit]"
+              style="display:contents;">
+          <button type="submit" class="btn btn-primary">Jetzt scannen</button>
+        </form>
+      {% endif %}
+
+      {# Browser-Button #}
+      <button class="btn"
+              onclick="openBrowser({{ p.id }}, '{{ p.path | replace("'", "\\'") }}', '{{ p.name | replace("'", "\\'") }}')">
+        Browser ▸
+      </button>
+
+    {% elif not p.active %}
+      <span style="font-size:12px; color:var(--text-3);">Aktivieren um zu scannen</span>
+    {% endif %}
+  </div>
+
+</div>
+{% else %}
+<div class="empty-state">
+  <p>Kein Ordner in <code>{{ base_path }}</code> gefunden.</p>
+</div>
+{% endfor %}

@@ -1,0 +1,31 @@
+<div class="browse-col" data-depth="{{ depth }}">
+  {% if subdirs %}
+    {% for d in subdirs %}
+    <button
+      class="browse-entry {{ 'ignored' if d.ignored else '' }}"
+      onclick="
+        clearFromDepth({{ depth + 1 }});
+        selectEntry(this, {{ project_id }}, '{{ d.path | replace("'", "\\'") | replace('\\', '\\\\') }}');
+        {% if d.has_children %}
+        htmx.ajax('GET',
+          '/dashboard/browse?path={{ d.path | urlencode }}&project_id={{ project_id }}&depth={{ depth + 1 }}',
+          { target: '#browse-cols', swap: 'beforeend' }
+        );
+        {% endif %}
+      "
+    >
+      {% if d.ignored %}
+        <span class="browse-ignored-badge">ignoriert</span>
+      {% endif %}
+      <span style="flex:1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
+        {{ d.name }}
+      </span>
+      {% if d.has_children %}
+        <span class="browse-arrow">▶</span>
+      {% endif %}
+    </button>
+    {% endfor %}
+  {% else %}
+    <div style="padding:12px; font-size:12px; color:var(--text-3);">Keine Unterordner</div>
+  {% endif %}
+</div>

@@ -1,0 +1,84 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Dashboard{% endblock %}
+
+{% block content %}
+<div style="padding-top: 32px;">
+
+  {# ── Statistiken ── #}
+  <div class="stats-bar">
+    <div class="stat">
+      <span class="stat-n">{{ stats.total }}</span>
+      <span class="stat-l">Dokumente</span>
+    </div>
+    <div class="stat">
+      <span class="stat-n">{{ stats.active_projects }}</span>
+      <span class="stat-l">Aktive Projekte</span>
+    </div>
+    <div class="stat">
+      <span class="stat-n">{{ stats.duplicates }}</span>
+      <span class="stat-l">Dubletten</span>
+    </div>
+    <div class="stat">
+      <span class="stat-n">{{ stats.last_scan }}</span>
+      <span class="stat-l">Letzter Scan</span>
+    </div>
+  </div>
+
+  {# ── Projektliste ── #}
+  <div id="project-list">
+    {% include "_dashboard_projects.html" %}
+  </div>
+
+  {# ── Ordner-Browser (erscheint nach Klick) ── #}
+  <div id="browser-area" style="display:none; margin-top: 28px;">
+    <div class="browser-area">
+      <div class="browser-header">
+        <span>📁</span>
+        <span id="browser-title">Ordner-Browser</span>
+      </div>
+      <div class="browser-body">
+        <div id="browse-cols"></div>
+        <div id="detail-panel" class="detail-panel" style="display:none;"></div>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<script>
+  // Öffnet den Browser für ein Projekt
+  function openBrowser(projectId, projectPath, projectName) {
+    document.getElementById('browser-area').style.display = 'block';
+    document.getElementById('browser-title').textContent = projectName;
+    document.getElementById('browse-cols').innerHTML = '';
+    document.getElementById('detail-panel').style.display = 'none';
+
+    htmx.ajax('GET',
+      '/dashboard/browse?path=' + encodeURIComponent(projectPath) +
+      '&project_id=' + projectId + '&depth=0',
+      { target: '#browse-cols', swap: 'beforeend' }
+    );
+  }
+
+  // Entfernt alle Spalten ab einer bestimmten Tiefe
+  function clearFromDepth(depth) {
+    document.querySelectorAll('#browse-cols [data-depth]').forEach(function(el) {
+      if (parseInt(el.dataset.depth) >= depth) el.remove();
+    });
+  }
+
+  // Zeigt Detail-Panel und markiert gewählten Eintrag
+  function selectEntry(el, projectId, path) {
+    document.querySelectorAll('.browse-entry').forEach(function(e) {
+      e.classList.remove('selected');
+    });
+    el.classList.add('selected');
+    document.getElementById('detail-panel').style.display = 'block';
+    htmx.ajax('GET',
+      '/dashboard/detail?path=' + encodeURIComponent(path) +
+      '&project_id=' + projectId,
+      { target: '#detail-panel', swap: 'innerHTML' }
+    );
+  }
+</script>
+{% endblock %}

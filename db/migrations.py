@@ -15,6 +15,7 @@ def run(conn: sqlite3.Connection):
     """)
     conn.commit()
     _apply(conn, "001_fts_rebuild_standalone", _m001)
+    _apply(conn, "002_ignored_paths", _m002)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -94,3 +95,17 @@ def _m001(conn: sqlite3.Connection):
         LEFT JOIN document_content dc ON dc.document_id = d.id
     """).rowcount
     log.info("FTS neu aufgebaut: %d Dokumente indexiert", n)
+
+
+def _m002(conn: sqlite3.Connection):
+    """ignored_paths Tabelle anlegen."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS ignored_paths (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            path       TEXT    NOT NULL,
+            created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            UNIQUE(project_id, path)
+        );
+        CREATE INDEX IF NOT EXISTS idx_ignored_paths_project ON ignored_paths(project_id);
+    """)

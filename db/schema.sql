@@ -97,6 +97,17 @@ AFTER DELETE ON document_content BEGIN
     FROM documents d WHERE d.id = old.document_id;
 END;
 
+-- Vom Dashboard ignorierte Pfade (werden beim Scan übersprungen)
+CREATE TABLE IF NOT EXISTS ignored_paths (
+    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path       TEXT    NOT NULL,
+    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    UNIQUE(project_id, path)
+);
+
+CREATE INDEX IF NOT EXISTS idx_ignored_paths_project ON ignored_paths(project_id);
+
 -- Migrations-Tabelle
 CREATE TABLE IF NOT EXISTS _migrations (
     id         TEXT PRIMARY KEY,
