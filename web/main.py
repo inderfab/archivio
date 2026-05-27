@@ -57,18 +57,6 @@ async def search(
     })
 
 
-@app.get("/projects", response_class=HTMLResponse)
-async def projects_page(request: Request):
-    conn = connection.get_connection()
-    rows = conn.execute(
-        "SELECT id, name, path, active FROM projects ORDER BY name"
-    ).fetchall()
-    conn.close()
-    return templates.TemplateResponse("projects.html", {
-        "request":  request,
-        "projects": rows,
-    })
-
 
 @app.get("/open")
 async def open_file(path: str = Query(...)):
