@@ -46,13 +46,15 @@
       gap: 32px;
       height: 52px;
     }
-    .logo {
-      font-size: 16px;
-      font-weight: 700;
-      letter-spacing: -0.02em;
-      color: var(--accent);
-      text-decoration: none;
+    .logo-link { display: flex; align-items: center; text-decoration: none; }
+    .logo-img  { height: 28px; display: block; }
+    .logo-sep  { width: 1px; height: 20px; background: var(--border); margin: 0 16px; flex-shrink: 0; }
+    .logo-text { font-size: 15px; font-weight: 600; color: var(--text-2); letter-spacing: -0.01em; }
+
+    @media (prefers-color-scheme: dark) {
+      .logo-img { filter: invert(1); }
     }
+
     nav {
       display: flex;
       align-items: center;
@@ -381,7 +383,11 @@
 <header>
   <div class="container">
     <div class="header-inner">
-      <a class="logo" href="/">Archivio</a>
+      <a href="/" class="logo-link">
+        <img src="/static/strut_logo.svg" alt="Strut" class="logo-img">
+      </a>
+      <span class="logo-sep"></span>
+      <span class="logo-text">Archivio</span>
       <nav>
         <a href="/dashboard" class="{{ 'active' if request.url.path.startswith('/dashboard') else '' }}">Dashboard</a>
       </nav>
