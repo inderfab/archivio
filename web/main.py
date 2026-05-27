@@ -152,7 +152,9 @@ def _build_filters(project_id: str, ext: str) -> tuple[str, list]:
             params.append(int(project_id))
         except ValueError:
             pass
-    if ext:
+    if ext == "mail":
+        filters += " AND d.source_type = 'email'"
+    elif ext:
         e = ext if ext.startswith(".") else f".{ext}"
         filters += " AND d.extension = ?"
         params.append(e)
