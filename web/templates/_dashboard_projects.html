@@ -97,7 +97,7 @@
         <span style="font-size:11px; color:var(--text-3);">{{ mb.mail_count }} Mails</span>
       {% endif %}
       {% if mb.last_scanned_at %}
-        <span style="font-size:11px; color:var(--text-3);">· {{ mb.last_scanned_at[:10] }}</span>
+        <span style="font-size:11px; color:var(--text-3);">· {{ mb.last_scanned_at | fmt_date }}</span>
       {% endif %}
     </div>
     {% endfor %}
