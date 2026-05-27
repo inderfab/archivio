@@ -39,15 +39,27 @@ async def index(request: Request):
 
 @app.get("/search", response_class=HTMLResponse)
 async def search(
-    request:    Request,
-    q:          str = Query(default=""),
-    project_id: str = Query(default=""),
-    type:       str = Query(default=""),
+    request:         Request,
+    q:               str = Query(default=""),
+    project_id:      str = Query(default=""),
+    type:            str = Query(default=""),
+    from_addr:       str = Query(default=""),
+    to_addr:         str = Query(default=""),
+    subject_filter:  str = Query(default=""),
+    date_from:       str = Query(default=""),
+    date_to:         str = Query(default=""),
+    filesize:        str = Query(default=""),
+    duplicates_only: str = Query(default=""),
 ):
     results, error, total = [], None, 0
-    if q.strip():
+    has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only])
+    if q.strip() or has_filters:
         conn = connection.get_connection()
-        results, error = _search(conn, q.strip(), project_id, type)
+        filters_str, filter_params = _build_filters(
+            project_id, type, from_addr, to_addr, subject_filter,
+            date_from, date_to, filesize, duplicates_only,
+        )
+        results, error = _search(conn, q.strip(), filters_str, filter_params)
         total = len(results)
         conn.close()
     return templates.TemplateResponse("search_results.html", {
@@ -133,8 +145,9 @@ async def preview(request: Request, document_id: int, q: str = Query(default="")
 
 # ── Such-Logik ────────────────────────────────────────────────────────────────
 
-def _search(conn, q: str, project_id: str, ext: str):
-    filters, filter_params = _build_filters(project_id, ext)
+def _search(conn, q: str, filters: str, filter_params: list):
+    if not q:
+        return _search_filtered(conn, filters, filter_params)
     results, error = _search_fts(conn, q, filters, filter_params)
     if results or error:
         return results, error
@@ -144,7 +157,12 @@ def _search(conn, q: str, project_id: str, ext: str):
     return results, error
 
 
-def _build_filters(project_id: str, ext: str) -> tuple[str, list]:
+def _build_filters(
+    project_id: str, ext: str,
+    from_addr: str = "", to_addr: str = "", subject_filter: str = "",
+    date_from: str = "", date_to: str = "",
+    filesize: str = "", duplicates_only: str = "",
+) -> tuple[str, list]:
     filters, params = "", []
     if project_id:
         try:
@@ -158,7 +176,63 @@ def _build_filters(project_id: str, ext: str) -> tuple[str, list]:
         e = ext if ext.startswith(".") else f".{ext}"
         filters += " AND d.extension = ?"
         params.append(e)
+    if from_addr:
+        filters += " AND m.sender LIKE ?"
+        params.append(f"%{from_addr}%")
+    if to_addr:
+        filters += " AND (m.recipients LIKE ? OR m.cc LIKE ?)"
+        params.extend([f"%{to_addr}%", f"%{to_addr}%"])
+    if subject_filter:
+        filters += " AND m.subject LIKE ?"
+        params.append(f"%{subject_filter}%")
+    if date_from:
+        filters += " AND d.modified_at >= ?"
+        params.append(date_from)
+    if date_to:
+        filters += " AND d.modified_at <= ?"
+        params.append(date_to + "T23:59:59")
+    if filesize:
+        try:
+            filters += " AND d.filesize > ?"
+            params.append(int(filesize) * 1024 * 1024)
+        except ValueError:
+            pass
+    if duplicates_only:
+        filters += (" AND d.id IN ("
+                    "SELECT document_id FROM document_paths "
+                    "GROUP BY document_id HAVING COUNT(*) > 1)")
     return filters, params
+
+
+def _search_filtered(conn, filters: str, filter_params: list):
+    sql = f"""
+        SELECT d.id, d.filename, d.extension, d.filesize, d.modified_at,
+               d.extraction_status, d.source_type,
+               p.name      AS project_name,
+               dp.path     AS filepath,
+               dc.content  AS raw_content,
+               m.sender    AS mail_sender,
+               m.date      AS mail_date
+        FROM documents d
+        JOIN  projects        p  ON p.id  = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content dc ON dc.document_id = d.id
+        LEFT JOIN mails       m  ON m.document_id = d.id
+        WHERE 1=1 {filters}
+        ORDER BY d.modified_at DESC
+        LIMIT 50
+    """
+    try:
+        rows = conn.execute(sql, filter_params).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["fallback"] = False
+            d["excerpt"]  = d.pop("raw_content") or ""
+            results.append(d)
+        return results, None
+    except Exception as exc:
+        return [], str(exc)
 
 
 def _search_fts(conn, q: str, filters: str, filter_params: list):

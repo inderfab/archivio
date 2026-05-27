@@ -75,29 +75,33 @@
     .search-wrap { padding: 48px 0 16px; }
     .search-input {
       width: 100%;
-      padding: 13px 16px;
-      font-size: 16px;
+      padding: 14px 18px;
+      font-size: 17px;
       font-family: inherit;
-      border: 1.5px solid var(--border);
+      border: 2px solid var(--border);
       border-radius: var(--radius);
       outline: none;
       color: var(--text);
       background: var(--bg);
-      transition: border-color .15s;
+      transition: border-color .15s, box-shadow .15s;
+      box-shadow: 0 1px 4px rgba(0,0,0,.06);
     }
-    .search-input:focus { border-color: #9ca3af; }
+    .search-input:focus {
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px rgba(17,24,39,.08);
+    }
     .search-input::placeholder { color: var(--text-3); }
 
-    /* ── Filter-Leiste ── */
-    .filters {
+    /* ── Basis-Filter ── */
+    .filters-basic {
       display: flex;
+      flex-direction: column;
       gap: 8px;
-      padding: 10px 0 24px;
-      flex-wrap: wrap;
+      padding: 10px 0 8px;
     }
     select, .filter-select {
-      padding: 6px 10px;
-      font-size: 13px;
+      padding: 9px 12px;
+      font-size: 14px;
       font-family: inherit;
       border: 1px solid var(--border);
       border-radius: var(--radius);
@@ -105,8 +109,57 @@
       color: var(--text);
       cursor: pointer;
       outline: none;
+      width: 100%;
     }
     select:hover { border-color: #9ca3af; }
+
+    /* ── Mehr-Filter ── */
+    .btn-mehr-filter {
+      font-size: 13px; font-family: inherit;
+      padding: 6px 14px; margin-bottom: 10px;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text-2); cursor: pointer;
+    }
+    .btn-mehr-filter:hover { background: var(--bg-2); }
+    .btn-mehr-filter.active { background: var(--bg-2); color: var(--text); border-color: #9ca3af; }
+    .mehr-filter-panel {
+      border: 1px solid var(--border); border-radius: var(--radius);
+      padding: 16px; margin-bottom: 10px; background: var(--bg-2);
+    }
+    .filter-section { margin-bottom: 16px; }
+    .filter-section:last-child { margin-bottom: 0; }
+    .filter-section-title {
+      font-size: 10px; font-weight: 700; letter-spacing: .08em;
+      text-transform: uppercase; color: var(--text-3); margin-bottom: 10px;
+    }
+    .filter-row-2 {
+      display: grid; grid-template-columns: 1fr 1fr;
+      gap: 12px; margin-bottom: 10px;
+    }
+    .filter-label {
+      display: block; font-size: 10px; font-weight: 600;
+      letter-spacing: .06em; text-transform: uppercase;
+      color: var(--text-3); margin-bottom: 5px;
+    }
+    .filter-input {
+      width: 100%; padding: 7px 10px; font-size: 13px; font-family: inherit;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      background: var(--bg); color: var(--text); outline: none;
+    }
+    .filter-input:focus { border-color: #9ca3af; }
+
+    /* ── Filter-Chips ── */
+    #active-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 0 12px; }
+    .filter-chip {
+      display: inline-flex; align-items: center; gap: 5px;
+      padding: 3px 8px 3px 10px;
+      background: #eff6ff; color: #1d4ed8;
+      border: 1px solid #bfdbfe; border-radius: 100px; font-size: 12px;
+    }
+    .filter-chip button {
+      background: none; border: none; cursor: pointer;
+      color: #1d4ed8; font-size: 14px; line-height: 1; padding: 0;
+    }
 
     /* ── Resultate ── */
     #results { min-height: 120px; }

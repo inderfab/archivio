@@ -2,48 +2,32 @@
 {% block title %}Archivio – Suche{% endblock %}
 
 {% block content %}
-
-{# Alle Inputs in einem div — hx-include="#search-form" erfasst alle #}
 <div id="search-form">
 
   <div class="search-wrap">
-    <input
-      class="search-input"
-      id="q"
-      name="q"
-      type="search"
-      placeholder="Dokumente durchsuchen…"
-      autocomplete="off"
-      autofocus
-      hx-get="/search"
-      hx-trigger="input changed delay:300ms, search"
-      hx-target="#results"
-      hx-include="#search-form"
-      hx-indicator="#spinner"
-    >
+    <input class="search-input" id="q" name="q" type="search"
+      placeholder="Dokumente und Mails durchsuchen…"
+      autocomplete="off" autofocus
+      hx-get="/search" hx-trigger="input changed delay:300ms, search"
+      hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
   </div>
 
-  <div class="filters">
-    <select
-      name="project_id"
-      hx-get="/search"
-      hx-trigger="change"
-      hx-target="#results"
-      hx-include="#search-form"
-    >
+  {# ── Basis-Filter ── #}
+  <div class="filters-basic">
+    <select name="project_id"
+      hx-get="/search" hx-trigger="change"
+      hx-target="#results" hx-include="#search-form"
+      onchange="updateChips()">
       <option value="">Alle Projekte</option>
       {% for p in projects %}
       <option value="{{ p.id }}">{{ p.name }}</option>
       {% endfor %}
     </select>
 
-    <select
-      name="type"
-      hx-get="/search"
-      hx-trigger="change"
-      hx-target="#results"
-      hx-include="#search-form"
-    >
+    <select name="type"
+      hx-get="/search" hx-trigger="change"
+      hx-target="#results" hx-include="#search-form"
+      onchange="updateChips()">
       <option value="">Alle Typen</option>
       <option value="mail">✉ Mail</option>
       <optgroup label="Dokumente">
@@ -76,13 +60,165 @@
     </select>
   </div>
 
+  {# ── Mehr Filter ── #}
+  <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
+    onclick="toggleMehrFilter()">⚙ Mehr Filter</button>
+
+  <div id="mehr-filter-panel" class="mehr-filter-panel" style="display:none;">
+
+    <div class="filter-section">
+      <div class="filter-section-title">Mail-Filter</div>
+      <div class="filter-row-2">
+        <div>
+          <label class="filter-label">Von (Absender)</label>
+          <input type="text" name="from_addr" class="filter-input"
+            placeholder="z.B. roger@strut.ch"
+            hx-get="/search" hx-trigger="input changed delay:400ms"
+            hx-target="#results" hx-include="#search-form"
+            oninput="scheduleChipUpdate()">
+        </div>
+        <div>
+          <label class="filter-label">An / CC (Empfänger)</label>
+          <input type="text" name="to_addr" class="filter-input"
+            placeholder="z.B. felix@strut.ch"
+            hx-get="/search" hx-trigger="input changed delay:400ms"
+            hx-target="#results" hx-include="#search-form"
+            oninput="scheduleChipUpdate()">
+        </div>
+      </div>
+      <div>
+        <label class="filter-label">Betreff enthält</label>
+        <input type="text" name="subject_filter" class="filter-input"
+          placeholder="z.B. Baubeschrieb"
+          hx-get="/search" hx-trigger="input changed delay:400ms"
+          hx-target="#results" hx-include="#search-form"
+          oninput="scheduleChipUpdate()">
+      </div>
+    </div>
+
+    <div class="filter-section">
+      <div class="filter-section-title">Datei-Filter</div>
+      <div class="filter-row-2">
+        <div>
+          <label class="filter-label">Datumsbereich</label>
+          <div style="display:flex; gap:8px; align-items:center;">
+            <input type="date" name="date_from" class="filter-input"
+              hx-get="/search" hx-trigger="change"
+              hx-target="#results" hx-include="#search-form"
+              onchange="updateChips()">
+            <span style="color:var(--text-3); font-size:12px; flex-shrink:0;">bis</span>
+            <input type="date" name="date_to" class="filter-input"
+              hx-get="/search" hx-trigger="change"
+              hx-target="#results" hx-include="#search-form"
+              onchange="updateChips()">
+          </div>
+        </div>
+        <div>
+          <label class="filter-label">Dateigrösse</label>
+          <select name="filesize" class="filter-input"
+            hx-get="/search" hx-trigger="change"
+            hx-target="#results" hx-include="#search-form"
+            onchange="updateChips()">
+            <option value="">Beliebig</option>
+            <option value="1">über 1 MB</option>
+            <option value="10">über 10 MB</option>
+            <option value="100">über 100 MB</option>
+          </select>
+        </div>
+      </div>
+      <div style="margin-top:4px;">
+        <label class="filter-label">Nur Dubletten</label>
+        <select name="duplicates_only" class="filter-input" style="width:auto;"
+          hx-get="/search" hx-trigger="change"
+          hx-target="#results" hx-include="#search-form"
+          onchange="updateChips()">
+          <option value="">Alle Dateien</option>
+          <option value="1">Nur Dubletten</option>
+        </select>
+      </div>
+    </div>
+
+  </div>
+
+  {# ── Aktive Filter als Chips ── #}
+  <div id="active-chips"></div>
+
 </div>
 
 <div id="spinner" class="spinner htmx-indicator">Suche…</div>
 
+<div id="results">
+  <div class="empty-state">
+    <p>Suchbegriff eingeben um Dokumente zu finden.</p>
+  </div>
+</div>
+
 <script>
+function toggleMehrFilter() {
+  var panel = document.getElementById('mehr-filter-panel');
+  var btn   = document.getElementById('mehr-filter-btn');
+  var open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  btn.classList.toggle('active', !open);
+}
+
+var _chipTimer = null;
+function scheduleChipUpdate() {
+  clearTimeout(_chipTimer);
+  _chipTimer = setTimeout(updateChips, 420);
+}
+
+function updateChips() {
+  var container = document.getElementById('active-chips');
+  container.innerHTML = '';
+  var defs = [
+    { name: 'project_id', label: function(v) {
+        var o = document.querySelector('select[name=project_id] option[value="'+v+'"]');
+        return o ? o.text : v;
+    }},
+    { name: 'type', label: function(v) {
+        var o = document.querySelector('select[name=type] option[value="'+v+'"]');
+        return o ? o.text : v;
+    }},
+    { name: 'from_addr',       label: function(v) { return 'Von: '+v; } },
+    { name: 'to_addr',         label: function(v) { return 'An/CC: '+v; } },
+    { name: 'subject_filter',  label: function(v) { return 'Betreff: '+v; } },
+    { name: 'date_from',       label: function(v) { return 'Ab: '+fmtDate(v); } },
+    { name: 'date_to',         label: function(v) { return 'Bis: '+fmtDate(v); } },
+    { name: 'filesize',        label: function(v) {
+        var o = document.querySelector('select[name=filesize] option[value="'+v+'"]');
+        return o ? o.text : v;
+    }},
+    { name: 'duplicates_only', label: function() { return 'Nur Dubletten'; } },
+  ];
+  defs.forEach(function(def) {
+    var el = document.querySelector('[name="'+def.name+'"]');
+    if (!el || !el.value) return;
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip';
+    var n = def.name;
+    chip.innerHTML = def.label(el.value)
+      + ' <button onclick="clearFilter(\''+n+'\')">×</button>';
+    container.appendChild(chip);
+  });
+}
+
+function clearFilter(name) {
+  var el = document.querySelector('[name="'+name+'"]');
+  if (!el) return;
+  el.value = '';
+  updateChips();
+  htmx.trigger(document.getElementById('q'), 'search');
+}
+
+function fmtDate(iso) {
+  if (!iso) return '';
+  var p = iso.split('-');
+  return p[2]+'.'+p[1]+'.'+p[0];
+}
+
 function togglePreview(btn, docId, q) {
-  var box = document.getElementById('preview-' + docId);
+  var box = document.getElementById('preview-'+docId);
   if (!box) return;
   if (box.style.display !== 'none') {
     box.style.display = 'none';
@@ -92,8 +228,8 @@ function togglePreview(btn, docId, q) {
     btn.textContent = '▼';
     if (!btn.dataset.loaded) {
       btn.dataset.loaded = '1';
-      htmx.ajax('GET', '/preview/' + docId + '?q=' + encodeURIComponent(q),
-        { target: '#preview-' + docId, swap: 'innerHTML' });
+      htmx.ajax('GET', '/preview/'+docId+'?q='+encodeURIComponent(q),
+        { target: '#preview-'+docId, swap: 'innerHTML' });
     }
   }
 }
@@ -106,11 +242,4 @@ function copyPath(btn, text) {
   });
 }
 </script>
-
-<div id="results">
-  <div class="empty-state">
-    <p>Suchbegriff eingeben um Dokumente zu finden.</p>
-  </div>
-</div>
-
 {% endblock %}
