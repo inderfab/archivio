@@ -17,6 +17,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "001_fts_rebuild_standalone", _m001)
     _apply(conn, "002_ignored_paths", _m002)
     _apply(conn, "003_mail_integration", _m003)
+    _apply(conn, "004_add_chunks", _m004)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -103,6 +104,40 @@ def _m002(conn: sqlite3.Connection):
         );
         CREATE INDEX IF NOT EXISTS idx_ignored_paths_project ON ignored_paths(project_id);
     """)
+
+
+def _m004(conn: sqlite3.Connection):
+    """Chunk-Tabelle und chunks_fts für seitenbasiertes Chunking."""
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS document_chunks (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            page_number INTEGER,
+            chunk_index INTEGER,
+            content     TEXT,
+            embedding   BLOB,
+            created_at  TEXT DEFAULT (datetime('now'))
+        );
+
+        CREATE VIRTUAL TABLE IF NOT EXISTS chunks_fts USING fts5(
+            content,
+            content='document_chunks',
+            content_rowid='id',
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON document_chunks BEGIN
+            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON document_chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+        END;
+        CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON document_chunks BEGIN
+            INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+            INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+        END;
+    """)
+    log.info("Chunks-Tabelle und chunks_fts angelegt")
 
 
 def _m003(conn: sqlite3.Connection):

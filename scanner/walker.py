@@ -87,22 +87,25 @@ def _process_file(conn, project_id: int, path: Path):
 
 def _extract_and_store(conn, doc_id: int, path: Path):
     try:
-        # READ-ONLY: NAS darf nie verändert werden — extract() öffnet nur lesend
-        text, lang = extractors.extract(path)
+        # READ-ONLY: NAS darf nie verändert werden — extract_chunks() öffnet nur lesend
+        chunks = extractors.extract_chunks(path)
+        text   = "\n".join(c["content"] for c in chunks)
         status = "ok"
     except extractors.UnsupportedFormat:
-        text, lang, status = "", "", "unsupported"
+        chunks, text, status = [], "", "unsupported"
     except extractors.ExtractionError as exc:
         log.warning("Extraktion fehlgeschlagen %s: %s", path, exc)
-        text, lang, status = "", "", "error"
+        chunks, text, status = [], "", "error"
     except Exception as exc:
         log.error("Unerwarteter Fehler %s: %s", path, exc)
-        text, lang, status = "", "", "error"
+        chunks, text, status = [], "", "error"
 
     with conn:
         queries.set_extraction_status(conn, doc_id, status)
         if text:
-            queries.upsert_content(conn, doc_id, text, lang)
+            queries.upsert_content(conn, doc_id, text, "")
+        if chunks:
+            queries.save_chunks(conn, doc_id, chunks)
 
 
 def _iso(ts: float) -> str:

@@ -24,6 +24,7 @@
         onclick="togglePreview(this, {{ r.id }}, document.getElementById('q').value)">▶</button>
       <span class="result-title">{{ r.filename }}</span>
       <span class="badge badge-{{ ext }}">{{ 'MAIL' if is_mail else ext | upper }}</span>
+      {% if r.page_number %}<span class="badge badge-page">Seite {{ r.page_number }}</span>{% endif %}
     </div>
 
     <div class="result-meta">

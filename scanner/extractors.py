@@ -38,12 +38,70 @@ def extract_pdf(path: Path) -> tuple[str, str]:
     except ImportError:
         raise UnsupportedFormat("pypdf not installed")
     try:
-        # READ-ONLY: NAS darf nie verändert werden — PdfReader öffnet nur lesend
         reader = pypdf.PdfReader(str(path))
         parts = [t for page in reader.pages if (t := page.extract_text())]
         return "\n".join(parts), ""
     except Exception as exc:
         raise ExtractionError(str(exc)) from exc
+
+
+def extract_pdf_pages(path: Path) -> list[dict]:
+    """Gibt [{page_number, content}] zurück; leere Seiten (<50 Zeichen) werden übersprungen."""
+    try:
+        import pypdf
+    except ImportError:
+        raise UnsupportedFormat("pypdf not installed")
+    try:
+        reader = pypdf.PdfReader(str(path))
+        result = []
+        for i, page in enumerate(reader.pages, start=1):
+            text = (page.extract_text() or "").strip()
+            if len(text) < 50:
+                continue
+            result.append({"page_number": i, "content": text})
+        return result
+    except Exception as exc:
+        raise ExtractionError(str(exc)) from exc
+
+
+def _split_long_text(page_number, text: str, max_len: int = 3000) -> list[dict]:
+    if len(text) <= max_len:
+        return [{"page_number": page_number, "content": text}]
+    mid = len(text) // 2
+    split_at = text.rfind(" ", max(0, mid - 200), min(len(text), mid + 200))
+    if split_at == -1:
+        split_at = mid
+    return [
+        {"page_number": page_number, "content": text[:split_at].strip()},
+        {"page_number": page_number, "content": text[split_at:].strip()},
+    ]
+
+
+def extract_chunks(path: Path) -> list[dict]:
+    """Gibt [{page_number, chunk_index, content}] zurück.
+
+    PDF: ein Chunk pro Seite (lange Seiten werden gesplittet).
+    Alle anderen Formate: ein einzelner Chunk ohne Seitenangabe.
+    """
+    ext = path.suffix.lower()
+    if ext == ".pdf":
+        pages = extract_pdf_pages(path)
+        chunks = []
+        idx = 0
+        for page_data in pages:
+            for c in _split_long_text(page_data["page_number"], page_data["content"]):
+                chunks.append({
+                    "page_number": c["page_number"],
+                    "chunk_index": idx,
+                    "content":     c["content"],
+                })
+                idx += 1
+        return chunks
+    else:
+        text, _ = extract(path)
+        if not text:
+            return []
+        return [{"page_number": None, "chunk_index": 0, "content": text}]
 
 
 # ── DOCX ──────────────────────────────────────────────────────────────────────

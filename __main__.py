@@ -17,6 +17,7 @@ import argparse
 import logging
 
 from db import connection, queries
+from scanner import extractors
 from scanner.walker import scan_project
 from scanner.mail_scanner import (
     connect_imap, list_mailboxes, match_mailbox_to_project, scan_mailbox,
@@ -86,6 +87,68 @@ def cmd_init(_args: argparse.Namespace):
         print(f"  Projekt #{pid}: {p['name']}")
     conn.close()
     print("Fertig.")
+
+
+def cmd_rechunk(_args: argparse.Namespace):
+    """Bestehende Dokumente neu chunken (z.B. nach Upgrade auf Chunk-Suche)."""
+    connection.init_schema()
+    conn = connection.get_connection()
+
+    rows = conn.execute("""
+        SELECT d.id, d.extension, d.source_type,
+               dp.path AS filepath,
+               dc.content AS existing_content
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content dc ON dc.document_id = d.id
+        WHERE d.extraction_status = 'ok'
+        ORDER BY d.id
+    """).fetchall()
+
+    print(f"[rechunk] {len(rows)} Dokumente verarbeiten …")
+    ok = err = skip = 0
+
+    for row in rows:
+        doc_id = row["id"]
+
+        if row["source_type"] == "email":
+            content = row["existing_content"] or ""
+            if content:
+                chunks = [{"page_number": None, "chunk_index": 0, "content": content}]
+                with conn:
+                    queries.save_chunks(conn, doc_id, chunks)
+                ok += 1
+            else:
+                skip += 1
+            continue
+
+        filepath = row["filepath"]
+        if not filepath:
+            skip += 1
+            continue
+
+        path = Path(filepath)
+        if not path.exists():
+            skip += 1
+            continue
+
+        try:
+            chunks = extractors.extract_chunks(path)
+            if chunks:
+                with conn:
+                    queries.save_chunks(conn, doc_id, chunks)
+                ok += 1
+            else:
+                skip += 1
+        except Exception as exc:
+            logging.warning("rechunk Fehler %s: %s", path, exc)
+            err += 1
+
+        if (ok + err + skip) % 100 == 0:
+            print(f"  … {ok + err + skip}/{len(rows)}", flush=True)
+
+    conn.close()
+    print(f"\nFertig: ok={ok}  fehler={err}  übersprungen={skip}")
 
 
 def cmd_scan_mail(_args: argparse.Namespace):
@@ -197,9 +260,10 @@ def main():
     p_scan.add_argument("--project-id", type=int, metavar="ID")
     p_scan.add_argument("--name", metavar="NAME")
 
-    sub.add_parser("projects", help="Alle Projekte in der DB auflisten")
-    sub.add_parser("init",     help="Projekte aus config.yaml in die DB übernehmen")
+    sub.add_parser("projects",  help="Alle Projekte in der DB auflisten")
+    sub.add_parser("init",      help="Projekte aus config.yaml in die DB übernehmen")
     sub.add_parser("scan-mail", help="Mails via IMAP abrufen und indexieren")
+    sub.add_parser("rechunk",   help="Bestehende Dokumente neu chunken")
 
     args = parser.parse_args()
     {
@@ -207,6 +271,7 @@ def main():
         "projects":  cmd_projects,
         "init":      cmd_init,
         "scan-mail": cmd_scan_mail,
+        "rechunk":   cmd_rechunk,
     }[args.command](args)
 
 

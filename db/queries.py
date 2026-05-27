@@ -49,6 +49,15 @@ def upsert_content(conn: sqlite3.Connection, document_id: int, content: str, lan
     )
 
 
+def save_chunks(conn: sqlite3.Connection, document_id: int, chunks: list[dict]):
+    """Bestehende Chunks löschen und neu einfügen."""
+    conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (document_id,))
+    conn.executemany(
+        "INSERT INTO document_chunks (document_id, page_number, chunk_index, content) VALUES (?, ?, ?, ?)",
+        [(document_id, c["page_number"], c["chunk_index"], c["content"]) for c in chunks],
+    )
+
+
 def get_project_by_path(conn: sqlite3.Connection, path: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM projects WHERE path = ?", (path,)

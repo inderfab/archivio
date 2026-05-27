@@ -81,6 +81,7 @@ async def open_file(path: str = Query(...)):
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
 
 
+
 @app.get("/reveal")
 async def reveal_file(path: str = Query(...)):
     try:
@@ -227,8 +228,9 @@ def _search_filtered(conn, filters: str, filter_params: list):
         results = []
         for r in rows:
             d = dict(r)
-            d["fallback"] = False
-            d["excerpt"]  = d.pop("raw_content") or ""
+            d["fallback"]    = False
+            d["page_number"] = None
+            d["excerpt"]     = d.pop("raw_content") or ""
             results.append(d)
         return results, None
     except Exception as exc:
@@ -243,28 +245,37 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
             d.extraction_status, d.source_type,
             p.name      AS project_name,
             dp.path     AS filepath,
-            dc.content  AS raw_content,
+            dc_chunk.content AS raw_content,
+            dc_chunk.page_number,
+            chunks_fts.rank,
             m.sender    AS mail_sender,
             m.date      AS mail_date
-        FROM documents_fts
-        JOIN  documents       d  ON documents_fts.rowid = d.id
-        JOIN  projects        p  ON p.id  = d.project_id
+        FROM chunks_fts
+        JOIN  document_chunks dc_chunk ON chunks_fts.rowid = dc_chunk.id
+        JOIN  documents       d        ON d.id = dc_chunk.document_id
+        JOIN  projects        p        ON p.id = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-        LEFT JOIN document_content dc ON dc.document_id = d.id
         LEFT JOIN mails       m  ON m.document_id = d.id
-        WHERE documents_fts MATCH ?
+        WHERE chunks_fts MATCH ?
         {filters}
         ORDER BY rank
-        LIMIT 50
+        LIMIT 200
     """
     try:
         rows    = conn.execute(sql, [fts_q] + filter_params).fetchall()
+        seen    = set()
         results = []
         for r in rows:
             d = dict(r)
+            if d["id"] in seen:
+                continue
+            seen.add(d["id"])
             d["fallback"] = False
             d["excerpt"]  = _excerpt(d.pop("raw_content") or "", q)
+            d.pop("rank", None)
             results.append(d)
+            if len(results) >= 50:
+                break
         return results, None
     except Exception as exc:
         return [], str(exc)
@@ -304,8 +315,9 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
         results = []
         for r in rows:
             d = dict(r)
-            d["fallback"] = True
-            d["excerpt"]  = _excerpt(d.pop("raw_content") or "", q)
+            d["fallback"]    = True
+            d["page_number"] = None
+            d["excerpt"]     = _excerpt(d.pop("raw_content") or "", q)
             results.append(d)
         return results, None
     except Exception as exc:
