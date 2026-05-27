@@ -11,7 +11,7 @@
     <string>/Users/pas/archivio/.venv/bin/uvicorn</string>
     <string>web.main:app</string>
     <string>--host</string>
-    <string>127.0.0.1</string>
+    <string>0.0.0.0</string>
     <string>--port</string>
     <string>8000</string>
   </array>
