@@ -15,10 +15,12 @@ from fastapi.staticfiles import StaticFiles
 from db import connection
 from web.shared import templates
 from web.dashboard import router as dashboard_router
+from web.api import router as api_router
 
 app = FastAPI(title="Archivio")
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
+app.include_router(api_router)
 
 # ── Routen ────────────────────────────────────────────────────────────────────
 
