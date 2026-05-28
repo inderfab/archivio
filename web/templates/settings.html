@@ -285,11 +285,12 @@
          class="btn-save">
         ⬇ Helper herunterladen (v{{ helper_version }})
       </a>
-      <p style="margin:12px 0 0; font-size:12px; color:var(--text-3); line-height:1.6;">
+      <p style="margin:12px 0 0; font-size:12px; color:var(--text-3); line-height:1.8;">
         Nach dem Download: ZIP entpacken, App in <em>Programme</em> verschieben.<br>
         Beim ersten Öffnen: <strong>Rechtsklick → Öffnen</strong> (Gatekeeper-Sperre umgehen).<br>
-        Beim ersten Start werden Abhängigkeiten installiert — das dauert ca. 1–2 Minuten.
-        Fortschritt in <em>Konsole.app</em> unter <code>~/Library/Logs/ArchivioHelper.log</code>.
+        Beim ersten Start werden Abhängigkeiten installiert (ca. 1–2 Min.).<br>
+        Im Helper als Server-URL eintragen:
+        <code style="background:var(--bg); border:1px solid var(--border); border-radius:3px; padding:1px 6px; font-size:12px; user-select:all;">{{ helper_url_hint }}</code>
       </p>
       {% else %}
       <p style="font-size:13px; color:var(--text-3); margin:0;">

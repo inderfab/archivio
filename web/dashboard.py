@@ -321,6 +321,19 @@ async def unignore_path(
 
 # ── Einstellungen ────────────────────────────────────────────────────────────
 
+def _helper_url_hint(cfg: dict) -> str:
+    """URL, die Mitarbeiter im Helper eintragen sollen."""
+    import socket
+    port = cfg.get("server", {}).get("port", 8000)
+    try:
+        hostname = socket.gethostname()
+        if not hostname.endswith(".local"):
+            hostname += ".local"
+    except Exception:
+        hostname = "imac.local"
+    return f"http://{hostname}:{port}"
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,
@@ -346,6 +359,7 @@ async def settings_page(
         "restart":          bool(restart),
         "helper_available": available,
         "helper_version":   version,
+        "helper_url_hint":  _helper_url_hint(cfg),
     })
 
 
