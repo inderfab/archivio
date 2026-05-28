@@ -113,22 +113,18 @@ def _register_url_handler():
 # ── Update ────────────────────────────────────────────────────────────────────
 
 def _check_update() -> tuple[str, str] | None:
+    """Fragt den Archivio-Server nach der aktuellen Version."""
     try:
-        cfg   = _load_config()
-        repo  = cfg.get("github_repo", "inderfab/archivio")
-        resp  = requests.get(
-            f"https://api.github.com/repos/{repo}/releases/latest",
-            timeout=8, headers={"Accept": "application/vnd.github+json"},
-        )
+        cfg    = _load_config()
+        server = cfg.get("server_url", "http://127.0.0.1:8000").rstrip("/")
+        resp   = requests.get(f"{server}/api/version", timeout=5)
         if resp.status_code != 200:
             return None
-        data    = resp.json()
-        remote  = data.get("tag_name", "").lstrip("v")
+        remote  = resp.json().get("version", "")
         current = _local_version()
         if remote and remote != current:
-            for asset in data.get("assets", []):
-                if asset["name"].endswith(".zip"):
-                    return remote, asset["browser_download_url"]
+            download_url = f"{server}/dashboard/download/helper"
+            return remote, download_url
         return None
     except Exception as e:
         log.warning("Update check failed: %s", e)
@@ -142,13 +138,15 @@ def _do_update(version: str, url: str):
         with open(zip_path, "wb") as f:
             for chunk in resp.iter_content(65536):
                 f.write(chunk)
+        # App-Bundle liegt 4 Ebenen über dem Python-Binary im venv
         app_path = Path(sys.executable).parent.parent.parent.parent
+        dest_dir = app_path.parent
         with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(app_path.parent)
+            zf.extractall(dest_dir)
         zip_path.unlink(missing_ok=True)
+        log.info("Updated to %s in %s", version, dest_dir)
         rumps.notification("Archivio Helper", "Update installiert",
                            f"Version {version} — bitte App neu starten.")
-        log.info("Updated to %s", version)
     except Exception as e:
         log.error("Update failed: %s", e)
         rumps.notification("Archivio Helper", "Update fehlgeschlagen", str(e))

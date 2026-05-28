@@ -13,6 +13,14 @@ from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _now
 
 router = APIRouter(prefix="/api")
 
+_VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+
+
+@router.get("/version")
+async def version():
+    v = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
+    return JSONResponse({"version": v})
+
 
 @router.get("/status")
 async def status():
