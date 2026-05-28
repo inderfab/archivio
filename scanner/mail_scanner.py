@@ -73,16 +73,33 @@ def _decode_imap_utf7(text: str) -> str:
 # ── Projekt-Matching ──────────────────────────────────────────────────────────
 
 def match_mailbox_to_project(conn, mailbox_name: str) -> int | None:
-    """Postfachname enthält Projektnummer → project_id oder None."""
+    """Postfachname enthält Projektnummer → project_id oder None.
+
+    Sucht die Nummer im Ordnernamen des Pfades (letztes Segment) sowie im
+    Projektnamen — damit "211_Derendingen" zu "211 Emmenhof Derendingen" passt.
+    """
     m = re.search(r'\d{3,}', mailbox_name)
     if not m:
         return None
     number = m.group(0)
-    row = conn.execute(
-        "SELECT id FROM projects WHERE path LIKE ?",
-        (f"%{number}%",),
-    ).fetchone()
-    return row["id"] if row else None
+    rows = conn.execute(
+        """SELECT id, path, name FROM projects
+           WHERE path LIKE ? OR name LIKE ?""",
+        (f"%{number}%", f"%{number}%"),
+    ).fetchall()
+    if not rows:
+        return None
+    # Bevorzuge Treffer, wo die Nummer am Wortanfang steht (z.B. "211 Emmenhof"
+    # schlägt einen zufälligen Treffer "12211_Archiv")
+    for row in rows:
+        folder = row["path"].rstrip("/").rsplit("/", 1)[-1]
+        proj_number = re.match(r'(\d{3,})', row["name"] or "")
+        if proj_number and proj_number.group(1) == number:
+            return row["id"]
+        if re.match(rf'{re.escape(number)}\D', folder) or folder.startswith(number):
+            return row["id"]
+    # Fallback: erster Treffer
+    return rows[0]["id"]
 
 
 # ── Mail-Parser ───────────────────────────────────────────────────────────────

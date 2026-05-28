@@ -86,6 +86,8 @@ async def toggle_project(
                 "UPDATE projects SET active=? WHERE id=?",
                 (0 if row["active"] else 1, row["id"]),
             )
+    # Mailbox-Zuordnung für bisher ungematchte Postfächer aktualisieren
+    _rematch_unassigned_mailboxes(conn)
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
@@ -317,6 +319,25 @@ async def unignore_path(
         )
     conn.close()
     return await folder_detail(request, path=path, project_id=project_id)
+
+
+def _rematch_unassigned_mailboxes(conn) -> None:
+    """Ordnet Postfächer ohne Projekt-Zuordnung neu zu."""
+    try:
+        from scanner.mail_scanner import match_mailbox_to_project
+        rows = conn.execute(
+            "SELECT mailbox_name FROM mail_scan_config WHERE project_id IS NULL"
+        ).fetchall()
+        for row in rows:
+            pid = match_mailbox_to_project(conn, row["mailbox_name"])
+            if pid:
+                with conn:
+                    conn.execute(
+                        "UPDATE mail_scan_config SET project_id=? WHERE mailbox_name=?",
+                        (pid, row["mailbox_name"]),
+                    )
+    except Exception as exc:
+        log.warning("Mailbox-Rematch fehlgeschlagen: %s", exc)
 
 
 # ── Einstellungen ────────────────────────────────────────────────────────────
