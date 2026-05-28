@@ -5,6 +5,7 @@ import json
 import logging
 import os
 import threading
+import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -306,7 +307,7 @@ async def browse(
     }
     conn.close()
 
-    excluded = {f.lower() for f in settings.get("scanner.excluded_folders", [])}
+    excluded = {unicodedata.normalize('NFC', f.lower()) for f in settings.get("scanner.excluded_folders", [])}
 
     subdirs: list[dict] = []
     try:
@@ -318,7 +319,7 @@ async def browse(
                     "name":         entry.name,
                     "path":         entry.path,
                     "ignored":      entry.path in ignored,
-                    "excluded":     any(excl in entry.name.lower() for excl in excluded),
+                    "excluded":     any(excl in unicodedata.normalize('NFC', entry.name.lower()) for excl in excluded),
                     "has_children": _has_subdirs(entry.path),
                 })
     except PermissionError:

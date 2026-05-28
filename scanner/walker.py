@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import unicodedata
 from pathlib import Path
 
 from config import settings
@@ -22,8 +23,8 @@ def _supported_extensions() -> set[str]:
 
 
 def _excluded_folders() -> set[str]:
-    # Case-insensitiv vergleichen für Robustheit
-    return {f.lower() for f in settings.get("scanner.excluded_folders", [])}
+    # NFC-Normalisierung: macOS SMB-Mounts liefern NFD-Ordnernamen
+    return {unicodedata.normalize('NFC', f.lower()) for f in settings.get("scanner.excluded_folders", [])}
 
 
 def scan_project(project_id: int, root: Path, progress: dict | None = None):
@@ -42,7 +43,7 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None):
         # Ausgeschlossene Ordner in-place entfernen → os.walk steigt nicht hinein
         dirnames[:] = [
             d for d in dirnames
-            if not any(excl in d.lower() for excl in excluded)
+            if not any(excl in unicodedata.normalize('NFC', d.lower()) for excl in excluded)
         ]
         for filename in filenames:
             path = Path(dirpath) / filename
