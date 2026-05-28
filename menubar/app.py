@@ -47,7 +47,15 @@ def _save_scan_time(t: str):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-_ICON = str(Path(__file__).parent / "icon.png")
+_ICON         = str(Path(__file__).parent / "icon.png")
+_VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+
+
+def _server_version() -> str:
+    try:
+        return _VERSION_FILE.read_text().strip()
+    except Exception:
+        return "?"
 
 
 class ArchivioMenubar(rumps.App):
@@ -55,6 +63,7 @@ class ArchivioMenubar(rumps.App):
         super().__init__("", icon=_ICON, template=True, quit_button=None)
         self.scan_time = _load_scan_time()
 
+        self._version = rumps.MenuItem(f"Version {_server_version()}")
         self._srv    = rumps.MenuItem("⬤  Webserver …")
         self._nas    = rumps.MenuItem("⬤  NAS …")
         self._db     = rumps.MenuItem("⬤  Datenbank …")
@@ -71,6 +80,7 @@ class ArchivioMenubar(rumps.App):
         self._quitbtn = rumps.MenuItem("Beenden",         callback=rumps.quit_application)
 
         self.menu = [
+            self._version,
             self._srv, self._nas, self._db, self._last,
             self._sep1, self._timebtn, self._sep2,
             self._scanbtn, self._openbtn,

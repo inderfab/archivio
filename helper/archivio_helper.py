@@ -192,6 +192,7 @@ class ArchivioHelper(rumps.App):
         cfg = _load_config()
         self._server_url = cfg.get("server_url", "http://imac.local:8000")
 
+        self._version_item   = rumps.MenuItem(f"Version {_local_version()}")
         self._status_item    = rumps.MenuItem("⬤  Verbindung …")
         self._server_item    = rumps.MenuItem(
             f"Server: {self._server_url}", callback=self.change_server)
@@ -199,6 +200,7 @@ class ArchivioHelper(rumps.App):
             "Autostart beim Login", callback=self.toggle_autostart)
 
         self.menu = [
+            self._version_item,
             self._status_item,
             rumps.separator,
             self._server_item,
