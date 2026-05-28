@@ -1,6 +1,7 @@
-"""JSON-API für die Menubar-App."""
+"""JSON-API."""
 from __future__ import annotations
 
+import subprocess
 import threading
 from pathlib import Path
 
@@ -67,3 +68,28 @@ async def scan_all():
         threading.Thread(target=_run_mail_scan, daemon=True).start()
 
     return JSONResponse({"ok": True, "projects_started": started})
+
+
+@router.post("/update")
+async def update_server():
+    """git pull + pip install, danach LaunchAgent-Neustart."""
+    project_root = Path(__file__).parent.parent
+
+    def _run():
+        try:
+            subprocess.run(["git", "pull"], cwd=project_root, timeout=60)
+            venv_pip = project_root / ".venv" / "bin" / "pip"
+            subprocess.run(
+                [str(venv_pip), "install", "-q", "-r", "requirements.txt"],
+                cwd=project_root, timeout=120,
+            )
+        except Exception:
+            pass
+        # LaunchAgent-Neustart: KeepAlive sorgt für automatischen Wiederstart
+        try:
+            subprocess.run(["launchctl", "stop", "ch.strut.archivio"], timeout=5)
+        except Exception:
+            pass
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Update läuft, Server startet neu…"})
