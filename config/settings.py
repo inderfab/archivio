@@ -1,13 +1,20 @@
 from pathlib import Path
+import shutil
 import yaml
 
-_CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
+_CONFIG_PATH  = Path(__file__).parent.parent / "config.yaml"
+_EXAMPLE_PATH = Path(__file__).parent.parent / "config.yaml.example"
 _settings: dict = {}
 
 
 def _load() -> dict:
+    if not _CONFIG_PATH.exists():
+        if _EXAMPLE_PATH.exists():
+            shutil.copy(_EXAMPLE_PATH, _CONFIG_PATH)
+        else:
+            _CONFIG_PATH.write_text("{}\n", encoding="utf-8")
     with open(_CONFIG_PATH, encoding="utf-8") as f:
-        return yaml.safe_load(f)
+        return yaml.safe_load(f) or {}
 
 
 def get(key: str, default=None):

@@ -12,7 +12,18 @@ import rumps
 import yaml
 
 CONFIG_PATH = Path(__file__).parent.parent / "config.yaml"
-API         = "http://localhost:8000"
+
+
+def _api_base() -> str:
+    try:
+        cfg  = yaml.safe_load(CONFIG_PATH.read_text()) or {}
+        host = cfg.get("server", {}).get("host", "127.0.0.1") or "127.0.0.1"
+        port = cfg.get("server", {}).get("port", 8000)
+        if host == "0.0.0.0":
+            host = "127.0.0.1"
+        return f"http://{host}:{port}"
+    except Exception:
+        return "http://127.0.0.1:8000"
 
 
 # ── Config-Helpers ────────────────────────────────────────────────────────────
@@ -75,7 +86,7 @@ class ArchivioMenubar(rumps.App):
 
     def _refresh_status(self):
         try:
-            data = requests.get(f"{API}/api/status", timeout=3).json()
+            data = requests.get(f"{_api_base()}/api/status", timeout=3).json()
         except Exception:
             data = {}
 
@@ -110,7 +121,7 @@ class ArchivioMenubar(rumps.App):
 
     def _do_scan(self):
         try:
-            requests.post(f"{API}/api/scan/all", timeout=5)
+            requests.post(f"{_api_base()}/api/scan/all", timeout=5)
         except Exception:
             pass
 
@@ -125,7 +136,7 @@ class ArchivioMenubar(rumps.App):
         )
 
     def open_browser(self, _):
-        subprocess.run(["open", API])
+        subprocess.run(["open", _api_base()])
 
     def change_scan_time(self, sender):
         win = rumps.Window(

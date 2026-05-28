@@ -1,0 +1,49 @@
+database:
+  path: archivio.db
+
+server:
+  host: 0.0.0.0
+  port: 8000
+
+office:
+  name: ""
+  logo: ""
+  language: de
+
+scanner:
+  base_folders: []
+  supported_extensions:
+    # Textextraktion
+    - .pdf
+    - .xlsx
+    - .eml
+    - .txt
+    - .rtf
+    - .doc
+    - .docx
+    # Nur Metadaten / Dateiname
+    - .dwg
+    - .dxf
+    - .pln
+    - .vwx
+    - .ifc
+    - .rvt
+    - .skp
+    - .3dm
+    - .nwd
+    - .psd
+    - .ai
+    - .indd
+    - .mp4
+    - .mov
+    - .zip
+  excluded_folders: []
+  hash_algorithm: sha256
+  batch_size: 100
+
+mail_accounts: []
+
+logging:
+  level: INFO
+
+projects: []
