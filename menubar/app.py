@@ -47,9 +47,12 @@ def _save_scan_time(t: str):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
+_ICON = str(Path(__file__).parent / "icon.png")
+
+
 class ArchivioMenubar(rumps.App):
     def __init__(self):
-        super().__init__("Archivio", quit_button=None)
+        super().__init__("", icon=_ICON, template=True, quit_button=None)
         self.scan_time = _load_scan_time()
 
         self._srv    = rumps.MenuItem("⬤  Webserver …")

@@ -199,7 +199,6 @@ class ArchivioHelper(rumps.App):
             f"Server: {self._server_url}", callback=self.change_server)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
-        self._autostart_item.state = _autostart_enabled()
 
         self.menu = [
             self._status_item,
@@ -212,6 +211,8 @@ class ArchivioHelper(rumps.App):
             rumps.separator,
             rumps.MenuItem("Beenden", callback=rumps.quit_application),
         ]
+        # State nach Menu-Setup setzen (rumps braucht das)
+        self._autostart_item.state = _autostart_enabled()
 
         _register_url_handler()
         threading.Thread(target=self._status_loop, daemon=True).start()
@@ -232,7 +233,7 @@ class ArchivioHelper(rumps.App):
             f"{'🟢' if ok else '🔴'}  Archivio Server "
             f"{'erreichbar' if ok else 'nicht erreichbar'}"
         )
-        self.title = "☁" if ok else "☁"
+        # Kein Titeltext — Icon genügt
 
     def open_browser(self, _):
         subprocess.run(["open", self._server_url])
@@ -260,7 +261,7 @@ class ArchivioHelper(rumps.App):
         _save_config(cfg)
 
     def toggle_autostart(self, sender):
-        new_state = not sender.state
+        new_state = sender.state != 1  # 1 = aktiv → deaktivieren, sonst aktivieren
         _set_autostart(new_state)
         sender.state = new_state
 

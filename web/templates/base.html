@@ -46,7 +46,9 @@
       gap: 32px;
       height: 52px;
     }
-    .logo-text { font-size: 15px; font-weight: 600; color: var(--text-2); letter-spacing: -0.01em; }
+    .logo-wrap { display: flex; align-items: center; gap: 8px; text-decoration: none; }
+    .logo-icon  { width: 18px; height: 18px; display: block; opacity: .7; }
+    .logo-text  { font-size: 15px; font-weight: 600; color: var(--text-2); letter-spacing: -0.01em; }
 
     nav {
       display: flex;
@@ -430,7 +432,10 @@
 <header>
   <div class="container">
     <div class="header-inner">
-      <span class="logo-text">Archivio</span>
+      <a href="/" class="logo-wrap">
+        <img src="/static/logo.svg" class="logo-icon" alt="">
+        <span class="logo-text">Archivio</span>
+      </a>
       <nav>
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Suche</a>
         <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
