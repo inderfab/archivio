@@ -402,6 +402,7 @@ async def settings_save(request: Request):
     # Server
     server_host = form.get("server_host", "127.0.0.1").strip()
     server_port = int(form.get("server_port", "8000") or "8000")
+    scan_time   = form.get("scan_time", "").strip()
 
     # Mail — mehrere Konten
     labels    = form.getlist("mail_label")
@@ -445,6 +446,7 @@ async def settings_save(request: Request):
             "language": office_language,
         },
         "server":        {"host": server_host, "port": server_port},
+        "scheduler":     {"scan_time": scan_time},
         "mail_accounts": mail_accounts,
         # erstes Konto auch unter mail: {} für Rückwärtskompatibilität
         "mail":          mail_accounts[0] if mail_accounts else {},

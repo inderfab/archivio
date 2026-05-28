@@ -166,6 +166,13 @@
               value="{{ cfg.get('server', {}).get('port', 8000) }}">
           </div>
         </div>
+        <div class="field" style="max-width: 160px;">
+          <label>Automatischer Scan</label>
+          <input type="text" name="scan_time"
+            placeholder="z.B. 23:00"
+            value="{{ cfg.get('scheduler', {}).get('scan_time', '') }}">
+          <span class="hint">Täglich um diese Uhrzeit (HH:MM). Leer = deaktiviert.</span>
+        </div>
       </div>
     </details>
 

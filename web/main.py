@@ -3,6 +3,10 @@ from __future__ import annotations
 import re
 import subprocess
 import sys
+import threading
+import time
+from contextlib import asynccontextmanager
+from datetime import datetime
 from pathlib import Path
 from urllib.parse import quote
 
@@ -17,7 +21,37 @@ from web.shared import templates
 from web.dashboard import router as dashboard_router
 from web.api import router as api_router
 
-app = FastAPI(title="Archivio")
+
+# ── Scheduler ─────────────────────────────────────────────────────────────────
+
+def _scheduler_loop():
+    triggered_today: str | None = None
+    while True:
+        try:
+            from config import settings
+            scan_time = (settings.get("scheduler.scan_time") or "").strip()
+            if scan_time:
+                now = datetime.now()
+                today = now.strftime("%Y-%m-%d")
+                if now.strftime("%H:%M") == scan_time and triggered_today != today:
+                    triggered_today = today
+                    try:
+                        import requests as _req
+                        _req.post("http://127.0.0.1:8000/api/scan/all", timeout=5)
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        time.sleep(60)
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
+    yield
+
+
+app = FastAPI(title="Archivio", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
 app.include_router(api_router)
