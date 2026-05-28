@@ -83,6 +83,11 @@ async def update_server():
                 [str(venv_pip), "install", "-q", "-r", "requirements.txt"],
                 cwd=project_root, timeout=120,
             )
+            # Helper-App neu bauen damit Download-Version aktuell ist
+            subprocess.run(
+                ["bash", "helper/build.sh"],
+                cwd=project_root, timeout=120,
+            )
         except Exception:
             pass
         # LaunchAgent-Neustart: KeepAlive sorgt für automatischen Wiederstart
