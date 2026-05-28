@@ -106,9 +106,6 @@
   }
   .btn-save:hover { opacity: .85; }
 
-  .logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
-  .logo-preview img { height: 32px; }
-
   .settings-advanced > summary { cursor: pointer; list-style: none; user-select: none; }
   .settings-advanced > summary::-webkit-details-marker { display: none; }
   .adv-arrow { display: inline-block; transition: transform .2s; font-size: 10px; margin-right: 4px; }
@@ -127,7 +124,7 @@
   </div>
   {% endif %}
 
-  <form method="POST" action="/dashboard/settings" enctype="multipart/form-data">
+  <form method="POST" action="/dashboard/settings">
 
     {# ── Büro ── #}
     <div class="settings-section">
@@ -138,19 +135,6 @@
           <label>Büroname</label>
           <input type="text" name="office_name"
             value="{{ cfg.get('office', {}).get('name', '') }}">
-        </div>
-
-        <div class="field">
-          <label>Logo</label>
-          {% set logo = cfg.get('office', {}).get('logo', '') %}
-          {% if logo %}
-          <div class="logo-preview">
-            <img src="/static/{{ logo }}" alt="Logo">
-            <span class="hint">{{ logo }}</span>
-          </div>
-          {% endif %}
-          <input type="file" name="logo" accept=".svg,.png" style="font-size:13px;">
-          <span class="hint">SVG oder PNG, wird in web/static/ gespeichert</span>
         </div>
 
         <div class="field" style="max-width: 220px;">

@@ -7,7 +7,7 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi import APIRouter, Form, Query, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 
 from config import settings
@@ -337,17 +337,6 @@ async def settings_save(request: Request):
     office_name     = form.get("office_name", "").strip()
     office_language = form.get("office_language", "de")
 
-    # Logo-Upload
-    logo_file = form.get("logo")
-    logo_name = old_cfg.get("office", {}).get("logo", "")
-    if logo_file and hasattr(logo_file, "filename") and logo_file.filename:
-        suffix = Path(logo_file.filename).suffix.lower()
-        if suffix in (".svg", ".png"):
-            dest = Path(__file__).parent / "static" / f"logo{suffix}"
-            content = await logo_file.read()
-            dest.write_bytes(content)
-            logo_name = f"logo{suffix}"
-
     # Server
     server_host = form.get("server_host", "127.0.0.1").strip()
     server_port = int(form.get("server_port", "8000") or "8000")
@@ -391,7 +380,6 @@ async def settings_save(request: Request):
     updates = {
         "office": {
             "name":     office_name,
-            "logo":     logo_name,
             "language": office_language,
         },
         "server":        {"host": server_host, "port": server_port},

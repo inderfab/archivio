@@ -7,7 +7,6 @@ server:
 
 office:
   name: ""
-  logo: ""
   language: de
 
 scanner:

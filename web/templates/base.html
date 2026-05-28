@@ -46,14 +46,7 @@
       gap: 32px;
       height: 52px;
     }
-    .logo-link { display: flex; align-items: center; text-decoration: none; }
-    .logo-img  { height: 28px; display: block; }
-    .logo-sep  { width: 1px; height: 20px; background: var(--border); margin: 0 16px; flex-shrink: 0; }
     .logo-text { font-size: 15px; font-weight: 600; color: var(--text-2); letter-spacing: -0.01em; }
-
-    @media (prefers-color-scheme: dark) {
-      .logo-img { filter: invert(1); }
-    }
 
     nav {
       display: flex;
@@ -437,12 +430,6 @@
 <header>
   <div class="container">
     <div class="header-inner">
-      {% if office_logo() %}
-      <a href="/" class="logo-link">
-        <img src="/static/{{ office_logo() }}" alt="{{ office_name() }}" class="logo-img">
-      </a>
-      <span class="logo-sep"></span>
-      {% endif %}
       <span class="logo-text">Archivio</span>
       <nav>
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Suche</a>
