@@ -55,6 +55,7 @@ chmod +x "$APP/Contents/MacOS/Archivio Helper"
 cp helper/archivio_helper.py  "$APP/Contents/Resources/"
 cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
+cp helper/icon.png            "$APP/Contents/Resources/"
 cp VERSION                    "$APP/Contents/Resources/"
 
 # Info.plist

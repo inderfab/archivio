@@ -185,9 +185,12 @@ def _set_autostart(enabled: bool):
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
+_ICON = str(Path(__file__).parent / "icon.png")
+
+
 class ArchivioHelper(rumps.App):
     def __init__(self):
-        super().__init__("☁", quit_button=None)
+        super().__init__("", icon=_ICON, template=True, quit_button=None)
         cfg = _load_config()
         self._server_url = cfg.get("server_url", "http://imac.local:8000")
 
