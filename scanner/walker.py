@@ -38,7 +38,7 @@ def scan_project(project_id: int, root: Path):
         # Ausgeschlossene Ordner in-place entfernen → os.walk steigt nicht hinein
         dirnames[:] = [
             d for d in dirnames
-            if d.lower() not in excluded
+            if not any(excl in d.lower() for excl in excluded)
         ]
         for filename in filenames:
             path = Path(dirpath) / filename

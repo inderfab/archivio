@@ -228,6 +228,8 @@ async def browse(
     }
     conn.close()
 
+    excluded = {f.lower() for f in settings.get("scanner.excluded_folders", [])}
+
     subdirs: list[dict] = []
     try:
         with os.scandir(path) as it:
@@ -238,6 +240,7 @@ async def browse(
                     "name":         entry.name,
                     "path":         entry.path,
                     "ignored":      entry.path in ignored,
+                    "excluded":     any(excl in entry.name.lower() for excl in excluded),
                     "has_children": _has_subdirs(entry.path),
                 })
     except PermissionError:

@@ -2,7 +2,7 @@
   {% if subdirs %}
     {% for d in subdirs %}
     <button
-      class="browse-entry {{ 'ignored' if d.ignored else '' }}"
+      class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }}"
       onclick="
         clearFromDepth({{ project_id }}, {{ depth + 1 }});
         selectEntry(this, {{ project_id }}, '{{ d.path | replace("'", "\\'") | replace('\\', '\\\\') }}');
@@ -17,7 +17,11 @@
       <span style="flex:1; text-align:left; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;">
         {{ d.name }}
       </span>
-      {% if d.has_children %}
+      {% if d.ignored %}
+        <span class="browse-tag">ignoriert</span>
+      {% elif d.excluded %}
+        <span class="browse-tag">ausgeschlossen</span>
+      {% elif d.has_children %}
         <span class="browse-arrow">▶</span>
       {% endif %}
     </button>
