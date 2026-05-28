@@ -304,6 +304,16 @@ async def settings_page(
     restart: str = Query(default=""),
 ):
     cfg = settings.load_all()
+    # Einmal-Migration: altes mail-{} → mail_accounts: [{}]
+    if "mail_accounts" not in cfg and "mail" in cfg:
+        old = cfg["mail"]
+        cfg["mail_accounts"] = [{
+            "label":    "Haupt",
+            "host":     old.get("host", ""),
+            "port":     old.get("port", 993),
+            "username": old.get("username", ""),
+            "password": old.get("password", ""),
+        }]
     return templates.TemplateResponse("settings.html", {
         "request": request,
         "cfg":     cfg,
@@ -316,9 +326,12 @@ async def settings_page(
 async def settings_save(request: Request):
     form = await request.form()
 
-    old_cfg = settings.load_all()
+    old_cfg  = settings.load_all()
     old_host = str(old_cfg.get("server", {}).get("host", ""))
     old_port = str(old_cfg.get("server", {}).get("port", ""))
+    old_accounts = old_cfg.get("mail_accounts", old_cfg.get("mail", []))
+    if isinstance(old_accounts, dict):
+        old_accounts = [old_accounts]
 
     # Büro
     office_name     = form.get("office_name", "").strip()
@@ -335,28 +348,38 @@ async def settings_save(request: Request):
             dest.write_bytes(content)
             logo_name = f"logo{suffix}"
 
-    # Server & DB
-    server_host   = form.get("server_host", "127.0.0.1").strip()
-    server_port   = int(form.get("server_port", "8000") or "8000")
-    database_path = form.get("database_path", "archivio.db").strip()
-    log_level     = form.get("log_level", "INFO")
+    # Server
+    server_host = form.get("server_host", "127.0.0.1").strip()
+    server_port = int(form.get("server_port", "8000") or "8000")
 
-    # Mail
-    mail_host     = form.get("mail_host", "").strip()
-    mail_port     = int(form.get("mail_port", "993") or "993")
-    mail_username = form.get("mail_username", "").strip()
-    mail_password_new = form.get("mail_password", "").strip()
-    if mail_password_new:
-        mail_password = mail_password_new
-    else:
-        mail_password = old_cfg.get("mail", {}).get("password", "")
+    # Mail — mehrere Konten
+    labels    = form.getlist("mail_label")
+    hosts     = form.getlist("mail_host")
+    ports     = form.getlist("mail_port")
+    usernames = form.getlist("mail_username")
+    passwords = form.getlist("mail_password")
+
+    mail_accounts = []
+    for i, (lbl, h, po, u, pw) in enumerate(zip(labels, hosts, ports, usernames, passwords)):
+        if not h.strip() and not u.strip():
+            continue
+        if not pw.strip():
+            # bestehendes Passwort behalten
+            pw = old_accounts[i]["password"] if i < len(old_accounts) else ""
+        mail_accounts.append({
+            "label":    lbl.strip(),
+            "host":     h.strip(),
+            "port":     int(po or 993),
+            "username": u.strip(),
+            "password": pw.strip(),
+        })
 
     # Scanner — base_folders
-    labels  = form.getlist("base_folder_label")
-    paths   = form.getlist("base_folder_path")
+    bf_labels = form.getlist("base_folder_label")
+    bf_paths  = form.getlist("base_folder_path")
     base_folders = [
         {"label": l.strip(), "path": p.strip()}
-        for l, p in zip(labels, paths)
+        for l, p in zip(bf_labels, bf_paths)
         if p.strip()
     ]
 
@@ -365,29 +388,19 @@ async def settings_save(request: Request):
         v.strip() for v in form.getlist("excluded_folder") if v.strip()
     ]
 
-    hash_algo  = form.get("hash_algorithm", "sha256")
-    batch_size = int(form.get("batch_size", "100") or "100")
-
     updates = {
         "office": {
             "name":     office_name,
             "logo":     logo_name,
             "language": office_language,
         },
-        "server":   {"host": server_host, "port": server_port},
-        "database": {"path": database_path},
-        "logging":  {"level": log_level},
-        "mail": {
-            "host":     mail_host,
-            "port":     mail_port,
-            "username": mail_username,
-            "password": mail_password,
-        },
+        "server":        {"host": server_host, "port": server_port},
+        "mail_accounts": mail_accounts,
+        # erstes Konto auch unter mail: {} für Rückwärtskompatibilität
+        "mail":          mail_accounts[0] if mail_accounts else {},
         "scanner": {
-            "base_folders":      base_folders,
-            "excluded_folders":  excluded_folders,
-            "hash_algorithm":    hash_algo,
-            "batch_size":        batch_size,
+            "base_folders":     base_folders,
+            "excluded_folders": excluded_folders,
         },
     }
     settings.save(updates)
@@ -405,19 +418,19 @@ async def settings_test_mail(request: Request):
     username = form.get("mail_username", "").strip()
     password = form.get("mail_password", "").strip()
     if not password:
-        password = settings.get("mail.password", "")
+        # Passwort aus gespeichertem Konto holen (anhand Username-Match)
+        for acc in settings.get("mail_accounts") or []:
+            if acc.get("username") == username:
+                password = acc.get("password", "")
+                break
     try:
         import imaplib
         client = imaplib.IMAP4_SSL(host, port)
         client.login(username, password)
         client.logout()
-        return HTMLResponse(
-            '<span class="test-ok">✓ Verbindung erfolgreich</span>'
-        )
+        return HTMLResponse('<span class="test-ok">✓ Verbindung erfolgreich</span>')
     except Exception as exc:
-        return HTMLResponse(
-            f'<span class="test-err">✗ {exc}</span>'
-        )
+        return HTMLResponse(f'<span class="test-err">✗ {exc}</span>')
 
 
 # ── Interne Helpers ───────────────────────────────────────────────────────────
