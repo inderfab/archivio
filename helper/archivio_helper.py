@@ -1,28 +1,35 @@
-"""Archivio Helper – macOS Menubar-App für Mitarbeiter-Macs.
-
-Registriert das archivio:// URL-Schema und öffnet Dateien direkt vom Browser.
-"""
+"""Archivio Helper – macOS Menubar-App für Mitarbeiter-Macs."""
 from __future__ import annotations
 
 import json
+import logging
 import subprocess
 import sys
 import threading
 import zipfile
 from pathlib import Path
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
-import objc
 import requests
 import rumps
-from AppKit import NSApplication
-from Foundation import NSObject, NSURL
 
-CONFIG_PATH  = Path(__file__).parent / "config.json"
-VERSION_PATH = Path(__file__).parent.parent / "VERSION"
+# ── Logging ───────────────────────────────────────────────────────────────────
+_log_dir = Path.home() / "Library" / "Logs"
+_log_dir.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(_log_dir / "ArchivioHelper.log"),
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger(__name__)
+log.info("Archivio Helper starting (Python %s)", sys.version)
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
+
+CONFIG_PATH  = Path(__file__).parent / "config.json"
+VERSION_PATH = Path(__file__).parent / "VERSION"
+
 
 def _load_config() -> dict:
     try:
@@ -33,7 +40,10 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict):
-    CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    try:
+        CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+    except Exception as e:
+        log.error("Config save failed: %s", e)
 
 
 def _local_version() -> str:
@@ -43,52 +53,72 @@ def _local_version() -> str:
         return _load_config().get("version", "1.0.0")
 
 
-# ── URL-Scheme Handler ────────────────────────────────────────────────────────
+# ── Datei öffnen ──────────────────────────────────────────────────────────────
 
-class _URLHandler(NSObject):
-    """Empfängt archivio:// Apple Events."""
-
-    def handleGetURLEvent_withReplyEvent_(self, event, reply):
-        url_str = str(event.paramDescriptorForKeyword_(
-            objc.selector(None, selector=b'----').selector
-        ).stringValue() or "")
-        _handle_archivio_url(url_str)
+def _open_path(path: str):
+    p = Path(path)
+    if not p.exists():
+        log.warning("File not found: %s", path)
+        rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+        return
+    log.info("Opening: %s", path)
+    subprocess.run(["open", path], timeout=5)
 
 
 def _handle_archivio_url(url_str: str):
-    """Parst archivio://open?path=... und öffnet die Datei."""
+    log.info("URL received: %s", url_str)
     try:
         parsed = urlparse(url_str)
         if parsed.scheme != "archivio":
             return
         if parsed.hostname == "open":
-            params = parse_qs(parsed.query)
-            path   = unquote(params.get("path", [""])[0])
+            path = unquote(parse_qs(parsed.query).get("path", [""])[0])
             if path:
                 _open_path(path)
-    except Exception as exc:
-        rumps.notification("Archivio Helper", "Fehler beim Öffnen", str(exc))
+    except Exception as e:
+        log.error("URL handling error: %s", e)
 
 
-def _open_path(path: str):
-    p = Path(path)
-    if not p.exists():
-        rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-        return
-    subprocess.run(["open", path], timeout=5)
+# ── URL-Scheme Handler (optional, benötigt pyobjc) ───────────────────────────
+
+def _register_url_handler():
+    try:
+        from Foundation import NSAppleEventManager, NSObject
+        import objc
+
+        kInternetEventClass = 0x4755524C  # 'GURL'
+        kAEGetURL           = 0x4755524C
+        keyDirectObject     = 0x2D2D2D2D  # '----'
+
+        class _Handler(NSObject):
+            def handleGetURLEvent_withReplyEvent_(self, event, reply):
+                url = str(event.paramDescriptorForKeyword_(keyDirectObject).stringValue())
+                _handle_archivio_url(url)
+
+        handler = _Handler.alloc().init()
+        # Keep a reference so the object isn't garbage-collected
+        _register_url_handler._handler = handler
+        NSAppleEventManager.sharedAppleEventManager() \
+            .setEventHandler_andSelector_forEventClass_andEventID_(
+                handler,
+                "handleGetURLEvent:withReplyEvent:",
+                kInternetEventClass,
+                kAEGetURL,
+            )
+        log.info("URL scheme handler registered")
+    except Exception as e:
+        log.warning("URL scheme handler not available: %s", e)
 
 
-# ── Update check ──────────────────────────────────────────────────────────────
+# ── Update ────────────────────────────────────────────────────────────────────
 
 def _check_update() -> tuple[str, str] | None:
-    """Gibt (neue_version, download_url) zurück oder None."""
     try:
-        cfg    = _load_config()
-        repo   = cfg.get("github_repo", "inderfab/archivio")
-        resp   = requests.get(
+        cfg   = _load_config()
+        repo  = cfg.get("github_repo", "inderfab/archivio")
+        resp  = requests.get(
             f"https://api.github.com/repos/{repo}/releases/latest",
-            timeout=8,
-            headers={"Accept": "application/vnd.github+json"},
+            timeout=8, headers={"Accept": "application/vnd.github+json"},
         )
         if resp.status_code != 200:
             return None
@@ -100,7 +130,8 @@ def _check_update() -> tuple[str, str] | None:
                 if asset["name"].endswith(".zip"):
                     return remote, asset["browser_download_url"]
         return None
-    except Exception:
+    except Exception as e:
+        log.warning("Update check failed: %s", e)
         return None
 
 
@@ -111,74 +142,61 @@ def _do_update(version: str, url: str):
         with open(zip_path, "wb") as f:
             for chunk in resp.iter_content(65536):
                 f.write(chunk)
-        app_path = Path(sys.executable).parent.parent.parent.parent  # .../Archivio Helper.app
+        app_path = Path(sys.executable).parent.parent.parent.parent
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(app_path.parent)
         zip_path.unlink(missing_ok=True)
         rumps.notification("Archivio Helper", "Update installiert",
                            f"Version {version} — bitte App neu starten.")
-    except Exception as exc:
-        rumps.notification("Archivio Helper", "Update fehlgeschlagen", str(exc))
+        log.info("Updated to %s", version)
+    except Exception as e:
+        log.error("Update failed: %s", e)
+        rumps.notification("Archivio Helper", "Update fehlgeschlagen", str(e))
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
 
-def _app_path() -> str:
-    return str(Path(sys.executable).parent.parent.parent.parent)
-
-
-def _autostart_is_enabled() -> bool:
-    script = (
-        'tell application "System Events" to return '
-        '(name of every login item) contains "Archivio Helper"'
-    )
+def _autostart_enabled() -> bool:
     try:
-        result = subprocess.run(
-            ["osascript", "-e", script], capture_output=True, text=True, timeout=5
+        r = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to return '
+             '(name of every login item) contains "Archivio Helper"'],
+            capture_output=True, text=True, timeout=5,
         )
-        return result.stdout.strip().lower() == "true"
+        return r.stdout.strip().lower() == "true"
     except Exception:
         return False
 
 
 def _set_autostart(enabled: bool):
-    path = _app_path()
+    path = str(Path(sys.executable).parent.parent.parent.parent)
     if enabled:
-        script = (
-            f'tell application "System Events" to make new login item '
-            f'at end with properties {{path:"{path}", hidden:true}}'
-        )
+        script = (f'tell application "System Events" to make new login item '
+                  f'at end with properties {{path:"{path}", hidden:true}}')
     else:
-        script = (
-            'tell application "System Events" to delete '
-            '(every login item whose name is "Archivio Helper")'
-        )
+        script = ('tell application "System Events" to delete '
+                  '(every login item whose name is "Archivio Helper")')
     try:
         subprocess.run(["osascript", "-e", script], timeout=5)
-    except Exception:
-        pass
+    except Exception as e:
+        log.error("Autostart toggle failed: %s", e)
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
 class ArchivioHelper(rumps.App):
     def __init__(self):
-        super().__init__("Archivio", quit_button=None)
+        super().__init__("☁", quit_button=None)
         cfg = _load_config()
         self._server_url = cfg.get("server_url", "http://imac.local:8000")
 
-        self._status_item = rumps.MenuItem("⬤  Verbindung …")
-        self._server_item = rumps.MenuItem(
-            f"Server: {self._server_url}", callback=self.change_server
-        )
+        self._status_item    = rumps.MenuItem("⬤  Verbindung …")
+        self._server_item    = rumps.MenuItem(
+            f"Server: {self._server_url}", callback=self.change_server)
         self._autostart_item = rumps.MenuItem(
-            "Autostart beim Login", callback=self.toggle_autostart
-        )
-        self._autostart_item.state = _autostart_is_enabled()
-
-        self._open_btn   = rumps.MenuItem("Archivio öffnen", callback=self.open_browser)
-        self._update_btn = rumps.MenuItem("Auf Updates prüfen", callback=self.check_update)
-        self._quit_btn   = rumps.MenuItem("Beenden", callback=rumps.quit_application)
+            "Autostart beim Login", callback=self.toggle_autostart)
+        self._autostart_item.state = _autostart_enabled()
 
         self.menu = [
             self._status_item,
@@ -186,54 +204,32 @@ class ArchivioHelper(rumps.App):
             self._server_item,
             self._autostart_item,
             rumps.separator,
-            self._open_btn,
-            self._update_btn,
+            rumps.MenuItem("Archivio öffnen",      callback=self.open_browser),
+            rumps.MenuItem("Auf Updates prüfen",   callback=self.check_update),
             rumps.separator,
-            self._quit_btn,
+            rumps.MenuItem("Beenden", callback=rumps.quit_application),
         ]
 
-        self._register_url_handler()
+        _register_url_handler()
         threading.Thread(target=self._status_loop, daemon=True).start()
-
-    # ── URL-Handler registrieren ──────────────────────────────────────────────
-
-    def _register_url_handler(self):
-        try:
-            from AppKit import NSAppleEventManager
-            from Foundation import NSAppleEventDescriptor
-            self._url_handler = _URLHandler.alloc().init()
-            mgr = NSAppleEventManager.sharedAppleEventManager()
-            mgr.setEventHandler_andSelector_forEventClass_andEventID_(
-                self._url_handler,
-                objc.selector(
-                    _URLHandler.handleGetURLEvent_withReplyEvent_,
-                    signature=b"v@:@@",
-                ),
-                0x4755524C,  # kInternetEventClass / 'GURL'
-                0x4755524C,  # kAEGetURL
-            )
-        except Exception:
-            pass
-
-    # ── Status ────────────────────────────────────────────────────────────────
+        log.info("ArchivioHelper ready")
 
     def _status_loop(self):
+        import time
         while True:
             self._refresh_status()
-            import time; time.sleep(30)
+            time.sleep(30)
 
     def _refresh_status(self):
         try:
-            resp = requests.get(f"{self._server_url}/api/status", timeout=3)
-            ok   = resp.status_code == 200
+            ok = requests.get(f"{self._server_url}/api/status", timeout=3).status_code == 200
         except Exception:
             ok = False
         self._status_item.title = (
             f"{'🟢' if ok else '🔴'}  Archivio Server "
             f"{'erreichbar' if ok else 'nicht erreichbar'}"
         )
-
-    # ── Callbacks ─────────────────────────────────────────────────────────────
+        self.title = "☁" if ok else "☁"
 
     def open_browser(self, _):
         subprocess.run(["open", self._server_url])
@@ -271,15 +267,17 @@ class ArchivioHelper(rumps.App):
             rumps.alert(f"Archivio Helper {_local_version()} ist aktuell.")
             return
         version, url = result
-        resp = rumps.alert(
+        if rumps.alert(
             title="Update verfügbar",
-            message=f"Version {version} ist verfügbar. Jetzt installieren?",
-            ok="Installieren",
-            cancel="Abbrechen",
-        )
-        if resp:
+            message=f"Version {version} verfügbar. Jetzt installieren?",
+            ok="Installieren", cancel="Abbrechen",
+        ):
             threading.Thread(target=_do_update, args=(version, url), daemon=True).start()
 
 
 if __name__ == "__main__":
-    ArchivioHelper().run()
+    try:
+        ArchivioHelper().run()
+    except Exception as e:
+        log.exception("Fatal error: %s", e)
+        raise

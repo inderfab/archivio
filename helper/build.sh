@@ -10,20 +10,41 @@ VERSION=$(cat VERSION)
 mkdir -p "$DIST"
 
 # ── Bundle-Struktur ────────────────────────────────────────────────────────────
+rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 
-# Launcher-Script
+# Launcher-Script (wird beim Öffnen der App ausgeführt)
 cat > "$APP/Contents/MacOS/Archivio Helper" <<'LAUNCHER'
 #!/usr/bin/env bash
 DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
-cd "$DIR"
+LOG="$HOME/Library/Logs/ArchivioHelper.log"
+exec >> "$LOG" 2>&1
+echo "$(date): Archivio Helper starting"
 
-# Abhängigkeiten bei Erststart installieren
+# Python suchen
+PYTHON=""
+for p in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+  if [ -x "$p" ]; then PYTHON="$p"; break; fi
+done
+
+if [ -z "$PYTHON" ]; then
+  osascript -e 'display alert "Archivio Helper" message "Python 3 nicht gefunden. Bitte Python 3 installieren (z.\,B. via Homebrew: brew install python)." as critical'
+  echo "$(date): ERROR - python3 not found"
+  exit 1
+fi
+echo "$(date): Using $PYTHON"
+
+# Venv + Abhängigkeiten beim ersten Start installieren
 VENV="$DIR/.venv"
 if [ ! -d "$VENV" ]; then
-  python3 -m venv "$VENV"
-  "$VENV/bin/pip" install --quiet -r "$DIR/requirements.txt"
+  osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Helper"'
+  echo "$(date): Creating venv"
+  "$PYTHON" -m venv "$VENV"
+  echo "$(date): Installing dependencies"
+  "$VENV/bin/pip" install --upgrade pip
+  "$VENV/bin/pip" install rumps requests
+  echo "$(date): Installation complete"
 fi
 
 exec "$VENV/bin/python3" "$DIR/archivio_helper.py"
@@ -78,7 +99,6 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 </plist>
 PLIST
 
-# PkgInfo
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
 # ── ZIP ────────────────────────────────────────────────────────────────────────
