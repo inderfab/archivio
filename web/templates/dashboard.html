@@ -32,6 +32,35 @@
   {# ── Mail-Integration ── #}
   {% include "_dashboard_mail.html" %}
 
+  {# ── Archivio Helper ── #}
+  <div class="card" style="margin-top:32px;">
+    <div class="card-header">
+      <h2>Archivio Helper</h2>
+      <span style="font-size:13px; color:var(--text-3);">macOS Menubar-App für Mitarbeiter</span>
+    </div>
+    <div class="card-body" style="padding:20px 24px;">
+      <p style="margin:0 0 8px; color:var(--text-2); font-size:14px; line-height:1.5;">
+        Der Archivio Helper läuft im Hintergrund und ermöglicht das Öffnen von Dateien
+        direkt aus dem Browser via <code>archivio://</code>-Link.
+      </p>
+      <ul style="margin:0 0 16px; padding-left:20px; color:var(--text-2); font-size:13px; line-height:1.8;">
+        <li>Läuft im macOS Menubar</li>
+        <li>Öffnet Dateien direkt auf dem NAS mit der richtigen App</li>
+        <li>Optional: automatischer Start beim Login</li>
+        <li>Zeigt Verbindungsstatus zum Archivio-Server</li>
+      </ul>
+      {% if helper_available %}
+      <a href="/download/helper" class="btn btn-primary" download>
+        ⬇ Archivio Helper herunterladen (v{{ helper_version }})
+      </a>
+      {% else %}
+      <span style="font-size:13px; color:var(--text-3);">
+        Noch kein Build vorhanden. Ausführen: <code>bash helper/build.sh</code>
+      </span>
+      {% endif %}
+    </div>
+  </div>
+
 </div>
 
 <script>
