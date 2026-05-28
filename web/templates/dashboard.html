@@ -58,6 +58,43 @@
     });
   }
 
+  document.addEventListener('archivio:browseEntryChanged', function(evt) {
+    updateBrowseEntry(evt.detail.path, evt.detail.ignored);
+  });
+
+  function updateBrowseEntry(path, ignored) {
+    var btn = null;
+    document.querySelectorAll('.browse-entry').forEach(function(el) {
+      if (el.dataset.path === path) btn = el;
+    });
+    if (!btn) return;
+    var badge = btn.querySelector('.browse-tag, .browse-arrow');
+    if (ignored) {
+      btn.classList.add('ignored');
+      btn.classList.remove('excluded');
+      if (badge) { badge.className = 'browse-tag'; badge.textContent = 'ignoriert'; }
+      else {
+        var s = document.createElement('span');
+        s.className = 'browse-tag'; s.textContent = 'ignoriert';
+        btn.appendChild(s);
+      }
+    } else {
+      btn.classList.remove('ignored');
+      var isExcluded = btn.dataset.excluded === 'true';
+      var hasChildren = btn.dataset.hasChildren === 'true';
+      if (isExcluded) btn.classList.add('excluded');
+      if (isExcluded) {
+        if (badge) { badge.className = 'browse-tag'; badge.textContent = 'ausgeschlossen'; }
+        else { var s = document.createElement('span'); s.className = 'browse-tag'; s.textContent = 'ausgeschlossen'; btn.appendChild(s); }
+      } else if (hasChildren) {
+        if (badge) { badge.className = 'browse-arrow'; badge.textContent = '▶'; }
+        else { var s = document.createElement('span'); s.className = 'browse-arrow'; s.textContent = '▶'; btn.appendChild(s); }
+      } else {
+        if (badge) badge.remove();
+      }
+    }
+  }
+
   function selectEntry(el, projectId, path) {
     document.querySelectorAll('.browse-entry').forEach(function(e) {
       e.classList.remove('selected');

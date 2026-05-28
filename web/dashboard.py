@@ -1,6 +1,7 @@
 """Dashboard: Projektverwaltung und Ordner-Browser."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import threading
@@ -305,7 +306,9 @@ async def ignore_path(
             (project_id, path),
         )
     conn.close()
-    return await folder_detail(request, path=path, project_id=project_id)
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({"archivio:browseEntryChanged": {"path": path, "ignored": True}})
+    return resp
 
 
 @router.post("/unignore", response_class=HTMLResponse)
@@ -321,7 +324,9 @@ async def unignore_path(
             (project_id, path),
         )
     conn.close()
-    return await folder_detail(request, path=path, project_id=project_id)
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({"archivio:browseEntryChanged": {"path": path, "ignored": False}})
+    return resp
 
 
 def _rematch_unassigned_mailboxes(conn) -> None:

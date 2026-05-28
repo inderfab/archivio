@@ -3,6 +3,9 @@
     {% for d in subdirs %}
     <button
       class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }}"
+      data-path="{{ d.path }}"
+      data-excluded="{{ 'true' if d.excluded else 'false' }}"
+      data-has-children="{{ 'true' if d.has_children else 'false' }}"
       onclick="
         clearFromDepth({{ project_id }}, {{ depth + 1 }});
         selectEntry(this, {{ project_id }}, '{{ d.path | replace("'", "\\'") | replace('\\', '\\\\') }}');
