@@ -438,9 +438,11 @@
   <div class="container">
     <div class="header-inner">
       <a href="/" class="logo-link">
-        <img src="/static/strut_logo.svg" alt="Strut" class="logo-img">
+        {% if office_logo() %}
+        <img src="/static/{{ office_logo() }}" alt="{{ office_name() }}" class="logo-img">
+        <span class="logo-sep"></span>
+        {% endif %}
       </a>
-      <span class="logo-sep"></span>
       <span class="logo-text">Archivio</span>
       <nav>
         <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>

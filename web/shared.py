@@ -15,7 +15,16 @@ def _office_name() -> str:
         return ""
 
 
+def _office_logo() -> str:
+    try:
+        from config import settings
+        return settings.get("office.logo", "") or ""
+    except Exception:
+        return ""
+
+
 templates.env.globals["office_name"] = _office_name
+templates.env.globals["office_logo"] = _office_logo
 
 
 def _fmt_date(iso: str | None) -> str:
