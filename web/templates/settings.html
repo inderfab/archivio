@@ -269,6 +269,30 @@
     </div>
 
   </form>
+
+  {# ── Mitarbeiter-Setup ── #}
+  <div class="settings-section" style="margin-top: 8px;">
+    <div class="settings-section-title">Mitarbeiter-Setup</div>
+    <div class="settings-body">
+      <p style="font-size:14px; color:var(--text-2); margin:0 0 14px; line-height:1.5;">
+        Der Archivio Helper ist eine kleine macOS Menubar-App für Mitarbeiter-Macs.
+        Sie ermöglicht das Öffnen von Dateien direkt aus dem Browser
+        via <code>archivio://</code>-Link.
+      </p>
+      {% if helper_available %}
+      <a href="/dashboard/download/helper"
+         style="display:inline-block; text-decoration:none;"
+         class="btn-save">
+        ⬇ Helper herunterladen (v{{ helper_version }})
+      </a>
+      {% else %}
+      <p style="font-size:13px; color:var(--text-3); margin:0;">
+        Noch kein Build vorhanden — <code>bash helper/build.sh</code> ausführen.
+      </p>
+      {% endif %}
+    </div>
+  </div>
+
 </div>
 
 <script>

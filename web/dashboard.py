@@ -43,13 +43,10 @@ async def dashboard(request: Request):
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
-    available, version = _helper_info()
     return templates.TemplateResponse("dashboard.html", {
-        "request":          request,
-        "groups":           groups,
-        "stats":            stats,
-        "helper_available": available,
-        "helper_version":   version,
+        "request": request,
+        "groups":  groups,
+        "stats":   stats,
     })
 
 
@@ -341,11 +338,14 @@ async def settings_page(
             "username": old.get("username", ""),
             "password": old.get("password", ""),
         }]
+    available, version = _helper_info()
     return templates.TemplateResponse("settings.html", {
-        "request": request,
-        "cfg":     cfg,
-        "saved":   bool(saved),
-        "restart": bool(restart),
+        "request":          request,
+        "cfg":              cfg,
+        "saved":            bool(saved),
+        "restart":          bool(restart),
+        "helper_available": available,
+        "helper_version":   version,
     })
 
 
