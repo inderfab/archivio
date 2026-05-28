@@ -1,0 +1,330 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Einstellungen{% endblock %}
+
+{% block content %}
+<style>
+  .settings-page { padding: 32px 0 64px; max-width: 680px; }
+  .settings-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 28px; letter-spacing: -.02em; }
+
+  .settings-banner {
+    padding: 10px 14px; border-radius: var(--radius);
+    font-size: 14px; margin-bottom: 20px;
+  }
+  .settings-banner.ok      { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
+  .settings-banner.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
+
+  .settings-section {
+    border: 1px solid var(--border);
+    border-radius: var(--radius);
+    margin-bottom: 20px;
+    overflow: hidden;
+  }
+  .settings-section-title {
+    font-size: 12px; font-weight: 600; text-transform: uppercase;
+    letter-spacing: .06em; color: var(--text-2);
+    padding: 10px 16px; background: var(--bg-2);
+    border-bottom: 1px solid var(--border);
+  }
+  .settings-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
+
+  .field { display: flex; flex-direction: column; gap: 4px; }
+  .field label { font-size: 13px; font-weight: 500; color: var(--text); }
+  .field .hint { font-size: 12px; color: var(--text-3); margin-top: 2px; }
+
+  .field input[type="text"],
+  .field input[type="number"],
+  .field input[type="password"],
+  .field input[type="email"],
+  .field select {
+    padding: 7px 10px; font-size: 14px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg); outline: none;
+    transition: border-color .15s;
+    width: 100%;
+  }
+  .field input:focus, .field select:focus { border-color: var(--accent); }
+
+  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field-row-3 { display: grid; grid-template-columns: 2fr 1fr 1fr; gap: 12px; }
+
+  /* Liste (base_folders, excluded_folders) */
+  .list-items { display: flex; flex-direction: column; gap: 6px; }
+  .list-item {
+    display: flex; gap: 8px; align-items: center;
+  }
+  .list-item input { flex: 1; padding: 6px 9px; font-size: 13px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg); outline: none; }
+  .list-item input:focus { border-color: var(--accent); }
+  .list-item .remove-btn {
+    flex-shrink: 0; width: 26px; height: 26px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text-3);
+    cursor: pointer; font-size: 15px; line-height: 1;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .list-item .remove-btn:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
+
+  .add-btn {
+    align-self: flex-start; margin-top: 2px;
+    padding: 5px 10px; font-size: 13px; font-family: inherit;
+    border: 1px dashed var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text-2); cursor: pointer;
+  }
+  .add-btn:hover { border-color: #9ca3af; color: var(--text); background: var(--bg-2); }
+
+  /* Mail-Test */
+  .mail-test-row { display: flex; align-items: center; gap: 12px; margin-top: 4px; }
+  .mail-test-btn {
+    padding: 6px 14px; font-size: 13px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-2); color: var(--text); cursor: pointer; white-space: nowrap;
+  }
+  .mail-test-btn:hover { background: var(--bg); border-color: #9ca3af; }
+  #mail-test-result { font-size: 13px; }
+  .test-ok  { color: #166534; }
+  .test-err { color: #991b1b; }
+
+  /* Save-Button */
+  .settings-actions { padding-top: 8px; }
+  .btn-save {
+    padding: 9px 22px; font-size: 14px; font-family: inherit; font-weight: 600;
+    background: var(--accent); color: #fff; border: none; border-radius: var(--radius);
+    cursor: pointer; letter-spacing: -.01em;
+  }
+  .btn-save:hover { opacity: .85; }
+
+  /* Logo-Vorschau */
+  .logo-preview { display: flex; align-items: center; gap: 12px; }
+  .logo-preview img { height: 32px; }
+</style>
+
+<div class="settings-page">
+  <h1>Einstellungen</h1>
+
+  {% if saved %}
+  <div class="settings-banner ok">Einstellungen gespeichert.</div>
+  {% endif %}
+  {% if restart %}
+  <div class="settings-banner warning">
+    Host oder Port geändert — bitte den Server neu starten damit die Änderung wirksam wird.
+  </div>
+  {% endif %}
+
+  <form method="POST" action="/dashboard/settings" enctype="multipart/form-data">
+
+    {# ── Büro ── #}
+    <div class="settings-section">
+      <div class="settings-section-title">Büro</div>
+      <div class="settings-body">
+
+        <div class="field">
+          <label>Büroname</label>
+          <input type="text" name="office_name"
+            value="{{ cfg.get('office', {}).get('name', '') }}">
+        </div>
+
+        <div class="field">
+          <label>Logo</label>
+          {% set logo = cfg.get('office', {}).get('logo', '') %}
+          {% if logo %}
+          <div class="logo-preview">
+            <img src="/static/{{ logo }}" alt="Logo">
+            <span class="hint">{{ logo }}</span>
+          </div>
+          {% endif %}
+          <input type="file" name="logo" accept=".svg,.png"
+            style="font-size:13px; margin-top: 4px;">
+          <span class="hint">SVG oder PNG, wird in web/static/ gespeichert</span>
+        </div>
+
+        <div class="field" style="max-width: 240px;">
+          <label>Sprache</label>
+          <select name="office_language">
+            <option value="de" {{ 'selected' if cfg.get('office', {}).get('language', 'de') == 'de' }}>
+              Deutsch
+            </option>
+            <option value="en" {{ 'selected' if cfg.get('office', {}).get('language') == 'en' }}>
+              Englisch
+            </option>
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    {# ── Server & Datenbank ── #}
+    <div class="settings-section">
+      <div class="settings-section-title">Server &amp; Datenbank</div>
+      <div class="settings-body">
+
+        <div class="field-row">
+          <div class="field">
+            <label>Host</label>
+            <input type="text" name="server_host"
+              value="{{ cfg.get('server', {}).get('host', '127.0.0.1') }}">
+          </div>
+          <div class="field">
+            <label>Port</label>
+            <input type="number" name="server_port" min="1" max="65535"
+              value="{{ cfg.get('server', {}).get('port', 8000) }}">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Datenbankpfad</label>
+          <input type="text" name="database_path"
+            value="{{ cfg.get('database', {}).get('path', 'archivio.db') }}">
+        </div>
+
+        <div class="field" style="max-width: 200px;">
+          <label>Log-Level</label>
+          <select name="log_level">
+            {% for lvl in ['DEBUG', 'INFO', 'WARNING', 'ERROR'] %}
+            <option value="{{ lvl }}"
+              {{ 'selected' if cfg.get('logging', {}).get('level', 'INFO') == lvl }}>
+              {{ lvl }}
+            </option>
+            {% endfor %}
+          </select>
+        </div>
+
+      </div>
+    </div>
+
+    {# ── Mail (IMAP) ── #}
+    <div class="settings-section">
+      <div class="settings-section-title">Mail (IMAP)</div>
+      <div class="settings-body">
+
+        <div class="field-row">
+          <div class="field">
+            <label>Server</label>
+            <input type="text" name="mail_host" id="mail_host"
+              value="{{ cfg.get('mail', {}).get('host', '') }}">
+          </div>
+          <div class="field">
+            <label>Port</label>
+            <input type="number" name="mail_port" id="mail_port" min="1" max="65535"
+              value="{{ cfg.get('mail', {}).get('port', 993) }}">
+          </div>
+        </div>
+
+        <div class="field">
+          <label>Benutzername</label>
+          <input type="text" name="mail_username" id="mail_username"
+            value="{{ cfg.get('mail', {}).get('username', '') }}">
+        </div>
+
+        <div class="field">
+          <label>Passwort</label>
+          <input type="password" name="mail_password" id="mail_password"
+            placeholder="{{ '••••••' if cfg.get('mail', {}).get('password') else 'Passwort eingeben' }}"
+            autocomplete="new-password">
+          <span class="hint">Leer lassen um bestehendes Passwort zu behalten</span>
+        </div>
+
+        <div class="mail-test-row">
+          <button type="button" class="mail-test-btn"
+            hx-post="/dashboard/settings/test-mail"
+            hx-include="#mail_host, #mail_port, #mail_username, #mail_password"
+            hx-target="#mail-test-result"
+            hx-indicator="#mail-test-result">
+            Verbindung testen
+          </button>
+          <span id="mail-test-result"></span>
+        </div>
+
+      </div>
+    </div>
+
+    {# ── Scanner ── #}
+    <div class="settings-section">
+      <div class="settings-section-title">Scanner</div>
+      <div class="settings-body">
+
+        <div class="field">
+          <label>Base-Folders</label>
+          <div class="list-items" id="base-folders-list">
+            {% for f in cfg.get('scanner', {}).get('base_folders', []) %}
+            <div class="list-item">
+              <input type="text" name="base_folder_label"
+                placeholder="Label (z.B. Projekte)" value="{{ f.get('label', '') }}">
+              <input type="text" name="base_folder_path"
+                placeholder="/Volumes/NAS/Projekte" value="{{ f.get('path', '') }}"
+                style="flex: 2;">
+              <button type="button" class="remove-btn"
+                onclick="this.closest('.list-item').remove()">×</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="add-btn" onclick="addBaseFolder()">+ Ordner hinzufügen</button>
+        </div>
+
+        <div class="field">
+          <label>Ausgeschlossene Ordner</label>
+          <div class="list-items" id="excluded-folders-list">
+            {% for f in cfg.get('scanner', {}).get('excluded_folders', []) %}
+            <div class="list-item">
+              <input type="text" name="excluded_folder"
+                placeholder="Ordnername" value="{{ f }}">
+              <button type="button" class="remove-btn"
+                onclick="this.closest('.list-item').remove()">×</button>
+            </div>
+            {% endfor %}
+          </div>
+          <button type="button" class="add-btn" onclick="addExcludedFolder()">+ Ordner hinzufügen</button>
+        </div>
+
+        <div class="field-row">
+          <div class="field">
+            <label>Hash-Algorithmus</label>
+            <select name="hash_algorithm">
+              {% for algo in ['sha256', 'md5', 'sha1'] %}
+              <option value="{{ algo }}"
+                {{ 'selected' if cfg.get('scanner', {}).get('hash_algorithm', 'sha256') == algo }}>
+                {{ algo }}
+              </option>
+              {% endfor %}
+            </select>
+          </div>
+          <div class="field">
+            <label>Batch-Grösse</label>
+            <input type="number" name="batch_size" min="1" max="1000"
+              value="{{ cfg.get('scanner', {}).get('batch_size', 100) }}">
+          </div>
+        </div>
+
+      </div>
+    </div>
+
+    <div class="settings-actions">
+      <button type="submit" class="btn-save">Speichern</button>
+    </div>
+
+  </form>
+</div>
+
+<script>
+  function addBaseFolder() {
+    var item = document.createElement('div');
+    item.className = 'list-item';
+    item.innerHTML =
+      '<input type="text" name="base_folder_label" placeholder="Label (z.B. Projekte)">' +
+      '<input type="text" name="base_folder_path" placeholder="/Volumes/NAS/Projekte" style="flex:2;">' +
+      '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
+    document.getElementById('base-folders-list').appendChild(item);
+    item.querySelector('input').focus();
+  }
+
+  function addExcludedFolder() {
+    var item = document.createElement('div');
+    item.className = 'list-item';
+    item.innerHTML =
+      '<input type="text" name="excluded_folder" placeholder="Ordnername">' +
+      '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
+    document.getElementById('excluded-folders-list').appendChild(item);
+    item.querySelector('input').focus();
+  }
+</script>
+{% endblock %}

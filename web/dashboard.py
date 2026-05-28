@@ -7,8 +7,8 @@ import threading
 from datetime import datetime, timezone
 from pathlib import Path
 
-from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import HTMLResponse
+from fastapi import APIRouter, File, Form, Query, Request, UploadFile
+from fastapi.responses import HTMLResponse, RedirectResponse
 
 from config import settings
 from db import connection
@@ -293,6 +293,131 @@ async def unignore_path(
         )
     conn.close()
     return await folder_detail(request, path=path, project_id=project_id)
+
+
+# ── Einstellungen ────────────────────────────────────────────────────────────
+
+@router.get("/settings", response_class=HTMLResponse)
+async def settings_page(
+    request: Request,
+    saved:   str = Query(default=""),
+    restart: str = Query(default=""),
+):
+    cfg = settings.load_all()
+    return templates.TemplateResponse("settings.html", {
+        "request": request,
+        "cfg":     cfg,
+        "saved":   bool(saved),
+        "restart": bool(restart),
+    })
+
+
+@router.post("/settings")
+async def settings_save(request: Request):
+    form = await request.form()
+
+    old_cfg = settings.load_all()
+    old_host = str(old_cfg.get("server", {}).get("host", ""))
+    old_port = str(old_cfg.get("server", {}).get("port", ""))
+
+    # Büro
+    office_name     = form.get("office_name", "").strip()
+    office_language = form.get("office_language", "de")
+
+    # Logo-Upload
+    logo_file = form.get("logo")
+    logo_name = old_cfg.get("office", {}).get("logo", "")
+    if logo_file and hasattr(logo_file, "filename") and logo_file.filename:
+        suffix = Path(logo_file.filename).suffix.lower()
+        if suffix in (".svg", ".png"):
+            dest = Path(__file__).parent / "static" / f"logo{suffix}"
+            content = await logo_file.read()
+            dest.write_bytes(content)
+            logo_name = f"logo{suffix}"
+
+    # Server & DB
+    server_host   = form.get("server_host", "127.0.0.1").strip()
+    server_port   = int(form.get("server_port", "8000") or "8000")
+    database_path = form.get("database_path", "archivio.db").strip()
+    log_level     = form.get("log_level", "INFO")
+
+    # Mail
+    mail_host     = form.get("mail_host", "").strip()
+    mail_port     = int(form.get("mail_port", "993") or "993")
+    mail_username = form.get("mail_username", "").strip()
+    mail_password_new = form.get("mail_password", "").strip()
+    if mail_password_new:
+        mail_password = mail_password_new
+    else:
+        mail_password = old_cfg.get("mail", {}).get("password", "")
+
+    # Scanner — base_folders
+    labels  = form.getlist("base_folder_label")
+    paths   = form.getlist("base_folder_path")
+    base_folders = [
+        {"label": l.strip(), "path": p.strip()}
+        for l, p in zip(labels, paths)
+        if p.strip()
+    ]
+
+    # Scanner — excluded_folders
+    excluded_folders = [
+        v.strip() for v in form.getlist("excluded_folder") if v.strip()
+    ]
+
+    hash_algo  = form.get("hash_algorithm", "sha256")
+    batch_size = int(form.get("batch_size", "100") or "100")
+
+    updates = {
+        "office": {
+            "name":     office_name,
+            "logo":     logo_name,
+            "language": office_language,
+        },
+        "server":   {"host": server_host, "port": server_port},
+        "database": {"path": database_path},
+        "logging":  {"level": log_level},
+        "mail": {
+            "host":     mail_host,
+            "port":     mail_port,
+            "username": mail_username,
+            "password": mail_password,
+        },
+        "scanner": {
+            "base_folders":      base_folders,
+            "excluded_folders":  excluded_folders,
+            "hash_algorithm":    hash_algo,
+            "batch_size":        batch_size,
+        },
+    }
+    settings.save(updates)
+
+    restart_required = (server_host != old_host or str(server_port) != old_port)
+    params = "?saved=1" + ("&restart=1" if restart_required else "")
+    return RedirectResponse(f"/dashboard/settings{params}", status_code=303)
+
+
+@router.post("/settings/test-mail", response_class=HTMLResponse)
+async def settings_test_mail(request: Request):
+    form     = await request.form()
+    host     = form.get("mail_host", "").strip()
+    port     = int(form.get("mail_port", "993") or "993")
+    username = form.get("mail_username", "").strip()
+    password = form.get("mail_password", "").strip()
+    if not password:
+        password = settings.get("mail.password", "")
+    try:
+        import imaplib
+        client = imaplib.IMAP4_SSL(host, port)
+        client.login(username, password)
+        client.logout()
+        return HTMLResponse(
+            '<span class="test-ok">✓ Verbindung erfolgreich</span>'
+        )
+    except Exception as exc:
+        return HTMLResponse(
+            f'<span class="test-err">✗ {exc}</span>'
+        )
 
 
 # ── Interne Helpers ───────────────────────────────────────────────────────────

@@ -23,6 +23,26 @@ def get(key: str, default=None):
     return val
 
 
+def load_all() -> dict:
+    return _load()
+
+
+def save(updates: dict):
+    existing = _load()
+    _deep_update(existing, updates)
+    with open(_CONFIG_PATH, "w", encoding="utf-8") as f:
+        yaml.dump(existing, f, allow_unicode=True, default_flow_style=False, sort_keys=False)
+    reload()
+
+
+def _deep_update(base: dict, updates: dict):
+    for k, v in updates.items():
+        if isinstance(v, dict) and isinstance(base.get(k), dict):
+            _deep_update(base[k], v)
+        else:
+            base[k] = v
+
+
 def reload():
     global _settings
     _settings = _load()

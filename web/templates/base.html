@@ -443,7 +443,8 @@
       <span class="logo-sep"></span>
       <span class="logo-text">Archivio</span>
       <nav>
-        <a href="/dashboard" class="{{ 'active' if request.url.path.startswith('/dashboard') else '' }}">Dashboard</a>
+        <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
+        <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
       </nav>
     </div>
   </div>
