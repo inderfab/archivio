@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
 
 from config import settings
 from db import connection
@@ -26,6 +26,16 @@ _mail_scan: dict = {}
 
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
 
+_DIST = Path(__file__).parent.parent / "dist"
+_VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+
+
+def _helper_info() -> tuple[bool, str]:
+    version = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "1.0.0"
+    zip_path = _DIST / f"archivio-helper-{version}.zip"
+    return zip_path.exists(), version
+
+
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
     conn = connection.get_connection()
@@ -33,11 +43,28 @@ async def dashboard(request: Request):
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
+    available, version = _helper_info()
     return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "groups":  groups,
-        "stats":   stats,
+        "request":          request,
+        "groups":           groups,
+        "stats":            stats,
+        "helper_available": available,
+        "helper_version":   version,
     })
+
+
+@router.get("/download/helper")
+async def download_helper():
+    _, version = _helper_info()
+    zip_path = _DIST / f"archivio-helper-{version}.zip"
+    if not zip_path.exists():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"archivio-helper-{version}.zip",
+    )
 
 
 # ── Projektliste (HTMX-Partial) ───────────────────────────────────────────────
