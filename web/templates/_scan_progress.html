@@ -1,0 +1,24 @@
+<div class="scan-progress-banner {{ 'spb-done' if status == 'done' else 'spb-error' if status == 'error' else 'spb-running' }}">
+  <div class="spb-header">
+    <span class="spb-icon">{% if status == "running" %}⟳{% elif status == "done" %}✓{% else %}⚠{% endif %}</span>
+    <span class="spb-title">
+      {% if status == "running" %}Scan läuft{% elif status == "done" %}Scan abgeschlossen{% else %}Scan-Fehler{% endif %}
+      — {{ project_name }}
+    </span>
+  </div>
+
+  {% if phase == "collecting" and status == "running" %}
+    <div class="spb-phase">Dateien werden gesammelt…</div>
+  {% elif total > 0 %}
+    <div class="spb-bar-wrap">
+      <div class="spb-bar-fill" style="width: {{ percent }}%"></div>
+    </div>
+    <div class="spb-counts">{{ processed }} / {{ total }} Dateien &nbsp;&nbsp; {{ percent }}%</div>
+    {% if status == "running" and current_file %}
+      <div class="spb-current">{{ current_file }}</div>
+    {% endif %}
+    <div class="spb-stats">
+      ✓ {{ new }} neu &nbsp;&nbsp; ↷ {{ skipped }} unverändert &nbsp;&nbsp; ⚠ {{ errors }} Fehler
+    </div>
+  {% endif %}
+</div>

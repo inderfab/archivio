@@ -4,6 +4,7 @@ Der Scanner darf das NAS ausschliesslich lesen.
 Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb'), Path.unlink, Path.rename.
 Erlaubt:  open(..., 'rb'), open(..., 'r'), Path.stat(), os.walk(), Path.is_file().
 """
+from __future__ import annotations
 
 import logging
 import os
@@ -25,10 +26,13 @@ def _excluded_folders() -> set[str]:
     return {f.lower() for f in settings.get("scanner.excluded_folders", [])}
 
 
-def scan_project(project_id: int, root: Path):
+def scan_project(project_id: int, root: Path, progress: dict | None = None):
     """Walk root, hash every supported file, extract text, persist to DB."""
     supported = _supported_extensions()
     excluded = _excluded_folders()
+
+    if progress is not None:
+        progress["phase"] = "collecting"
 
     batch: list[Path] = []
 
@@ -52,19 +56,43 @@ def scan_project(project_id: int, root: Path):
         ", ".join(settings.get("scanner.excluded_folders", [])),
     )
 
+    if progress is not None:
+        progress["phase"] = "processing"
+        progress["total"] = len(batch)
+
     conn = connection.get_connection()
     for path in batch:
-        _process_file(conn, project_id, path)
+        if progress is not None:
+            progress["current_file"] = path.name
+        result = _process_file(conn, project_id, path)
+        if progress is not None:
+            progress["processed"] += 1
+            if result == "new":
+                progress["new"] += 1
+            elif result == "skipped":
+                progress["skipped"] += 1
+            else:
+                progress["errors"] += 1
     conn.close()
 
 
-def _process_file(conn, project_id: int, path: Path):
+def _process_file(conn, project_id: int, path: Path) -> str:
+    """Verarbeitet eine Datei. Gibt 'new', 'skipped' oder 'error' zurück."""
     try:
         # READ-ONLY: NAS darf nie verändert werden — sha256 öffnet nur mit 'rb'
         file_hash = hasher.sha256(path)
     except OSError as exc:
         log.warning("Kann nicht lesen %s: %s", path, exc)
-        return
+        return "error"
+
+    # Bereits vollständig indexiert → nur Pfad aktualisieren, Extraktion überspringen
+    existing = conn.execute(
+        "SELECT id, extraction_status FROM documents WHERE hash=?", (file_hash,)
+    ).fetchone()
+    if existing and existing["extraction_status"] == "ok":
+        with conn:
+            queries.upsert_path(conn, existing["id"], str(path), is_primary=True)
+        return "skipped"
 
     # READ-ONLY: NAS darf nie verändert werden — stat() liest nur Metadaten
     stat = path.stat()
@@ -83,6 +111,7 @@ def _process_file(conn, project_id: int, path: Path):
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
 
     _extract_and_store(conn, doc_id, path)
+    return "new"
 
 
 def _extract_and_store(conn, doc_id: int, path: Path):

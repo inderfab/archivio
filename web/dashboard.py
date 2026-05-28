@@ -110,7 +110,18 @@ async def start_scan(request: Request, project_id: int):
         return HTMLResponse("Projekt nicht gefunden", status_code=404)
     if _scans.get(project_id, {}).get("status") == "running":
         return HTMLResponse(_scan_badge(project_id, "running"))
-    _scans[project_id] = {"status": "running", "started_at": _now()}
+    _scans[project_id] = {
+        "status":       "running",
+        "phase":        "collecting",
+        "project_name": row["name"],
+        "total":        0,
+        "processed":    0,
+        "new":          0,
+        "skipped":      0,
+        "errors":       0,
+        "current_file": "",
+        "started_at":   _now(),
+    }
     threading.Thread(
         target=_run_scan, args=(project_id, row["path"]), daemon=True
     ).start()
@@ -121,6 +132,72 @@ async def start_scan(request: Request, project_id: int):
 async def scan_status(project_id: int):
     status = _scans.get(project_id, {}).get("status", "idle")
     return HTMLResponse(_scan_badge(project_id, status))
+
+
+@router.get("/projects/{project_id}/scan-progress")
+async def scan_progress_json(project_id: int):
+    s = _scans.get(project_id, {})
+    if not s:
+        return JSONResponse({"status": "idle"})
+    total     = s.get("total", 0)
+    processed = s.get("processed", 0)
+    percent   = int(processed / total * 100) if total > 0 else 0
+    return JSONResponse({
+        "status":       s.get("status", "idle"),
+        "phase":        s.get("phase", ""),
+        "total":        total,
+        "processed":    processed,
+        "percent":      percent,
+        "new":          s.get("new", 0),
+        "skipped":      s.get("skipped", 0),
+        "errors":       s.get("errors", 0),
+        "current_file": s.get("current_file", ""),
+    })
+
+
+@router.get("/scan-progress-banner", response_class=HTMLResponse)
+async def scan_progress_banner(request: Request):
+    """Liefert den Fortschritts-Banner für HTMX-Polling. Leer wenn kein Scan aktiv."""
+    active = None
+    for pid, s in _scans.items():
+        status = s.get("status")
+        if status == "running":
+            active = (pid, s)
+            break
+        if status in ("done", "error"):
+            elapsed = _elapsed_seconds(s.get("finished_at", ""))
+            if elapsed < 10:
+                active = (pid, s)
+
+    if active is None:
+        return HTMLResponse("")
+
+    pid, s    = active
+    total     = s.get("total", 0)
+    processed = s.get("processed", 0)
+    percent   = int(processed / total * 100) if total > 0 else 0
+    return templates.TemplateResponse("_scan_progress.html", {
+        "request":      request,
+        "status":       s.get("status"),
+        "phase":        s.get("phase", ""),
+        "project_name": s.get("project_name", ""),
+        "total":        total,
+        "processed":    processed,
+        "percent":      percent,
+        "new":          s.get("new", 0),
+        "skipped":      s.get("skipped", 0),
+        "errors":       s.get("errors", 0),
+        "current_file": s.get("current_file", ""),
+    })
+
+
+def _elapsed_seconds(iso_str: str) -> float:
+    try:
+        from datetime import datetime, timezone
+        finished = datetime.fromisoformat(iso_str.replace("Z", "+00:00"))
+        return (datetime.now(timezone.utc) - finished).total_seconds()
+    except Exception:
+        return 999.0
 
 
 # ── Mail-Integration ──────────────────────────────────────────────────────────
@@ -620,16 +697,17 @@ def _run_mail_scan():
 
 
 def _run_scan(project_id: int, path: str):
+    progress = _scans[project_id]
     try:
-        scan_project(project_id, Path(path))
+        scan_project(project_id, Path(path), progress=progress)
         conn  = connection.get_connection()
         count = conn.execute(
             "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
         ).fetchone()[0]
         conn.close()
-        _scans[project_id] = {"status": "done", "count": count, "finished_at": _now()}
+        progress.update({"status": "done", "count": count, "finished_at": _now()})
     except Exception as exc:
-        _scans[project_id] = {"status": "error", "error": str(exc), "finished_at": _now()}
+        progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
 
 
 def _fmt_iso_date(iso: str | None) -> str | None:

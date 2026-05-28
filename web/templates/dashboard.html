@@ -4,6 +4,13 @@
 {% block content %}
 <div style="padding-top: 32px;">
 
+  {# ── Scan-Fortschritt ── #}
+  <div id="scan-progress-banner"
+       hx-get="/dashboard/scan-progress-banner"
+       hx-trigger="load, every 2s"
+       hx-swap="innerHTML">
+  </div>
+
   {# ── Statistiken ── #}
   <div class="stats-bar">
     <div class="stat">
