@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}Archivio{% endblock %}</title>
+  <title>{% block title %}Archivio{% if office_name() %} – {{ office_name() }}{% endif %}{% endblock %}</title>
   <script src="/static/htmx.min.js" defer></script>
   <style>
     /* ── Reset & Basis ── */

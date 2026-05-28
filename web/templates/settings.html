@@ -108,6 +108,11 @@
 
   .logo-preview { display: flex; align-items: center; gap: 12px; margin-bottom: 4px; }
   .logo-preview img { height: 32px; }
+
+  .settings-advanced > summary { cursor: pointer; list-style: none; user-select: none; }
+  .settings-advanced > summary::-webkit-details-marker { display: none; }
+  .adv-arrow { display: inline-block; transition: transform .2s; font-size: 10px; margin-right: 4px; }
+  .settings-advanced[open] .adv-arrow { transform: rotate(90deg); }
 </style>
 
 <div class="settings-page">
@@ -159,9 +164,11 @@
       </div>
     </div>
 
-    {# ── Server ── #}
-    <div class="settings-section">
-      <div class="settings-section-title">Server</div>
+    {# ── Erweiterte Einstellungen (zugeklappt) ── #}
+    <details class="settings-section settings-advanced">
+      <summary class="settings-section-title">
+        <span class="adv-arrow">▶</span> Erweiterte Einstellungen
+      </summary>
       <div class="settings-body">
         <div class="field-row" style="max-width: 360px;">
           <div class="field">
@@ -176,7 +183,7 @@
           </div>
         </div>
       </div>
-    </div>
+    </details>
 
     {# ── Mail-Konten ── #}
     <div class="settings-section">

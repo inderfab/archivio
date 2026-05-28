@@ -7,6 +7,17 @@ from fastapi.templating import Jinja2Templates
 templates = Jinja2Templates(directory="web/templates")
 
 
+def _office_name() -> str:
+    try:
+        from config import settings
+        return settings.get("office.name", "") or ""
+    except Exception:
+        return ""
+
+
+templates.env.globals["office_name"] = _office_name
+
+
 def _fmt_date(iso: str | None) -> str:
     if not iso:
         return "—"

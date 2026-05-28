@@ -72,7 +72,7 @@
         <div>
           <label class="filter-label">Von (Absender)</label>
           <input type="text" name="from_addr" class="filter-input"
-            placeholder="z.B. roger@strut.ch"
+            placeholder="Absender-Adresse"
             hx-get="/search" hx-trigger="input changed delay:400ms"
             hx-target="#results" hx-include="#search-form"
             oninput="scheduleChipUpdate()">
@@ -80,7 +80,7 @@
         <div>
           <label class="filter-label">An / CC (Empfänger)</label>
           <input type="text" name="to_addr" class="filter-input"
-            placeholder="z.B. felix@strut.ch"
+            placeholder="Empfänger-Adresse"
             hx-get="/search" hx-trigger="input changed delay:400ms"
             hx-target="#results" hx-include="#search-form"
             oninput="scheduleChipUpdate()">
