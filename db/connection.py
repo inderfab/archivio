@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import sqlite3
 from pathlib import Path
 from config import settings
@@ -11,7 +12,12 @@ def _resolve_path() -> Path:
     global _DB_PATH
     if _DB_PATH is None:
         raw = settings.get("database.path", "archivio.db")
-        _DB_PATH = Path(raw)
+        path = Path(raw)
+        if not path.is_absolute():
+            data_dir = os.environ.get("ARCHIVIO_DATA_DIR")
+            if data_dir:
+                path = Path(data_dir) / path
+        _DB_PATH = path
     return _DB_PATH
 
 

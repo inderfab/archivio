@@ -38,6 +38,12 @@ def _helper_info() -> tuple[bool, str]:
     return zip_path.exists(), version
 
 
+def _server_info() -> tuple[bool, str]:
+    version = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "1.0.0"
+    zip_path = _DIST / f"archivio-server-{version}.zip"
+    return zip_path.exists(), version
+
+
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
     conn = connection.get_connection()
@@ -63,6 +69,20 @@ async def download_helper():
         zip_path,
         media_type="application/zip",
         filename=f"archivio-helper-{version}.zip",
+    )
+
+
+@router.get("/download/server")
+async def download_server():
+    _, version = _server_info()
+    zip_path = _DIST / f"archivio-server-{version}.zip"
+    if not zip_path.exists():
+        from fastapi.responses import JSONResponse
+        return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
+    return FileResponse(
+        zip_path,
+        media_type="application/zip",
+        filename=f"archivio-server-{version}.zip",
     )
 
 

@@ -1,9 +1,17 @@
+import os
 from pathlib import Path
 import shutil
 import yaml
 
-_CONFIG_PATH  = Path(__file__).parent.parent / "config.yaml"
 _EXAMPLE_PATH = Path(__file__).parent.parent / "config.yaml.example"
+
+def _default_config_path() -> Path:
+    data_dir = os.environ.get("ARCHIVIO_DATA_DIR")
+    if data_dir:
+        return Path(data_dir) / "config.yaml"
+    return Path(__file__).parent.parent / "config.yaml"
+
+_CONFIG_PATH = _default_config_path()
 _settings: dict = {}
 
 

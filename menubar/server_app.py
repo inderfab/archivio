@@ -1,0 +1,288 @@
+"""Archivio Server – macOS Menubar-App. Startet und verwaltet den FastAPI-Server."""
+from __future__ import annotations
+
+import logging
+import os
+import shutil
+import subprocess
+import sys
+import threading
+import time
+import zipfile
+from pathlib import Path
+
+import requests
+import rumps
+
+# ── Pfade ────────────────────────────────────────────────────────────────────
+
+_HERE = Path(__file__).parent
+# Im Bundle liegt web/ neben dieser Datei (Contents/Resources/); in Dev eine Ebene höher
+_IN_BUNDLE  = (_HERE / "web").exists()
+_CODE_ROOT  = _HERE if _IN_BUNDLE else _HERE.parent
+_DATA_DIR   = (Path.home() / "Library" / "Application Support" / "Archivio") if _IN_BUNDLE else _CODE_ROOT
+_VENV       = (_HERE if _IN_BUNDLE else _CODE_ROOT) / ".venv"
+_VERSION    = _HERE / "VERSION" if _IN_BUNDLE else _CODE_ROOT / "VERSION"
+_EXAMPLE    = _CODE_ROOT / "config.yaml.example"
+
+GITHUB_REPO = "inderfab/archivio"
+ASSET_NAME  = "archivio-server"
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+
+_log_dir = Path.home() / "Library" / "Logs"
+_log_dir.mkdir(parents=True, exist_ok=True)
+logging.basicConfig(
+    filename=str(_log_dir / "ArchivioServer.log"),
+    level=logging.DEBUG,
+    format="%(asctime)s %(levelname)s %(message)s",
+)
+log = logging.getLogger(__name__)
+log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUNDLE)
+
+# ── Server-Prozess ────────────────────────────────────────────────────────────
+
+_server_proc: subprocess.Popen | None = None
+_server_lock = threading.Lock()
+
+
+def _env() -> dict:
+    env = os.environ.copy()
+    if _IN_BUNDLE:
+        env["ARCHIVIO_DATA_DIR"] = str(_DATA_DIR)
+    return env
+
+
+def _prepare_data_dir():
+    """Erstellt Datenverzeichnis und initialisiert config.yaml + DB beim ersten Start."""
+    _DATA_DIR.mkdir(parents=True, exist_ok=True)
+    (_DATA_DIR / "logs").mkdir(exist_ok=True)
+
+    config = _DATA_DIR / "config.yaml"
+    if not config.exists() and _EXAMPLE.exists():
+        shutil.copy(_EXAMPLE, config)
+        log.info("config.yaml aus Beispiel erstellt: %s", config)
+
+    db = _DATA_DIR / "archivio.db"
+    if not db.exists():
+        python = str(_VENV / "bin" / "python3")
+        schema = _CODE_ROOT / "db" / "schema.sql"
+        log.info("Datenbank initialisieren: %s", db)
+        subprocess.run(
+            [python, "-c",
+             "import sys; sys.path.insert(0,'.');from db import connection; connection.init_schema()"],
+            cwd=str(_CODE_ROOT),
+            env=_env(),
+            timeout=30,
+        )
+
+
+def _start_server():
+    global _server_proc
+    with _server_lock:
+        if _server_proc and _server_proc.poll() is None:
+            return
+        if _IN_BUNDLE:
+            _prepare_data_dir()
+        python = str(_VENV / "bin" / "python3")
+        log_path = (_DATA_DIR / "logs" / "server.log") if _IN_BUNDLE else (_CODE_ROOT / "logs" / "server.log")
+        log_path.parent.mkdir(exist_ok=True)
+        log_file = open(log_path, "a")
+        _server_proc = subprocess.Popen(
+            [python, "-m", "uvicorn", "web.main:app",
+             "--host", "0.0.0.0", "--port", "8000"],
+            cwd=str(_CODE_ROOT),
+            env=_env(),
+            stdout=log_file,
+            stderr=log_file,
+        )
+        log.info("uvicorn gestartet (pid %s)", _server_proc.pid)
+
+
+def _stop_server():
+    global _server_proc
+    with _server_lock:
+        if _server_proc:
+            try:
+                _server_proc.terminate()
+                _server_proc.wait(timeout=8)
+            except Exception as e:
+                log.warning("Server stop: %s", e)
+                _server_proc.kill()
+            _server_proc = None
+            log.info("uvicorn gestoppt")
+
+
+# ── Version ───────────────────────────────────────────────────────────────────
+
+def _local_version() -> str:
+    try:
+        return _VERSION.read_text().strip()
+    except Exception:
+        return "0.0.0"
+
+
+# ── Update ────────────────────────────────────────────────────────────────────
+
+def _check_update() -> tuple[str, str] | None:
+    """Prüft GitHub Releases. Gibt (version, download_url) zurück oder None."""
+    try:
+        resp = requests.get(
+            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+            timeout=10,
+            headers={"Accept": "application/vnd.github+json"},
+        )
+        if resp.status_code != 200:
+            return None
+        data       = resp.json()
+        remote_ver = data.get("tag_name", "").lstrip("v")
+        if not remote_ver or remote_ver == _local_version():
+            return None
+        for asset in data.get("assets", []):
+            if ASSET_NAME in asset["name"]:
+                return remote_ver, asset["browser_download_url"]
+        return None
+    except Exception as e:
+        log.warning("Update-Check fehlgeschlagen: %s", e)
+        return None
+
+
+def _do_update(version: str, url: str):
+    try:
+        resp     = requests.get(url, timeout=120, stream=True)
+        zip_path = Path("/tmp/archivio-server-update.zip")
+        with open(zip_path, "wb") as f:
+            for chunk in resp.iter_content(65536):
+                f.write(chunk)
+        # App-Bundle liegt 5 Ebenen über dem Python-Binary im venv
+        app_path = Path(sys.executable).parent.parent.parent.parent.parent
+        dest_dir = app_path.parent
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(dest_dir)
+        zip_path.unlink(missing_ok=True)
+        log.info("Update auf %s in %s installiert", version, dest_dir)
+        rumps.notification("Archivio Server", "Update installiert",
+                           f"Version {version} — bitte App neu starten.")
+    except Exception as e:
+        log.error("Update fehlgeschlagen: %s", e)
+        rumps.notification("Archivio Server", "Update fehlgeschlagen", str(e))
+
+
+# ── Autostart ─────────────────────────────────────────────────────────────────
+
+def _autostart_enabled() -> bool:
+    try:
+        r = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to return '
+             '(name of every login item) contains "Archivio Server"'],
+            capture_output=True, text=True, timeout=5,
+        )
+        return r.stdout.strip().lower() == "true"
+    except Exception:
+        return False
+
+
+def _set_autostart(enabled: bool):
+    path = str(Path(sys.executable).parent.parent.parent.parent)
+    if enabled:
+        script = (f'tell application "System Events" to make new login item '
+                  f'at end with properties {{path:"{path}", hidden:true}}')
+    else:
+        script = ('tell application "System Events" to delete '
+                  '(every login item whose name is "Archivio Server")')
+    try:
+        subprocess.run(["osascript", "-e", script], timeout=5)
+    except Exception as e:
+        log.error("Autostart fehlgeschlagen: %s", e)
+
+
+# ── App ───────────────────────────────────────────────────────────────────────
+
+_ICON = str(_HERE / "icon.png")
+
+
+class ArchivioServer(rumps.App):
+    def __init__(self):
+        super().__init__("", icon=_ICON, template=True, quit_button=None)
+
+        self._title_item    = rumps.MenuItem("Archivio Server")
+        self._version_item  = rumps.MenuItem(f"Version {_local_version()}")
+        self._server_item   = rumps.MenuItem("⬤  Server …")
+        self._nas_item      = rumps.MenuItem("⬤  NAS …")
+        self._autostart_item = rumps.MenuItem(
+            "Autostart beim Login", callback=self.toggle_autostart)
+
+        self.menu = [
+            self._title_item,
+            rumps.separator,
+            self._version_item,
+            self._server_item,
+            self._nas_item,
+            rumps.separator,
+            self._autostart_item,
+            rumps.separator,
+            rumps.MenuItem("Archivio öffnen",    callback=self.open_browser),
+            rumps.MenuItem("Auf Updates prüfen", callback=self.check_update),
+            rumps.separator,
+            rumps.MenuItem("Beenden", callback=self.quit_app),
+        ]
+        self._autostart_item.state = _autostart_enabled()
+
+        threading.Thread(target=self._boot, daemon=True).start()
+
+    def _boot(self):
+        _start_server()
+        time.sleep(3)
+        self._status_loop()
+
+    def _status_loop(self):
+        while True:
+            self._refresh_status()
+            time.sleep(30)
+
+    def _refresh_status(self):
+        try:
+            data = requests.get("http://127.0.0.1:8000/api/status", timeout=3).json()
+            server_ok = data.get("server", False)
+            nas_ok    = data.get("nas", False)
+        except Exception:
+            server_ok = False
+            nas_ok    = False
+        self._server_item.title = (
+            f"{'🟢' if server_ok else '🔴'}  Server {'läuft' if server_ok else 'offline'}")
+        self._nas_item.title = (
+            f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
+
+    def open_browser(self, _):
+        subprocess.run(["open", "http://127.0.0.1:8000"])
+
+    def toggle_autostart(self, sender):
+        new_state = sender.state != 1
+        _set_autostart(new_state)
+        sender.state = new_state
+
+    def check_update(self, _):
+        result = _check_update()
+        if result is None:
+            rumps.alert(f"Archivio Server {_local_version()} ist aktuell.")
+            return
+        version, url = result
+        if rumps.alert(
+            title="Update verfügbar",
+            message=f"Version {version} verfügbar. Jetzt installieren?",
+            ok="Installieren", cancel="Abbrechen",
+        ):
+            threading.Thread(target=_do_update, args=(version, url), daemon=True).start()
+
+    def quit_app(self, _):
+        _stop_server()
+        rumps.quit_application()
+
+
+if __name__ == "__main__":
+    try:
+        ArchivioServer().run()
+    except Exception as e:
+        log.exception("Fatal error: %s", e)
+        raise
