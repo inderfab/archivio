@@ -132,25 +132,80 @@ def _check_update() -> tuple[str, str] | None:
 
 
 def _do_update(version: str, url: str):
+    import shutil
+    log.info("Helper-Update starten: %s", version)
+    zip_path  = Path("/tmp/archivio-helper-update.zip")
+    tmp_dir   = Path("/tmp/archivio-helper-new")
+
+    # ── Download ──────────────────────────────────────────────────────────────
     try:
-        resp = requests.get(url, timeout=60, stream=True)
-        zip_path = Path("/tmp/archivio-helper-update.zip")
+        resp = requests.get(url, timeout=120, stream=True)
+        resp.raise_for_status()
         with open(zip_path, "wb") as f:
             for chunk in resp.iter_content(65536):
                 f.write(chunk)
-        # App-Bundle liegt 5 Ebenen über dem Python-Binary im venv
-        # sys.executable: .../Archivio Helper.app/Contents/Resources/.venv/bin/python3
-        app_path = Path(sys.executable).parent.parent.parent.parent.parent
-        dest_dir = app_path.parent
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(dest_dir)
-        zip_path.unlink(missing_ok=True)
-        log.info("Updated to %s in %s", version, dest_dir)
-        rumps.notification("Archivio Helper", "Update installiert",
-                           f"Version {version} — bitte App neu starten.")
+        log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
     except Exception as e:
-        log.error("Update failed: %s", e)
-        rumps.notification("Archivio Helper", "Update fehlgeschlagen", str(e))
+        log.error("Download fehlgeschlagen: %s", e)
+        rumps.alert(title="Update fehlgeschlagen", message=f"Download-Fehler:\n{e}")
+        return
+
+    # ── Entpacken ─────────────────────────────────────────────────────────────
+    try:
+        shutil.rmtree(tmp_dir, ignore_errors=True)
+        with zipfile.ZipFile(zip_path) as zf:
+            zf.extractall(tmp_dir)
+        zip_path.unlink(missing_ok=True)
+        new_app = tmp_dir / "Archivio Helper.app"
+        if not new_app.exists():
+            raise FileNotFoundError(f"Archivio Helper.app nicht in ZIP gefunden")
+    except Exception as e:
+        log.error("Entpacken fehlgeschlagen: %s", e)
+        rumps.alert(title="Update fehlgeschlagen", message=f"Entpack-Fehler:\n{e}")
+        return
+
+    # ── App ersetzen ──────────────────────────────────────────────────────────
+    # sys.executable: .../Archivio Helper.app/Contents/Resources/.venv/bin/python3
+    app_path = Path(sys.executable).parent.parent.parent.parent.parent
+    log.info("Ersetze %s", app_path)
+    try:
+        shutil.rmtree(app_path)
+        shutil.copytree(str(new_app), str(app_path))
+        log.info("App ersetzt (ohne Admin)")
+    except PermissionError:
+        # /Applications benötigt Admin-Rechte → osascript-Dialog
+        log.info("Permission denied, versuche mit Admin-Rechten")
+        src = str(new_app).replace("\\", "\\\\").replace('"', '\\"')
+        dst = str(app_path).replace("\\", "\\\\").replace('"', '\\"')
+        r = subprocess.run(
+            ["osascript", "-e",
+             f'do shell script "rm -rf \\"{dst}\\" && cp -r \\"{src}\\" \\"{dst}\\"" '
+             f'with administrator privileges'],
+            capture_output=True, text=True,
+        )
+        if r.returncode != 0:
+            log.error("Admin-Kopie fehlgeschlagen: %s", r.stderr)
+            rumps.alert(title="Update fehlgeschlagen",
+                        message=f"Konnte App nicht ersetzen:\n{r.stderr or 'Abgebrochen'}")
+            return
+    except Exception as e:
+        log.error("App-Ersatz fehlgeschlagen: %s", e)
+        rumps.alert(title="Update fehlgeschlagen", message=str(e))
+        return
+
+    shutil.rmtree(tmp_dir, ignore_errors=True)
+    log.info("Update %s installiert", version)
+
+    # ── Neustart ──────────────────────────────────────────────────────────────
+    restart = Path("/tmp/archivio-helper-restart.sh")
+    restart.write_text(f'#!/bin/bash\nsleep 2\nopen "{app_path}"\n')
+    restart.chmod(0o755)
+    subprocess.Popen(["bash", str(restart)])
+    rumps.alert(
+        title="Update installiert",
+        message=f"Version {version} wurde installiert. Der Helper wird neu gestartet.",
+    )
+    rumps.quit_application()
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
