@@ -93,7 +93,7 @@ async def search_ai(
     vec_sources = vector_search(conn, qvec, project_id=project_id, limit=8)
     seen_ids = {s["id"] for s in kw_sources}
     sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
-    sources  = sources[:12]
+    sources  = sources[:8]
 
     error = None
     if not sources:

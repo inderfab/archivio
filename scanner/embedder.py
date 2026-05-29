@@ -279,22 +279,29 @@ def keyword_search_chunks(
 
 def llm_answer(question: str, chunks: list[dict]) -> str:
     context = "\n\n---\n\n".join(
-        f"[{c['filename']}, Seite {c.get('page_number') or '?'}]\n{c['content']}"
+        f"[{c['filename']}]\n{c['content']}"
         for c in chunks
     )
     prompt = (
-        "Du bist ein präziser Assistent für ein Schweizer Architekturbüro. "
-        "Beantworte die Frage ausschliesslich anhand der folgenden Dokumentenausschnitte. "
-        "Wenn die Information nicht eindeutig vorhanden ist, sage das klar. "
-        "Antworte auf Deutsch.\n\n"
-        f"Kontext:\n{context}\n\n"
+        "Du bist ein präziser Assistent für ein Schweizer Architekturbüro.\n"
+        "Beantworte AUSSCHLIESSLICH die folgende Frage in 1–3 klaren Sätzen.\n"
+        "Stütze dich NUR auf die unten stehenden Dokumentenausschnitte.\n"
+        "Erfinde keine Fragen und gib keine weiteren Erklärungen.\n"
+        "Wenn die Antwort nicht im Kontext steht, antworte: "
+        "«Diese Information ist in den Dokumenten nicht vorhanden.»\n\n"
+        f"Dokumentenausschnitte:\n{context}\n\n"
         f"Frage: {question}\n\n"
-        "Antwort:"
+        "Antwort (kurz und direkt):"
     )
     try:
         resp = httpx.post(
             f"{OLLAMA_URL}/api/generate",
-            json={"model": LLM_MODEL, "prompt": prompt, "stream": False},
+            json={
+                "model":   LLM_MODEL,
+                "prompt":  prompt,
+                "stream":  False,
+                "options": {"temperature": 0.1, "num_predict": 300},
+            },
             timeout=180,
         )
         resp.raise_for_status()
