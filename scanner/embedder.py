@@ -105,35 +105,26 @@ def vector_search(
     limit: int = 8,
 ) -> list[dict]:
     """Findet die ähnlichsten Chunks per Cosine-Similarity."""
+    base_sql = """
+        SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
+               dc.embedding,
+               d.filename, d.extension, d.project_id,
+               dp.path  AS filepath,
+               p.name   AS project_name
+        FROM document_chunks dc
+        JOIN documents d        ON d.id  = dc.document_id
+        JOIN projects  p        ON p.id  = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE dc.embedding IS NOT NULL
+    """
     if project_id:
         try:
-            rows = conn.execute("""
-                SELECT dc.id, dc.content, dc.page_number,
-                       dc.embedding,
-                       d.filename, d.extension, d.project_id,
-                       dp.path  AS filepath,
-                       p.name   AS project_name
-                FROM document_chunks dc
-                JOIN documents d        ON d.id  = dc.document_id
-                JOIN projects  p        ON p.id  = d.project_id
-                LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-                WHERE dc.embedding IS NOT NULL AND d.project_id = ?
-            """, (int(project_id),)).fetchall()
+            rows = conn.execute(base_sql + " AND d.project_id = ?",
+                                (int(project_id),)).fetchall()
         except (ValueError, TypeError):
             rows = []
     else:
-        rows = conn.execute("""
-            SELECT dc.id, dc.content, dc.page_number,
-                   dc.embedding,
-                   d.filename, d.extension, d.project_id,
-                   dp.path  AS filepath,
-                   p.name   AS project_name
-            FROM document_chunks dc
-            JOIN documents d        ON d.id  = dc.document_id
-            JOIN projects  p        ON p.id  = d.project_id
-            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-            WHERE dc.embedding IS NOT NULL
-        """).fetchall()
+        rows = conn.execute(base_sql).fetchall()
 
     if not rows:
         return []
@@ -144,11 +135,31 @@ def vector_search(
     scores   = embeddings @ query_vec          # cosine similarity (vecs already normalised)
     top_idx  = np.argsort(scores)[::-1][:limit]
 
+    # Für jeden Treffer den nächsten Chunk holen (Kontext über Chunk-Grenzen hinweg)
+    chunk_ids = [rows[i]["id"] for i in top_idx]
+    if chunk_ids:
+        placeholders = ",".join("?" * len(chunk_ids))
+        next_chunks = {
+            r[0]: r[1]
+            for r in conn.execute(f"""
+                SELECT dc_cur.id, dc_nxt.content
+                FROM document_chunks dc_cur
+                JOIN document_chunks dc_nxt
+                  ON dc_nxt.document_id = dc_cur.document_id
+                 AND dc_nxt.chunk_index  = dc_cur.chunk_index + 1
+                WHERE dc_cur.id IN ({placeholders})
+            """, chunk_ids).fetchall()
+        }
+    else:
+        next_chunks = {}
+
     results = []
     for i in top_idx:
         r = dict(rows[i])
         r["score"] = float(scores[i])
         r.pop("embedding", None)
+        if r["id"] in next_chunks:
+            r["content"] = r["content"].rstrip() + "\n" + next_chunks[r["id"]]
         results.append(r)
     return results
 
