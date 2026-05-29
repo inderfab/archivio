@@ -79,11 +79,29 @@ async def search_ai(
             "error":    status["reason"],
         })
 
-    conn     = connection.get_connection()
-    qvec     = embed_query(q)
-    sources  = vector_search(conn, qvec, project_id=project_id) if qvec is not None else []
-    conn.close()
+    conn  = connection.get_connection()
+    qvec  = embed_query(q)
+    if qvec is None:
+        conn.close()
+        return templates.TemplateResponse("_ai_answer.html", {
+            "request": request, "question": q, "answer": None, "sources": [],
+            "error": "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?",
+        })
 
+    sources = vector_search(conn, qvec, project_id=project_id)
+
+    error = None
+    if not sources:
+        has_embeddings = conn.execute(
+            "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
+        ).fetchone()
+        error = (
+            "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
+            if not has_embeddings else
+            "Keine relevanten Dokumente für diese Frage gefunden."
+        )
+
+    conn.close()
     answer = llm_answer(q, sources) if sources else None
 
     return templates.TemplateResponse("_ai_answer.html", {
@@ -91,7 +109,7 @@ async def search_ai(
         "question": q,
         "answer":   answer,
         "sources":  sources,
-        "error":    None if sources else "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren.",
+        "error":    error,
     })
 
 # ── Routen ────────────────────────────────────────────────────────────────────
