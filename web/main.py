@@ -56,6 +56,44 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
 app.include_router(api_router)
 
+# ── KI-Suche ──────────────────────────────────────────────────────────────────
+
+@app.get("/search/ai", response_class=HTMLResponse)
+async def search_ai(
+    request:    Request,
+    q:          str = Query(default=""),
+    project_id: str = Query(default=""),
+):
+    if not q.strip():
+        return HTMLResponse("")
+
+    from scanner.embedder import ai_status, embed_query, vector_search, llm_answer
+
+    status = ai_status()
+    if not status["ok"]:
+        return templates.TemplateResponse("_ai_answer.html", {
+            "request":  request,
+            "question": q,
+            "answer":   None,
+            "sources":  [],
+            "error":    status["reason"],
+        })
+
+    conn     = connection.get_connection()
+    qvec     = embed_query(q)
+    sources  = vector_search(conn, qvec, project_id=project_id) if qvec is not None else []
+    conn.close()
+
+    answer = llm_answer(q, sources) if sources else None
+
+    return templates.TemplateResponse("_ai_answer.html", {
+        "request":  request,
+        "question": q,
+        "answer":   answer,
+        "sources":  sources,
+        "error":    None if sources else "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren.",
+    })
+
 # ── Routen ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)

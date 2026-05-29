@@ -70,6 +70,52 @@ async def scan_all():
     return JSONResponse({"ok": True, "projects_started": started})
 
 
+@router.get("/ai/status")
+async def ai_status():
+    from scanner.embedder import ai_status as _status
+    return JSONResponse(_status())
+
+
+_backfill_state: dict = {"running": False, "done": 0, "total": 0, "error": ""}
+
+
+@router.post("/ai/backfill")
+async def ai_backfill():
+    """Berechnet fehlende Embeddings für alle vorhandenen Chunks im Hintergrund."""
+    if _backfill_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Läuft bereits"})
+
+    def _run():
+        from scanner.embedder import is_ollama_running, embed_document_chunks
+        _backfill_state.update({"running": True, "done": 0, "total": 0, "error": ""})
+        conn = connection.get_connection()
+        try:
+            if not is_ollama_running():
+                _backfill_state["error"] = "Ollama nicht erreichbar"
+                return
+            doc_ids = conn.execute("""
+                SELECT DISTINCT document_id FROM document_chunks
+                WHERE embedding IS NULL
+            """).fetchall()
+            _backfill_state["total"] = len(doc_ids)
+            for row in doc_ids:
+                embed_document_chunks(conn, row["document_id"])
+                _backfill_state["done"] += 1
+        except Exception as e:
+            _backfill_state["error"] = str(e)
+        finally:
+            _backfill_state["running"] = False
+            conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Backfill gestartet"})
+
+
+@router.get("/ai/backfill/status")
+async def ai_backfill_status():
+    return JSONResponse(_backfill_state)
+
+
 @router.post("/update")
 async def update_server():
     """git pull + pip install, danach LaunchAgent-Neustart."""

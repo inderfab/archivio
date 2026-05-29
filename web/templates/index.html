@@ -10,6 +10,16 @@
       autocomplete="off" autofocus
       hx-get="/search" hx-trigger="input changed delay:300ms, search"
       hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
+
+    <label class="ai-toggle-wrap" title="Zwischen normaler Suche und KI-Suche wechseln">
+      <span class="ai-toggle-label ai-toggle-left">Suche</span>
+      <span class="ai-toggle-track">
+        <input type="checkbox" id="ai-toggle" style="display:none"
+          onchange="switchSearchMode(this.checked)">
+        <span class="ai-toggle-thumb"></span>
+      </span>
+      <span class="ai-toggle-label ai-toggle-right">KI-Suche</span>
+    </label>
   </div>
 
   {# ── Basis-Filter ── #}
@@ -232,6 +242,26 @@ function togglePreview(btn, docId, q) {
         { target: '#preview-'+docId, swap: 'innerHTML' });
     }
   }
+}
+
+function switchSearchMode(aiOn) {
+  var input  = document.getElementById('q');
+  var wrap   = document.querySelector('.ai-toggle-wrap');
+  var thumb  = document.querySelector('.ai-toggle-thumb');
+  if (aiOn) {
+    wrap.classList.add('ai-on');
+    input.setAttribute('hx-get', '/search/ai');
+    input.setAttribute('hx-trigger', 'search');
+    input.placeholder = 'Frage stellen und Enter drücken…';
+  } else {
+    wrap.classList.remove('ai-on');
+    input.setAttribute('hx-get', '/search');
+    input.setAttribute('hx-trigger', 'input changed delay:300ms, search');
+    input.placeholder = 'Dokumente und Mails durchsuchen…';
+  }
+  htmx.process(input);
+  // Ergebnisse leeren beim Wechsel
+  document.getElementById('results').innerHTML = '';
 }
 
 function copyPath(btn, text) {
