@@ -191,11 +191,14 @@ class ArchivioHelper(rumps.App):
     def __init__(self):
         super().__init__("", icon=_ICON, template=True, quit_button=None)
         cfg = _load_config()
-        self._server_url = cfg.get("server_url", "http://localhost:8000")
+        self._server_url     = cfg.get("server_url", "http://localhost:8000")
+        self._pending_update: tuple[str, str] | None = None
 
         self._title_item     = rumps.MenuItem("Archivio Helper")
         self._version_item   = rumps.MenuItem(f"Version {_local_version()}")
         self._status_item    = rumps.MenuItem("⬤  Verbindung …")
+        self._update_item    = rumps.MenuItem("Auf Updates prüfen",
+                                              callback=self._update_action)
         self._server_item    = rumps.MenuItem(
             f"Server: {self._server_url}", callback=self.change_server)
         self._autostart_item = rumps.MenuItem(
@@ -206,26 +209,82 @@ class ArchivioHelper(rumps.App):
             rumps.separator,
             self._version_item,
             self._status_item,
+            self._update_item,
             rumps.separator,
             self._server_item,
             self._autostart_item,
             rumps.separator,
-            rumps.MenuItem("Archivio öffnen",      callback=self.open_browser),
-            rumps.MenuItem("Auf Updates prüfen",   callback=self.check_update),
+            rumps.MenuItem("Archivio öffnen", callback=self.open_browser),
             rumps.separator,
             rumps.MenuItem("Beenden", callback=rumps.quit_application),
         ]
-        # State nach Menu-Setup setzen (rumps braucht das)
         self._autostart_item.state = _autostart_enabled()
 
         _register_url_handler()
         threading.Thread(target=self._status_loop, daemon=True).start()
+        # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
+        threading.Thread(target=self._delayed_update_check, daemon=True).start()
         log.info("ArchivioHelper ready")
+
+    def _delayed_update_check(self):
+        import time
+        time.sleep(5)
+        self._silent_update_check()
+
+    def _silent_update_check(self):
+        result = _check_update()
+        if result:
+            version, url = result
+            self._pending_update = (version, url)
+            self._update_item.title = f"🟡  Update: v{version} installieren"
+            rumps.notification(
+                "Archivio Helper",
+                f"Update verfügbar: Version {version}",
+                "Im Menü auf «Update installieren» klicken.",
+            )
+            log.info("Update verfügbar: %s", version)
+        else:
+            self._pending_update = None
+            self._update_item.title = "Auf Updates prüfen"
+
+    def _update_action(self, _):
+        if self._pending_update:
+            version, url = self._pending_update
+            if rumps.alert(
+                title="Update verfügbar",
+                message=f"Version {version} verfügbar. Jetzt installieren?",
+                ok="Installieren", cancel="Abbrechen",
+            ):
+                threading.Thread(
+                    target=_do_update, args=(version, url), daemon=True
+                ).start()
+        else:
+            # Manuell prüfen
+            result = _check_update()
+            if result is None:
+                rumps.alert(f"Archivio Helper {_local_version()} ist aktuell.")
+            else:
+                version, url = result
+                self._pending_update = (version, url)
+                self._update_item.title = f"🟡  Update: v{version} installieren"
+                if rumps.alert(
+                    title="Update verfügbar",
+                    message=f"Version {version} verfügbar. Jetzt installieren?",
+                    ok="Installieren", cancel="Abbrechen",
+                ):
+                    threading.Thread(
+                        target=_do_update, args=(version, url), daemon=True
+                    ).start()
 
     def _status_loop(self):
         import time
+        tick = 0
         while True:
             self._refresh_status()
+            tick += 1
+            # Update-Check alle 30 Minuten
+            if tick % 60 == 0:
+                self._silent_update_check()
             time.sleep(30)
 
     def _refresh_status(self):
@@ -268,19 +327,6 @@ class ArchivioHelper(rumps.App):
         new_state = sender.state != 1  # 1 = aktiv → deaktivieren, sonst aktivieren
         _set_autostart(new_state)
         sender.state = new_state
-
-    def check_update(self, _):
-        result = _check_update()
-        if result is None:
-            rumps.alert(f"Archivio Helper {_local_version()} ist aktuell.")
-            return
-        version, url = result
-        if rumps.alert(
-            title="Update verfügbar",
-            message=f"Version {version} verfügbar. Jetzt installieren?",
-            ok="Installieren", cancel="Abbrechen",
-        ):
-            threading.Thread(target=_do_update, args=(version, url), daemon=True).start()
 
 
 if __name__ == "__main__":

@@ -277,22 +277,6 @@
 
   </form>
 
-  {# ── Server-Update ── #}
-  <div class="settings-section" style="margin-top: 8px;">
-    <div class="settings-section-title">Server-Update</div>
-    <div class="settings-body">
-      <div style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
-        <div>
-          <span style="font-size:13px; color:var(--text-2);">Version:</span>
-          <code id="srv-version" style="font-size:13px; margin-left:4px;">…</code>
-        </div>
-        <button type="button" class="btn-save" style="font-weight:500;"
-          onclick="runUpdate(this)">↑ Jetzt aktualisieren</button>
-        <span id="update-msg" style="font-size:13px; color:var(--text-2);"></span>
-      </div>
-    </div>
-  </div>
-
   {# ── Mitarbeiter-Setup ── #}
   <div class="settings-section" style="margin-top: 8px;">
     <div class="settings-section-title">Mitarbeiter-Setup</div>
@@ -401,27 +385,5 @@ function addExcludedFolder() {
   item.querySelector('input').focus();
 }
 
-// ── Server-Version laden ──
-fetch('/api/version').then(r => r.json()).then(d => {
-  var el = document.getElementById('srv-version');
-  if (el) el.textContent = d.version || '—';
-});
-
-// ── Update auslösen ──
-function runUpdate(btn) {
-  var msg = document.getElementById('update-msg');
-  btn.disabled = true;
-  msg.textContent = 'Lädt Update…';
-  fetch('/api/update', { method: 'POST' })
-    .then(r => r.json())
-    .then(function(d) {
-      msg.textContent = 'Update läuft — Server startet in wenigen Sekunden neu.';
-      setTimeout(function() { location.reload(); }, 15000);
-    })
-    .catch(function() {
-      msg.textContent = 'Fehler beim Update.';
-      btn.disabled = false;
-    });
-}
 </script>
 {% endblock %}
