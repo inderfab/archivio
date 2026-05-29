@@ -127,6 +127,8 @@ async def search_ai(
 
     conn.close()
     answer = llm_answer(q, sources) if sources else None
+    if answer and sources:
+        sources = _rerank_by_answer(sources, answer)
 
     return templates.TemplateResponse("_ai_answer.html", {
         "request":  request,
@@ -259,6 +261,19 @@ async def preview(request: Request, document_id: int, q: str = Query(default="")
 
 
 # ── Such-Logik ────────────────────────────────────────────────────────────────
+
+def _rerank_by_answer(sources: list, answer: str) -> list:
+    """Sortiert Quellen: der Chunk mit den meisten Antwort-Wörtern kommt zuerst."""
+    answer_words = {w for w in re.findall(r'\b\w{4,}\b', answer.lower()) if w}
+    if not answer_words:
+        return sources
+
+    def score(s):
+        content = (s.get("content") or "").lower()
+        return sum(1 for w in answer_words if w in content)
+
+    return sorted(sources, key=score, reverse=True)
+
 
 def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
