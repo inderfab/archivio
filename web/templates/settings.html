@@ -416,8 +416,7 @@ function runUpdate(btn) {
     .then(r => r.json())
     .then(function(d) {
       msg.textContent = 'Update läuft — Server startet in wenigen Sekunden neu.';
-      // Nach 8s neu laden (Server ist dann wieder oben)
-      setTimeout(function() { location.reload(); }, 8000);
+      setTimeout(function() { location.reload(); }, 15000);
     })
     .catch(function() {
       msg.textContent = 'Fehler beim Update.';

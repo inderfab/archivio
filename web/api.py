@@ -1,8 +1,10 @@
 """JSON-API."""
 from __future__ import annotations
 
+import os
 import subprocess
 import threading
+import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -124,60 +126,124 @@ async def update_log():
     return JSONResponse({"log": _update_log[-50:]})
 
 
+_GITHUB_REPO = "inderfab/archivio"
+_in_bundle   = bool(os.environ.get("ARCHIVIO_DATA_DIR"))
+
+
 @router.post("/update")
 async def update_server():
-    """git pull + pip install, danach LaunchAgent-Neustart."""
-    project_root = Path(__file__).parent.parent
+    """Bundle-Modus: GitHub-Release herunterladen + App ersetzen + Neustart.
+       Dev-Modus: git pull + pip install + LaunchAgent-Neustart."""
     _update_log.clear()
 
     def _log(msg: str):
         _update_log.append(msg)
+        import logging
+        logging.getLogger(__name__).info(msg)
 
-    def _run():
-        _log("git pull starten…")
-        try:
-            r = subprocess.run(
-                ["git", "pull"], cwd=project_root, timeout=60,
-                capture_output=True, text=True,
-            )
-            _log(f"git pull stdout: {r.stdout.strip()}")
-            if r.stderr.strip():
-                _log(f"git pull stderr: {r.stderr.strip()}")
-            _log(f"git pull returncode: {r.returncode}")
-        except Exception as e:
-            _log(f"git pull Fehler: {e}")
+    if _in_bundle:
+        def _run_bundle():
+            import requests as _req
+            _log("Prüfe GitHub Releases…")
+            try:
+                resp = _req.get(
+                    f"https://api.github.com/repos/{_GITHUB_REPO}/releases/latest",
+                    timeout=10,
+                    headers={"Accept": "application/vnd.github+json"},
+                )
+                if resp.status_code != 200:
+                    _log(f"GitHub: HTTP {resp.status_code}")
+                    return
+                data = resp.json()
+                remote_ver = data.get("tag_name", "").lstrip("v")
+                current = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
+                _log(f"Lokal: {current}  →  GitHub: {remote_ver or '(kein Release)'}")
 
-        _log("pip install starten…")
-        try:
-            venv_pip = project_root / ".venv" / "bin" / "pip"
-            r = subprocess.run(
-                [str(venv_pip), "install", "-q", "-r", "requirements.txt"],
-                cwd=project_root, timeout=120,
-                capture_output=True, text=True,
-            )
-            _log(f"pip returncode: {r.returncode}")
-            if r.stderr.strip():
-                _log(f"pip stderr: {r.stderr.strip()[:300]}")
-        except Exception as e:
-            _log(f"pip Fehler: {e}")
+                download_url = next(
+                    (a["browser_download_url"] for a in data.get("assets", [])
+                     if "archivio-server" in a["name"] and a["name"].endswith(".zip")),
+                    None,
+                )
+                if not download_url:
+                    _log("Kein ZIP-Asset im Release — bitte .pkg manuell installieren.")
+                    return
 
-        try:
-            subprocess.run(["bash", "helper/build.sh"], cwd=project_root, timeout=120)
-        except Exception:
-            pass
+                _log("Lade Update herunter…")
+                zip_resp = _req.get(download_url, timeout=180, stream=True)
+                zip_path = Path("/tmp/archivio-server-update.zip")
+                with open(zip_path, "wb") as f:
+                    for chunk in zip_resp.iter_content(65536):
+                        f.write(chunk)
+                _log("ZIP heruntergeladen")
 
-        _log("LaunchAgent stoppen…")
-        for label in ("io.archivio.server", "ch.strut.archivio"):
+                # Bundle: api.py liegt in Contents/Resources/web/
+                code_root  = Path(__file__).parent.parent   # Contents/Resources
+                app_bundle = code_root.parent.parent        # Archivio Server.app
+                dest_dir   = app_bundle.parent              # /Applications/
+                with zipfile.ZipFile(zip_path) as zf:
+                    zf.extractall(dest_dir)
+                zip_path.unlink(missing_ok=True)
+                _log(f"Update nach {dest_dir} extrahiert")
+
+                # App neu starten (3 Sek. Verzögerung damit der Response noch gesendet wird)
+                restart = Path("/tmp/archivio-restart.sh")
+                restart.write_text(
+                    "#!/bin/bash\nsleep 4\n"
+                    "osascript -e 'quit app \"Archivio Server\"' 2>/dev/null || true\n"
+                    "sleep 2\nopen -a 'Archivio Server'\n"
+                )
+                restart.chmod(0o755)
+                subprocess.Popen(["bash", str(restart)])
+                _log("Server wird neu gestartet…")
+            except Exception as e:
+                _log(f"Update-Fehler: {e}")
+
+        threading.Thread(target=_run_bundle, daemon=True).start()
+
+    else:
+        project_root = Path(__file__).parent.parent
+
+        def _run_dev():
+            _log("git pull starten…")
             try:
                 r = subprocess.run(
-                    ["launchctl", "stop", label], timeout=5,
+                    ["git", "pull"], cwd=project_root, timeout=60,
                     capture_output=True, text=True,
                 )
-                _log(f"launchctl stop {label}: rc={r.returncode}")
-                if r.returncode == 0:
-                    break
+                _log(f"git pull stdout: {r.stdout.strip()}")
+                if r.stderr.strip():
+                    _log(f"git pull stderr: {r.stderr.strip()}")
+                _log(f"git pull returncode: {r.returncode}")
             except Exception as e:
-                _log(f"launchctl Fehler ({label}): {e}")
+                _log(f"git pull Fehler: {e}")
 
-    threading.Thread(target=_run, daemon=True).start()
+            _log("pip install starten…")
+            try:
+                venv_pip = project_root / ".venv" / "bin" / "pip"
+                r = subprocess.run(
+                    [str(venv_pip), "install", "-q", "-r", "requirements.txt"],
+                    cwd=project_root, timeout=120,
+                    capture_output=True, text=True,
+                )
+                _log(f"pip returncode: {r.returncode}")
+                if r.stderr.strip():
+                    _log(f"pip stderr: {r.stderr.strip()[:300]}")
+            except Exception as e:
+                _log(f"pip Fehler: {e}")
+
+            _log("LaunchAgent stoppen…")
+            for label in ("io.archivio.server", "ch.strut.archivio"):
+                try:
+                    r = subprocess.run(
+                        ["launchctl", "stop", label], timeout=5,
+                        capture_output=True, text=True,
+                    )
+                    _log(f"launchctl stop {label}: rc={r.returncode}")
+                    if r.returncode == 0:
+                        break
+                except Exception as e:
+                    _log(f"launchctl Fehler ({label}): {e}")
+
+        threading.Thread(target=_run_dev, daemon=True).start()
+
     return JSONResponse({"ok": True, "message": "Update läuft, Server startet neu…"})

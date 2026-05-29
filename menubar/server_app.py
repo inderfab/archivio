@@ -248,8 +248,8 @@ def _do_update(version: str, url: str):
         with open(zip_path, "wb") as f:
             for chunk in resp.iter_content(65536):
                 f.write(chunk)
-        # App-Bundle liegt 5 Ebenen über dem Python-Binary im venv
-        app_path = Path(sys.executable).parent.parent.parent.parent.parent
+        # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
+        app_path = _HERE.parent.parent
         dest_dir = app_path.parent
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(dest_dir)
