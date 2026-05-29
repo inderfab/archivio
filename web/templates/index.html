@@ -10,6 +10,16 @@
       autocomplete="off" autofocus
       hx-get="/search" hx-trigger="input changed delay:300ms, search"
       hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
+
+    <label class="ai-toggle-wrap" title="Zwischen normaler Suche und KI-Suche wechseln">
+      <span class="ai-toggle-label ai-toggle-left">Suche</span>
+      <span class="ai-toggle-track">
+        <input type="checkbox" id="ai-toggle" style="display:none"
+          onchange="switchSearchMode(this.checked)">
+        <span class="ai-toggle-thumb"></span>
+      </span>
+      <span class="ai-toggle-label ai-toggle-right">KI-Suche</span>
+    </label>
   </div>
 
   {# ── Basis-Filter ── #}
@@ -232,6 +242,70 @@ function togglePreview(btn, docId, q) {
         { target: '#preview-'+docId, swap: 'innerHTML' });
     }
   }
+}
+
+var _aiTimer = null;
+var _aiStep  = 0;
+var AI_STEPS = [
+  'Durchsucht Dokumente…',
+  'Analysiert relevante Abschnitte…',
+  'Generiert Antwort…',
+];
+
+function _renderAiLoading() {
+  var html = '<div class="ai-thinking">';
+  AI_STEPS.forEach(function(label, i) {
+    var cls = i < _aiStep ? 'done' : (i === _aiStep ? 'active' : '');
+    html += '<div class="ai-thinking-step ' + cls + '">'
+          + '<span class="ai-thinking-dot"></span>'
+          + '<span>' + label + '</span></div>';
+  });
+  html += '</div>';
+  document.getElementById('results').innerHTML = html;
+}
+
+function _showAiLoading() {
+  _aiStep = 0;
+  _renderAiLoading();
+  clearInterval(_aiTimer);
+  _aiTimer = setInterval(function() {
+    if (_aiStep < AI_STEPS.length - 1) { _aiStep++; _renderAiLoading(); }
+  }, 4000);
+}
+
+function _clearAiLoading() {
+  clearInterval(_aiTimer);
+  _aiTimer = null;
+}
+
+document.body.addEventListener('htmx:beforeRequest', function(evt) {
+  if (evt.detail.elt.id !== 'q') return;
+  if (!document.getElementById('ai-toggle').checked) return;
+  _showAiLoading();
+});
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+  if (evt.detail.elt.id !== 'q') return;
+  _clearAiLoading();
+});
+
+function switchSearchMode(aiOn) {
+  var input  = document.getElementById('q');
+  var wrap   = document.querySelector('.ai-toggle-wrap');
+  var thumb  = document.querySelector('.ai-toggle-thumb');
+  if (aiOn) {
+    wrap.classList.add('ai-on');
+    input.setAttribute('hx-get', '/search/ai');
+    input.setAttribute('hx-trigger', 'search');
+    input.placeholder = 'Frage stellen und Enter drücken…';
+  } else {
+    wrap.classList.remove('ai-on');
+    input.setAttribute('hx-get', '/search');
+    input.setAttribute('hx-trigger', 'input changed delay:300ms, search');
+    input.placeholder = 'Dokumente und Mails durchsuchen…';
+  }
+  htmx.process(input);
+  // Ergebnisse leeren beim Wechsel
+  document.getElementById('results').innerHTML = '';
 }
 
 function copyPath(btn, text) {

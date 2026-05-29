@@ -14,6 +14,9 @@ from pathlib import Path
 import requests
 import rumps
 
+OLLAMA_EMBED_MODEL = "nomic-embed-text"
+OLLAMA_LLM_MODEL   = "llama3.2:3b"
+
 # ── Pfade ────────────────────────────────────────────────────────────────────
 
 _HERE = Path(__file__).parent
@@ -39,6 +42,97 @@ logging.basicConfig(
 )
 log = logging.getLogger(__name__)
 log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUNDLE)
+
+# ── Ollama-Verwaltung ─────────────────────────────────────────────────────────
+
+_ollama_proc: subprocess.Popen | None = None
+_ollama_lock = threading.Lock()
+_OLLAMA_BIN  = shutil.which("ollama") or "/usr/local/bin/ollama"
+
+
+def _is_ollama_running() -> bool:
+    try:
+        requests.get("http://localhost:11434/", timeout=2)
+        return True
+    except Exception:
+        return False
+
+
+def _start_ollama():
+    global _ollama_proc
+    with _ollama_lock:
+        if _is_ollama_running():
+            return
+        if not Path(_OLLAMA_BIN).exists():
+            log.warning("Ollama nicht gefunden (%s)", _OLLAMA_BIN)
+            return
+        try:
+            _ollama_proc = subprocess.Popen(
+                [_OLLAMA_BIN, "serve"],
+                stdout=subprocess.DEVNULL,
+                stderr=subprocess.DEVNULL,
+            )
+            log.info("ollama serve gestartet (pid %s)", _ollama_proc.pid)
+            # kurz warten bis Ollama bereit
+            for _ in range(20):
+                time.sleep(0.5)
+                if _is_ollama_running():
+                    break
+        except Exception as e:
+            log.error("Ollama start fehlgeschlagen: %s", e)
+
+
+def _stop_ollama():
+    global _ollama_proc
+    with _ollama_lock:
+        if _ollama_proc:
+            try:
+                _ollama_proc.terminate()
+                _ollama_proc.wait(timeout=5)
+            except Exception:
+                _ollama_proc.kill()
+            _ollama_proc = None
+
+
+def _pull_model_if_missing(model: str):
+    """Lädt Ollama-Modell herunter falls noch nicht vorhanden."""
+    try:
+        resp   = requests.get("http://localhost:11434/api/tags", timeout=5)
+        models = [m["name"].split(":")[0] for m in resp.json().get("models", [])]
+        if model.split(":")[0] in models:
+            return
+        log.info("Ziehe Ollama-Modell: %s", model)
+        requests.post(
+            "http://localhost:11434/api/pull",
+            json={"name": model, "stream": False},
+            timeout=600,
+        )
+        log.info("Modell %s geladen", model)
+    except Exception as e:
+        log.warning("Modell-Pull %s fehlgeschlagen: %s", model, e)
+
+
+def _ensure_ollama_models():
+    _start_ollama()
+    if _is_ollama_running():
+        _pull_model_if_missing(OLLAMA_EMBED_MODEL)
+        _pull_model_if_missing(OLLAMA_LLM_MODEL)
+
+
+def _ollama_status_label() -> str:
+    if not Path(_OLLAMA_BIN).exists():
+        return "🔴  KI-Suche (Ollama fehlt)"
+    if not _is_ollama_running():
+        return "🔴  KI-Suche offline"
+    try:
+        resp   = requests.get("http://localhost:11434/api/tags", timeout=3)
+        models = [m["name"].split(":")[0] for m in resp.json().get("models", [])]
+        both   = (OLLAMA_EMBED_MODEL.split(":")[0] in models and
+                  OLLAMA_LLM_MODEL.split(":")[0] in models)
+        return "🟢  KI-Suche bereit" if both else "🟡  KI-Modelle laden…"
+    except Exception:
+        return "🔴  KI-Suche offline"
+
 
 # ── Server-Prozess ────────────────────────────────────────────────────────────
 
@@ -210,6 +304,7 @@ class ArchivioServer(rumps.App):
         self._version_item  = rumps.MenuItem(f"Version {_local_version()}")
         self._server_item   = rumps.MenuItem("⬤  Server …")
         self._nas_item      = rumps.MenuItem("⬤  NAS …")
+        self._ki_item       = rumps.MenuItem("⬤  KI-Suche …")
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
 
@@ -219,6 +314,7 @@ class ArchivioServer(rumps.App):
             self._version_item,
             self._server_item,
             self._nas_item,
+            self._ki_item,
             rumps.separator,
             self._autostart_item,
             rumps.separator,
@@ -233,6 +329,7 @@ class ArchivioServer(rumps.App):
 
     def _boot(self):
         _start_server()
+        threading.Thread(target=_ensure_ollama_models, daemon=True).start()
         time.sleep(3)
         self._status_loop()
 
@@ -253,6 +350,7 @@ class ArchivioServer(rumps.App):
             f"{'🟢' if server_ok else '🔴'}  Server {'läuft' if server_ok else 'offline'}")
         self._nas_item.title = (
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
+        self._ki_item.title = _ollama_status_label()
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])
@@ -277,6 +375,7 @@ class ArchivioServer(rumps.App):
 
     def quit_app(self, _):
         _stop_server()
+        _stop_ollama()
         rumps.quit_application()
 
 

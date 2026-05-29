@@ -137,6 +137,14 @@ def _extract_and_store(conn, doc_id: int, path: Path):
         if chunks:
             queries.save_chunks(conn, doc_id, chunks)
 
+    if chunks:
+        try:
+            from scanner.embedder import embed_document_chunks, is_ollama_running
+            if is_ollama_running():
+                embed_document_chunks(conn, doc_id)
+        except Exception as e:
+            log.debug("Embedding übersprungen für %s: %s", path.name, e)
+
 
 def _iso(ts: float) -> str:
     from datetime import datetime, timezone

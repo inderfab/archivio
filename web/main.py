@@ -56,6 +56,88 @@ app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
 app.include_router(api_router)
 
+# ── KI-Suche ──────────────────────────────────────────────────────────────────
+
+@app.get("/search/ai", response_class=HTMLResponse)
+async def search_ai(
+    request:    Request,
+    q:          str = Query(default=""),
+    project_id: str = Query(default=""),
+):
+    if not q.strip():
+        return HTMLResponse("")
+
+    from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks, llm_answer
+
+    status = ai_status()
+    if not status["ok"]:
+        return templates.TemplateResponse("_ai_answer.html", {
+            "request":  request,
+            "question": q,
+            "answer":   None,
+            "sources":  [],
+            "error":    status["reason"],
+        })
+
+    conn  = connection.get_connection()
+    qvec  = embed_query(q)
+    if qvec is None:
+        conn.close()
+        return templates.TemplateResponse("_ai_answer.html", {
+            "request": request, "question": q, "answer": None, "sources": [],
+            "error": "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?",
+        })
+
+    # Hybrid: Keyword-Treffer zuerst, dann Vektor-Treffer auffüllen
+    kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=6)
+    vec_sources = vector_search(conn, qvec, project_id=project_id, limit=8)
+    seen_ids = {s["id"] for s in kw_sources}
+    sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
+    sources  = sources[:8]
+
+    error = None
+    if not sources:
+        if project_id:
+            try:
+                has_project_emb = conn.execute(
+                    """SELECT 1 FROM document_chunks dc
+                       JOIN documents d ON d.id = dc.document_id
+                       WHERE dc.embedding IS NOT NULL AND d.project_id = ? LIMIT 1""",
+                    (int(project_id),)
+                ).fetchone()
+            except (ValueError, TypeError):
+                has_project_emb = None
+            if not has_project_emb:
+                proj_name = conn.execute(
+                    "SELECT name FROM projects WHERE id = ?", (project_id,)
+                ).fetchone()
+                name = proj_name["name"] if proj_name else f"Projekt {project_id}"
+                error = f"Keine Embeddings für «{name}». Embeddings generieren und nochmals versuchen."
+            else:
+                error = "Keine relevanten Dokumente für diese Frage gefunden."
+        else:
+            has_embeddings = conn.execute(
+                "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
+            ).fetchone()
+            error = (
+                "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
+                if not has_embeddings else
+                "Keine relevanten Dokumente für diese Frage gefunden."
+            )
+
+    conn.close()
+    answer = llm_answer(q, sources) if sources else None
+    if answer and sources:
+        sources = _rerank_by_answer(sources, answer)
+
+    return templates.TemplateResponse("_ai_answer.html", {
+        "request":  request,
+        "question": q,
+        "answer":   answer,
+        "sources":  sources,
+        "error":    error,
+    })
+
 # ── Routen ────────────────────────────────────────────────────────────────────
 
 @app.get("/", response_class=HTMLResponse)
@@ -179,6 +261,19 @@ async def preview(request: Request, document_id: int, q: str = Query(default="")
 
 
 # ── Such-Logik ────────────────────────────────────────────────────────────────
+
+def _rerank_by_answer(sources: list, answer: str) -> list:
+    """Sortiert Quellen: der Chunk mit den meisten Antwort-Wörtern kommt zuerst."""
+    answer_words = {w for w in re.findall(r'\b\w{4,}\b', answer.lower()) if w}
+    if not answer_words:
+        return sources
+
+    def score(s):
+        content = (s.get("content") or "").lower()
+        return sum(1 for w in answer_words if w in content)
+
+    return sorted(sources, key=score, reverse=True)
+
 
 def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
