@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Anleitung – Archivio</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff;
+      color: #111;
+      line-height: 1.7;
+    }
+
+    /* ── Header ── */
+    header {
+      padding: 28px 48px;
+      border-bottom: 1px solid #e8e8e8;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
+      font-size: 18px;
+      font-weight: 600;
+      letter-spacing: -0.3px;
+      color: #111;
+      text-decoration: none;
+    }
+    .wordmark svg { display: block; }
+    .back-link {
+      font-size: 13px;
+      color: #999;
+      text-decoration: none;
+    }
+    .back-link:hover { color: #111; }
+
+    /* ── Layout ── */
+    .page {
+      display: flex;
+      max-width: 1060px;
+      margin: 0 auto;
+      padding: 60px 24px 120px;
+      gap: 64px;
+    }
+
+    /* ── Sidebar Nav ── */
+    nav {
+      flex-shrink: 0;
+      width: 200px;
+    }
+    nav ul {
+      list-style: none;
+      position: sticky;
+      top: 40px;
+    }
+    nav li { margin-bottom: 2px; }
+    nav a {
+      display: block;
+      padding: 6px 0;
+      font-size: 14px;
+      color: #777;
+      text-decoration: none;
+      border-left: 2px solid transparent;
+      padding-left: 12px;
+      transition: color 0.1s;
+    }
+    nav a:hover { color: #111; }
+    nav .nav-section {
+      font-size: 11px;
+      font-weight: 600;
+      letter-spacing: 0.06em;
+      text-transform: uppercase;
+      color: #aaa;
+      padding: 20px 0 6px 12px;
+    }
+    nav .nav-section:first-child { padding-top: 0; }
+
+    /* ── Content ── */
+    article {
+      flex: 1;
+      min-width: 0;
+    }
+
+    .doc-section {
+      padding-bottom: 60px;
+      margin-bottom: 60px;
+      border-bottom: 1px solid #e8e8e8;
+    }
+    .doc-section:last-child {
+      border-bottom: none;
+      margin-bottom: 0;
+      padding-bottom: 0;
+    }
+
+    h2 {
+      font-size: 24px;
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 20px;
+    }
+    h3 {
+      font-size: 16px;
+      font-weight: 600;
+      margin: 32px 0 10px;
+    }
+    p { margin-bottom: 14px; color: #333; }
+    p:last-child { margin-bottom: 0; }
+
+    ol, ul {
+      padding-left: 20px;
+      margin-bottom: 14px;
+      color: #333;
+    }
+    li { margin-bottom: 6px; }
+
+    .step-list {
+      list-style: none;
+      padding: 0;
+      counter-reset: steps;
+    }
+    .step-list li {
+      counter-increment: steps;
+      display: flex;
+      gap: 16px;
+      margin-bottom: 16px;
+      align-items: flex-start;
+    }
+    .step-list li::before {
+      content: counter(steps);
+      flex-shrink: 0;
+      width: 26px;
+      height: 26px;
+      background: #111;
+      color: #fff;
+      font-size: 12px;
+      font-weight: 600;
+      border-radius: 50%;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      margin-top: 1px;
+    }
+
+    .callout {
+      background: #f7f7f7;
+      border-left: 3px solid #111;
+      padding: 14px 18px;
+      border-radius: 0 6px 6px 0;
+      margin: 20px 0;
+      font-size: 14px;
+      color: #444;
+    }
+    .callout strong { color: #111; }
+
+    code {
+      background: #f0f0f0;
+      padding: 2px 6px;
+      border-radius: 4px;
+      font-size: 13px;
+      font-family: "SF Mono", Menlo, Monaco, monospace;
+    }
+
+    .badge {
+      display: inline-block;
+      background: #111;
+      color: #fff;
+      font-size: 11px;
+      font-weight: 600;
+      padding: 2px 8px;
+      border-radius: 4px;
+      vertical-align: middle;
+      margin-right: 4px;
+    }
+
+    /* ── Footer ── */
+    footer {
+      border-top: 1px solid #e8e8e8;
+      padding: 32px 48px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 13px;
+      color: #999;
+      flex-wrap: wrap;
+      gap: 8px;
+    }
+    footer a { color: #999; text-decoration: none; }
+    footer a:hover { color: #111; }
+
+    @media (max-width: 740px) {
+      header { padding: 20px 24px; }
+      .page { flex-direction: column; gap: 32px; padding: 40px 20px 80px; }
+      nav { width: 100%; }
+      nav ul { position: static; display: flex; flex-wrap: wrap; gap: 4px; }
+      nav .nav-section { display: none; }
+      nav a { border: 1px solid #e0e0e0; border-radius: 4px; padding: 6px 12px; border-left-width: 1px; }
+      footer { padding: 24px; flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <div class="page">
+
+    <nav>
+      <ul>
+        <li class="nav-section">Einstieg</li>
+        <li><a href="#setup">Installation</a></li>
+        <li><a href="#erste-schritte">Erster Start</a></li>
+        <li class="nav-section">Einrichten</li>
+        <li><a href="#nas">NAS verknüpfen</a></li>
+        <li><a href="#ordner">Ordner ignorieren</a></li>
+        <li><a href="#mitarbeiter">Mitarbeiter-Macs</a></li>
+        <li class="nav-section">Funktionen</li>
+        <li><a href="#suche">Suche</a></li>
+        <li><a href="#ki">KI-Suche aktivieren</a></li>
+        <li><a href="#scan">Automatischer Scan</a></li>
+      </ul>
+    </nav>
+
+    <article>
+
+      <div class="doc-section" id="setup">
+        <h2>Installation</h2>
+        <p>Archivio besteht aus zwei Teilen: dem <strong>Server</strong>, der auf einem fixen Mac (z.&nbsp;B. iMac) läuft, und dem optionalen <strong>Helper</strong> auf jedem Mitarbeiter-Mac.</p>
+        <h3>Server installieren</h3>
+        <ol class="step-list">
+          <li>Das neuste <code>.pkg</code> von der <a href="https://github.com/inderfab/archivio/releases/latest">Releases-Seite</a> herunterladen.</li>
+          <li>Doppelklick auf die <code>.pkg</code>-Datei, Installer durchlaufen.</li>
+          <li>„Archivio Server" in den Programme-Ordner öffnen und starten.</li>
+          <li>Im Menüleisten-Icon erscheint <span class="badge">●</span> — der Server läuft auf Port <code>8000</code>.</li>
+        </ol>
+        <div class="callout">
+          <strong>Autostart aktivieren:</strong> Im Menü des Server-Icons → „Autostart beim Login" aktivieren. Der Server startet dann automatisch beim Hochfahren.
+        </div>
+      </div>
+
+      <div class="doc-section" id="erste-schritte">
+        <h2>Erster Start</h2>
+        <p>Nach dem Start ist die Weboberfläche unter <code>http://&lt;Server-IP&gt;:8000</code> erreichbar — z.&nbsp;B. <code>http://192.168.1.10:8000</code>.</p>
+        <p>Beim ersten Öffnen ist die Datenbank leer. Zuerst ein Projekt anlegen und den NAS-Ordner verknüpfen, dann einen ersten Scan starten.</p>
+      </div>
+
+      <div class="doc-section" id="nas">
+        <h2>NAS verknüpfen</h2>
+        <p>Archivio liest Dateien direkt vom NAS. Das NAS muss auf dem Server-Mac eingehängt sein, bevor ein Scan läuft.</p>
+        <ol class="step-list">
+          <li>Im Finder: <strong>Gehe zu → Mit Server verbinden</strong> (<code>⌘K</code>) → NAS-Adresse eingeben → verbinden.</li>
+          <li>In der Archivio-Weboberfläche: <strong>Dashboard → Projekte → Neues Projekt</strong>.</li>
+          <li>Projektname vergeben und den Pfad zum NAS-Ordner eintragen, z.&nbsp;B. <code>/Volumes/NAS/Projekte/2024</code>.</li>
+          <li>Speichern → <strong>Scan starten</strong>.</li>
+        </ol>
+        <div class="callout">
+          <strong>Tipp:</strong> Der NAS-Ordner sollte beim Serverstart automatisch eingehängt sein. Das lässt sich in den macOS-Systemeinstellungen unter „Benutzer &amp; Gruppen → Anmeldeobjekte" einrichten.
+        </div>
+      </div>
+
+      <div class="doc-section" id="ordner">
+        <h2>Ordner ignorieren</h2>
+        <p>Temporäre Ordner, Papierkorb oder Archiv-Ablagen können vom Scan ausgeschlossen werden.</p>
+        <ol class="step-list">
+          <li>Dashboard → <strong>Einstellungen</strong> öffnen.</li>
+          <li>Im Abschnitt „Ausgeschlossene Ordner" den Ordnernamen oder -pfad eintragen.</li>
+          <li>Es reicht ein Teilname — z.&nbsp;B. <code>.trash</code> schliesst alle Ordner mit diesem Namen aus.</li>
+          <li>Speichern. Beim nächsten Scan werden diese Ordner übersprungen.</li>
+        </ol>
+      </div>
+
+      <div class="doc-section" id="mitarbeiter">
+        <h2>Mitarbeiter-Macs einrichten</h2>
+        <p>Der <strong>Archivio Helper</strong> läuft auf jedem Mitarbeiter-Mac als kleines Menüleisten-Icon. Er ermöglicht das Öffnen von Dateien direkt aus der Suchoberfläche.</p>
+        <ol class="step-list">
+          <li>Auf dem Mitarbeiter-Mac die Archivio-Weboberfläche öffnen: <code>http://&lt;Server-IP&gt;:8000</code>.</li>
+          <li>Oben rechts: <strong>Helper herunterladen</strong> → <code>.zip</code> entpacken.</li>
+          <li>„Archivio Helper" in den Programme-Ordner ziehen und starten.</li>
+          <li>Im Helper-Menü die Server-URL eintragen, z.&nbsp;B. <code>http://192.168.1.10:8000</code>.</li>
+          <li>„Autostart beim Login" aktivieren.</li>
+        </ol>
+        <p>Ab jetzt erscheinen in den Suchergebnissen „Öffnen"- und „Im Finder zeigen"-Buttons, die Dateien direkt auf dem Mitarbeiter-Mac öffnen.</p>
+      </div>
+
+      <div class="doc-section" id="suche">
+        <h2>Suche</h2>
+        <p>Die Volltextsuche findet Inhalte in PDFs, Word-Dokumenten, E-Mails und weiteren Formaten. Die Suche unterstützt:</p>
+        <ul>
+          <li><strong>Einzelwörter</strong> — <code>Brandschutz</code></li>
+          <li><strong>Phrasen</strong> — <code>"Technischer Bericht"</code></li>
+          <li><strong>Mehrere Begriffe</strong> — alle eingegebenen Wörter müssen vorkommen</li>
+        </ul>
+        <p>Über die Filter lässt sich die Suche auf bestimmte Projekte, Dateitypen oder Zeiträume einschränken.</p>
+      </div>
+
+      <div class="doc-section" id="ki">
+        <h2>KI-Suche aktivieren</h2>
+        <p>Die KI-Suche beantwortet Fragen auf Basis der indizierten Dokumente — ohne Cloud, vollständig lokal.</p>
+        <h3>Voraussetzung: Ollama installieren</h3>
+        <ol class="step-list">
+          <li><a href="https://ollama.com/download" target="_blank">ollama.com/download</a> aufrufen und Ollama auf dem <strong>Server-Mac</strong> installieren.</li>
+          <li>Ollama starten (erscheint als Icon in der Menüleiste).</li>
+          <li>Archivio Server neu starten — er lädt das Sprachmodell automatisch beim ersten Start.</li>
+        </ol>
+        <div class="callout">
+          <strong>Wichtig:</strong> Ollama muss auf dem Server-Mac installiert sein, nicht auf dem Mitarbeiter-Mac. Das Modell wird lokal geladen, keine Daten verlassen das Büro.
+        </div>
+        <h3>KI-Suche verwenden</h3>
+        <p>Im Suchfeld oben den Tab <strong>„KI-Suche"</strong> wählen und eine Frage in ganzen Sätzen stellen, z.&nbsp;B.: <em>„Welche Anforderungen gelten für den Brandschutz im Treppenhaus?"</em></p>
+        <p>Archivio sucht die relevantesten Textstellen und formuliert eine Antwort mit Quellenangaben.</p>
+      </div>
+
+      <div class="doc-section" id="scan">
+        <h2>Automatischer Scan</h2>
+        <p>Damit neue Dateien auf dem NAS automatisch gefunden werden, kann ein täglicher Scan eingerichtet werden.</p>
+        <ol class="step-list">
+          <li>Dashboard → <strong>Einstellungen</strong> öffnen.</li>
+          <li>Im Abschnitt „Automatischer Scan" eine Uhrzeit eintragen, z.&nbsp;B. <code>02:00</code>.</li>
+          <li>Speichern. Der Scan läuft täglich zur eingestellten Zeit — vorausgesetzt, der Server läuft.</li>
+        </ol>
+        <div class="callout">
+          <strong>Manueller Scan:</strong> Im Dashboard kann jederzeit ein Scan per Knopfdruck gestartet werden. Bei grossen NAS-Ordnern dauert der erste Scan einige Minuten.
+        </div>
+      </div>
+
+    </article>
+  </div>
+
+  <footer>
+    <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
+    <span>© 2026 Archivio</span>
+  </footer>
+
+</body>
+</html>
