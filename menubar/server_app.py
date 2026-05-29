@@ -241,7 +241,16 @@ def _check_update() -> tuple[str, str] | None:
         return None
 
 
+def _thread_alert(title: str, message: str):
+    """Dialog aus Background-Thread — rumps.alert nur Main-Thread sicher."""
+    msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    subprocess.run(["osascript", "-e",
+                    f'display alert "{title}" message "{msg}"'],
+                   timeout=60)
+
+
 def _do_update(version: str, url: str):
+    import os
     log.info("Update starten: %s von %s", version, url)
     zip_path = Path("/tmp/archivio-server-update.zip")
     try:
@@ -253,7 +262,7 @@ def _do_update(version: str, url: str):
         log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
     except Exception as e:
         log.error("Download fehlgeschlagen: %s", e)
-        rumps.alert(title="Update fehlgeschlagen", message=f"Download-Fehler:\n{e}")
+        _thread_alert("Update fehlgeschlagen", f"Download-Fehler: {e}")
         return
 
     # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
@@ -266,23 +275,20 @@ def _do_update(version: str, url: str):
     )
     if r.returncode != 0:
         log.error("ditto Fehler: %s", r.stderr)
-        rumps.alert(title="Update fehlgeschlagen",
-                    message=f"Extraktion fehlgeschlagen:\n{r.stderr or 'Unbekannter Fehler'}")
+        _thread_alert("Update fehlgeschlagen",
+                      f"Extraktion fehlgeschlagen: {r.stderr or 'Unbekannter Fehler'}")
         return
     zip_path.unlink(missing_ok=True)
     log.info("Update %s installiert in %s", version, dest_dir)
 
-    # App neu starten mit neuem Code
     restart = Path("/tmp/archivio-server-restart.sh")
     restart.write_text("#!/bin/bash\nsleep 2\nopen -a 'Archivio Server'\n")
     restart.chmod(0o755)
     subprocess.Popen(["bash", str(restart)], start_new_session=True)
-    rumps.alert(
-        title="Update installiert",
-        message=f"Version {version} wurde installiert. Die App wird neu gestartet.",
-    )
+    _thread_alert("Update installiert",
+                  f"Version {version} installiert. Die App wird neu gestartet.")
     _stop_server()
-    rumps.quit_application()
+    os._exit(0)
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────

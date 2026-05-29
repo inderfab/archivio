@@ -131,7 +131,15 @@ def _check_update() -> tuple[str, str] | None:
         return None
 
 
+def _thread_alert(title: str, message: str):
+    msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
+    subprocess.run(["osascript", "-e",
+                    f'display alert "{title}" message "{msg}"'],
+                   timeout=60)
+
+
 def _do_update(version: str, url: str):
+    import os
     import shutil
     log.info("Helper-Update starten: %s", version)
     zip_path = Path("/tmp/archivio-helper-update.zip")
@@ -146,11 +154,10 @@ def _do_update(version: str, url: str):
         log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
     except Exception as e:
         log.error("Download fehlgeschlagen: %s", e)
-        rumps.alert(title="Update fehlgeschlagen", message=f"Download-Fehler:\n{e}")
+        _thread_alert("Update fehlgeschlagen", f"Download-Fehler: {e}")
         return
 
-
-    # ── App ersetzen via ditto (macOS-nativ, meldet Fehler korrekt) ─────────────
+    # ── App ersetzen via ditto ────────────────────────────────────────────────
     app_path = Path(sys.executable).parent.parent.parent.parent.parent
     log.info("Ersetze %s mit ditto", app_path)
     r = subprocess.run(
@@ -158,7 +165,7 @@ def _do_update(version: str, url: str):
         capture_output=True, text=True,
     )
     if r.returncode != 0:
-        log.info("ditto fehlgeschlagen (%s), versuche mit Admin-Rechten", r.stderr)
+        log.info("ditto fehlgeschlagen, versuche mit Admin-Rechten: %s", r.stderr)
         src = str(zip_path).replace('"', '\\"')
         dst = str(app_path.parent).replace('"', '\\"')
         r2 = subprocess.run(
@@ -169,11 +176,10 @@ def _do_update(version: str, url: str):
         )
         if r2.returncode != 0:
             log.error("Admin-ditto fehlgeschlagen: %s", r2.stderr)
-            rumps.alert(title="Update fehlgeschlagen",
-                        message=f"Konnte App nicht ersetzen:\n{r2.stderr or 'Abgebrochen'}")
+            _thread_alert("Update fehlgeschlagen",
+                          f"Konnte App nicht ersetzen: {r2.stderr or 'Abgebrochen'}")
             return
 
-    shutil.rmtree(tmp_dir, ignore_errors=True)
     zip_path.unlink(missing_ok=True)
     log.info("Update %s installiert", version)
 
@@ -182,11 +188,9 @@ def _do_update(version: str, url: str):
     restart.write_text(f'#!/bin/bash\nsleep 2\nopen "{app_path}"\n')
     restart.chmod(0o755)
     subprocess.Popen(["bash", str(restart)], start_new_session=True)
-    rumps.alert(
-        title="Update installiert",
-        message=f"Version {version} wurde installiert. Der Helper wird neu gestartet.",
-    )
-    rumps.quit_application()
+    _thread_alert("Update installiert",
+                  f"Version {version} installiert. Der Helper wird neu gestartet.")
+    os._exit(0)
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
