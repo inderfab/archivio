@@ -1,7 +1,9 @@
 #!/bin/bash
-cd /Users/pas/archivio
+ARCHIVIO_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+cd "$ARCHIVIO_DIR"
 git pull
-launchctl stop ch.strut.archivio
+.venv/bin/pip install -q -r requirements.txt
+launchctl stop io.archivio.server
 sleep 2
-launchctl start ch.strut.archivio
+launchctl start io.archivio.server
 echo "Archivio aktualisiert: $(date)"

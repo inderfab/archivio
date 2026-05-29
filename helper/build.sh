@@ -66,7 +66,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>ch.strut.archivio.helper</string>
+  <string>io.archivio.helper</string>
   <key>CFBundleName</key>
   <string>Archivio Helper</string>
   <key>CFBundleDisplayName</key>

@@ -457,7 +457,7 @@ def _helper_url_hint(cfg: dict) -> str:
         if not hostname.endswith(".local"):
             hostname += ".local"
     except Exception:
-        hostname = "imac.local"
+        hostname = "localhost"
     return f"http://{hostname}:{port}"
 
 

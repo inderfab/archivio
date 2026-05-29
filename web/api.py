@@ -167,14 +167,17 @@ async def update_server():
             pass
 
         _log("LaunchAgent stoppen…")
-        try:
-            r = subprocess.run(
-                ["launchctl", "stop", "ch.strut.archivio"], timeout=5,
-                capture_output=True, text=True,
-            )
-            _log(f"launchctl returncode: {r.returncode}, stderr: {r.stderr.strip()}")
-        except Exception as e:
-            _log(f"launchctl Fehler: {e}")
+        for label in ("io.archivio.server", "ch.strut.archivio"):
+            try:
+                r = subprocess.run(
+                    ["launchctl", "stop", label], timeout=5,
+                    capture_output=True, text=True,
+                )
+                _log(f"launchctl stop {label}: rc={r.returncode}")
+                if r.returncode == 0:
+                    break
+            except Exception as e:
+                _log(f"launchctl Fehler ({label}): {e}")
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Update läuft, Server startet neu…"})

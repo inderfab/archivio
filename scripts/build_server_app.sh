@@ -69,7 +69,7 @@ cat > "$APP/Contents/Info.plist" <<PLIST
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key>
-  <string>ch.strut.archivio.server</string>
+  <string>io.archivio.server</string>
   <key>CFBundleName</key>
   <string>Archivio Server</string>
   <key>CFBundleDisplayName</key>
@@ -128,7 +128,7 @@ chmod +x "$PKG_SCRIPTS/postinstall"
 pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
-  --identifier "ch.strut.archivio.server" \
+  --identifier "io.archivio.server" \
   --version "$VERSION" \
   --install-location "/" \
   "$PKG"

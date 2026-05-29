@@ -35,7 +35,7 @@ def _load_config() -> dict:
     try:
         return json.loads(CONFIG_PATH.read_text())
     except Exception:
-        return {"server_url": "http://imac.local:8000", "version": "1.0.0",
+        return {"server_url": "http://localhost:8000", "version": "1.0.0",
                 "github_repo": "inderfab/archivio"}
 
 
@@ -191,7 +191,7 @@ class ArchivioHelper(rumps.App):
     def __init__(self):
         super().__init__("", icon=_ICON, template=True, quit_button=None)
         cfg = _load_config()
-        self._server_url = cfg.get("server_url", "http://imac.local:8000")
+        self._server_url = cfg.get("server_url", "http://localhost:8000")
 
         self._title_item     = rumps.MenuItem("Archivio Helper")
         self._version_item   = rumps.MenuItem(f"Version {_local_version()}")
@@ -256,7 +256,7 @@ class ArchivioHelper(rumps.App):
             return
         url = resp.text.strip().rstrip("/")
         if not url.startswith("http"):
-            rumps.alert("Bitte eine gültige URL eingeben, z. B. http://imac.local:8000")
+            rumps.alert("Bitte eine gültige URL eingeben, z. B. http://localhost:8000")
             return
         self._server_url = url
         self._server_item.title = f"Server: {url}"
