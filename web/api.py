@@ -116,31 +116,65 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
+_update_log: list[str] = []
+
+
+@router.get("/update/log")
+async def update_log():
+    return JSONResponse({"log": _update_log[-50:]})
+
+
 @router.post("/update")
 async def update_server():
     """git pull + pip install, danach LaunchAgent-Neustart."""
     project_root = Path(__file__).parent.parent
+    _update_log.clear()
+
+    def _log(msg: str):
+        _update_log.append(msg)
 
     def _run():
+        _log("git pull starten…")
         try:
-            subprocess.run(["git", "pull"], cwd=project_root, timeout=60)
+            r = subprocess.run(
+                ["git", "pull"], cwd=project_root, timeout=60,
+                capture_output=True, text=True,
+            )
+            _log(f"git pull stdout: {r.stdout.strip()}")
+            if r.stderr.strip():
+                _log(f"git pull stderr: {r.stderr.strip()}")
+            _log(f"git pull returncode: {r.returncode}")
+        except Exception as e:
+            _log(f"git pull Fehler: {e}")
+
+        _log("pip install starten…")
+        try:
             venv_pip = project_root / ".venv" / "bin" / "pip"
-            subprocess.run(
+            r = subprocess.run(
                 [str(venv_pip), "install", "-q", "-r", "requirements.txt"],
                 cwd=project_root, timeout=120,
+                capture_output=True, text=True,
             )
-            # Helper-App neu bauen damit Download-Version aktuell ist
-            subprocess.run(
-                ["bash", "helper/build.sh"],
-                cwd=project_root, timeout=120,
-            )
-        except Exception:
-            pass
-        # LaunchAgent-Neustart: KeepAlive sorgt für automatischen Wiederstart
+            _log(f"pip returncode: {r.returncode}")
+            if r.stderr.strip():
+                _log(f"pip stderr: {r.stderr.strip()[:300]}")
+        except Exception as e:
+            _log(f"pip Fehler: {e}")
+
         try:
-            subprocess.run(["launchctl", "stop", "ch.strut.archivio"], timeout=5)
+            subprocess.run(["bash", "helper/build.sh"], cwd=project_root, timeout=120)
         except Exception:
             pass
+
+        _log("LaunchAgent stoppen…")
+        try:
+            r = subprocess.run(
+                ["launchctl", "stop", "ch.strut.archivio"], timeout=5,
+                capture_output=True, text=True,
+            )
+            _log(f"launchctl returncode: {r.returncode}, stderr: {r.stderr.strip()}")
+        except Exception as e:
+            _log(f"launchctl Fehler: {e}")
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Update läuft, Server startet neu…"})
