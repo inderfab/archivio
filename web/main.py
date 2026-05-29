@@ -92,14 +92,33 @@ async def search_ai(
 
     error = None
     if not sources:
-        has_embeddings = conn.execute(
-            "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
-        ).fetchone()
-        error = (
-            "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
-            if not has_embeddings else
-            "Keine relevanten Dokumente für diese Frage gefunden."
-        )
+        if project_id:
+            try:
+                has_project_emb = conn.execute(
+                    """SELECT 1 FROM document_chunks dc
+                       JOIN documents d ON d.id = dc.document_id
+                       WHERE dc.embedding IS NOT NULL AND d.project_id = ? LIMIT 1""",
+                    (int(project_id),)
+                ).fetchone()
+            except (ValueError, TypeError):
+                has_project_emb = None
+            if not has_project_emb:
+                proj_name = conn.execute(
+                    "SELECT name FROM projects WHERE id = ?", (project_id,)
+                ).fetchone()
+                name = proj_name["name"] if proj_name else f"Projekt {project_id}"
+                error = f"Keine Embeddings für «{name}». Embeddings generieren und nochmals versuchen."
+            else:
+                error = "Keine relevanten Dokumente für diese Frage gefunden."
+        else:
+            has_embeddings = conn.execute(
+                "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
+            ).fetchone()
+            error = (
+                "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
+                if not has_embeddings else
+                "Keine relevanten Dokumente für diese Frage gefunden."
+            )
 
     conn.close()
     answer = llm_answer(q, sources) if sources else None
