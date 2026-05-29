@@ -164,6 +164,117 @@ def vector_search(
     return results
 
 
+# ── Keyword-Suche in Chunks (FTS) ────────────────────────────────────────────
+
+_STOPWORDS = {
+    "bis", "wann", "muss", "man", "das", "die", "der", "den", "dem",
+    "ein", "eine", "und", "oder", "für", "mit", "von", "zu", "auf",
+    "ist", "sind", "hat", "wird", "war", "ich", "sie", "wir", "ihr",
+    "wie", "was", "wer", "wo", "welche", "auch", "noch", "nicht",
+    "gibt", "gibt", "kann", "alle", "beim", "nach", "als",
+}
+
+
+def keyword_search_chunks(
+    conn: sqlite3.Connection,
+    query: str,
+    project_id: str = "",
+    limit: int = 4,
+) -> list[dict]:
+    """Hybrid-Keyword-Suche: LIKE-AND (morphologisch) + FTS-OR (Recall)."""
+    import re
+    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in query.lower().split() if w]
+    words = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
+    if not words:
+        return []
+
+    proj_clause = ""
+    proj_params: list = []
+    if project_id:
+        try:
+            proj_clause = "AND d.project_id = ?"
+            proj_params.append(int(project_id))
+        except (ValueError, TypeError):
+            pass
+
+    # ── Strategie 1: LIKE AND mit 3-Zeichen-Präfix (deckt dt. Morphologie ab) ──
+    prefixes = [w[:3] for w in words]
+    like_clauses = " AND ".join(f"LOWER(dc.content) LIKE ?" for _ in prefixes)
+    like_params   = [f"%{p}%" for p in prefixes] + proj_params + [limit * 2]
+    like_rows: list = []
+    try:
+        like_rows = conn.execute(f"""
+            SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
+                   d.filename, d.extension, d.project_id,
+                   dp.path AS filepath, p.name AS project_name,
+                   0.95 AS score
+            FROM document_chunks dc
+            JOIN documents d ON d.id = dc.document_id
+            JOIN projects  p ON p.id = d.project_id
+            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE {like_clauses} {proj_clause}
+            LIMIT ?
+        """, like_params).fetchall()
+    except Exception as e:
+        log.warning("LIKE-Chunk-Suche fehlgeschlagen: %s", e)
+
+    # ── Strategie 2: FTS OR (breiter Recall für nicht-morphologische Fälle) ──
+    fts_q    = " OR ".join(f"{w}*" for w in words)
+    fts_rows: list = []
+    try:
+        fts_rows = conn.execute(f"""
+            SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
+                   d.filename, d.extension, d.project_id,
+                   dp.path AS filepath, p.name AS project_name,
+                   0.90 AS score
+            FROM chunks_fts
+            JOIN document_chunks dc ON chunks_fts.rowid = dc.id
+            JOIN documents d        ON d.id = dc.document_id
+            JOIN projects  p        ON p.id = d.project_id
+            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE chunks_fts MATCH ? {proj_clause}
+            ORDER BY rank
+            LIMIT ?
+        """, [fts_q] + proj_params + [limit * 2]).fetchall()
+    except Exception as e:
+        log.warning("FTS-Chunk-Suche fehlgeschlagen: %s", e)
+
+    # ── Merge: LIKE zuerst (präziser), dann FTS-Ergänzungen ──
+    seen   = set()
+    merged = []
+    for row in list(like_rows) + list(fts_rows):
+        if row["id"] not in seen:
+            seen.add(row["id"])
+            merged.append(row)
+        if len(merged) >= limit:
+            break
+
+    # ── Folge-Chunk anhängen für vollständigen Kontext ──
+    chunk_ids = [r["id"] for r in merged]
+    next_chunks: dict = {}
+    if chunk_ids:
+        placeholders = ",".join("?" * len(chunk_ids))
+        next_chunks = {
+            r[0]: r[1]
+            for r in conn.execute(f"""
+                SELECT dc_cur.id, dc_nxt.content
+                FROM document_chunks dc_cur
+                JOIN document_chunks dc_nxt
+                  ON dc_nxt.document_id = dc_cur.document_id
+                 AND dc_nxt.chunk_index  = dc_cur.chunk_index + 1
+                WHERE dc_cur.id IN ({placeholders})
+            """, chunk_ids).fetchall()
+        }
+
+    results = []
+    for row in merged:
+        r = dict(row)
+        if r["id"] in next_chunks:
+            r["content"] = r["content"].rstrip() + "\n" + next_chunks[r["id"]]
+        results.append(r)
+    return results
+
+
 # ── LLM-Antwort ───────────────────────────────────────────────────────────────
 
 def llm_answer(question: str, chunks: list[dict]) -> str:

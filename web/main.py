@@ -67,7 +67,7 @@ async def search_ai(
     if not q.strip():
         return HTMLResponse("")
 
-    from scanner.embedder import ai_status, embed_query, vector_search, llm_answer
+    from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks, llm_answer
 
     status = ai_status()
     if not status["ok"]:
@@ -88,7 +88,12 @@ async def search_ai(
             "error": "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?",
         })
 
-    sources = vector_search(conn, qvec, project_id=project_id)
+    # Hybrid: Keyword-Treffer zuerst, dann Vektor-Treffer auffüllen
+    kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=6)
+    vec_sources = vector_search(conn, qvec, project_id=project_id, limit=8)
+    seen_ids = {s["id"] for s in kw_sources}
+    sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
+    sources  = sources[:12]
 
     error = None
     if not sources:
