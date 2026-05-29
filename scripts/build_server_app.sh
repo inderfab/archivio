@@ -17,6 +17,9 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 
+# Helper zuerst bauen (wird als Download angeboten)
+bash helper/build.sh
+
 # Server-Code ins Bundle kopieren
 for dir in web scanner db config; do
   cp -r "$dir" "$APP/Contents/Resources/"
@@ -26,6 +29,10 @@ cp config.yaml.example     "$APP/Contents/Resources/"
 cp VERSION                 "$APP/Contents/Resources/"
 cp menubar/server_app.py   "$APP/Contents/Resources/archivio_server.py"
 cp menubar/icon.png        "$APP/Contents/Resources/"
+
+# Helper-ZIP ins Bundle (für /dashboard/download/helper)
+mkdir -p "$APP/Contents/Resources/dist"
+cp "dist/archivio-helper-${VERSION}.zip" "$APP/Contents/Resources/dist/"
 
 # ── Launcher-Script ────────────────────────────────────────────────────────────
 cat > "$APP/Contents/MacOS/Archivio Server" <<'LAUNCHER'
