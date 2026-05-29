@@ -242,24 +242,45 @@ def _check_update() -> tuple[str, str] | None:
 
 
 def _do_update(version: str, url: str):
+    log.info("Update starten: %s von %s", version, url)
+    zip_path = Path("/tmp/archivio-server-update.zip")
     try:
-        resp     = requests.get(url, timeout=120, stream=True)
-        zip_path = Path("/tmp/archivio-server-update.zip")
+        resp = requests.get(url, timeout=180, stream=True)
+        resp.raise_for_status()
         with open(zip_path, "wb") as f:
             for chunk in resp.iter_content(65536):
                 f.write(chunk)
+        log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
+    except Exception as e:
+        log.error("Download fehlgeschlagen: %s", e)
+        rumps.alert(title="Update fehlgeschlagen", message=f"Download-Fehler:\n{e}")
+        return
+
+    try:
         # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
         app_path = _HERE.parent.parent
         dest_dir = app_path.parent
+        log.info("Extrahiere nach %s", dest_dir)
         with zipfile.ZipFile(zip_path) as zf:
             zf.extractall(dest_dir)
         zip_path.unlink(missing_ok=True)
-        log.info("Update auf %s in %s installiert", version, dest_dir)
-        rumps.notification("Archivio Server", "Update installiert",
-                           f"Version {version} — bitte App neu starten.")
+        log.info("Update %s installiert in %s", version, dest_dir)
     except Exception as e:
-        log.error("Update fehlgeschlagen: %s", e)
-        rumps.notification("Archivio Server", "Update fehlgeschlagen", str(e))
+        log.error("Extraktion fehlgeschlagen: %s", e)
+        rumps.alert(title="Update fehlgeschlagen", message=f"Installations-Fehler:\n{e}")
+        return
+
+    # App neu starten mit neuem Code
+    restart = Path("/tmp/archivio-server-restart.sh")
+    restart.write_text("#!/bin/bash\nsleep 2\nopen -a 'Archivio Server'\n")
+    restart.chmod(0o755)
+    subprocess.Popen(["bash", str(restart)])
+    rumps.alert(
+        title="Update installiert",
+        message=f"Version {version} wurde installiert. Die App wird neu gestartet.",
+    )
+    _stop_server()
+    rumps.quit_application()
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
