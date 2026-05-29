@@ -244,6 +244,50 @@ function togglePreview(btn, docId, q) {
   }
 }
 
+var _aiTimer = null;
+var _aiStep  = 0;
+var AI_STEPS = [
+  'Durchsucht Dokumente…',
+  'Analysiert relevante Abschnitte…',
+  'Generiert Antwort…',
+];
+
+function _renderAiLoading() {
+  var html = '<div class="ai-thinking">';
+  AI_STEPS.forEach(function(label, i) {
+    var cls = i < _aiStep ? 'done' : (i === _aiStep ? 'active' : '');
+    html += '<div class="ai-thinking-step ' + cls + '">'
+          + '<span class="ai-thinking-dot"></span>'
+          + '<span>' + label + '</span></div>';
+  });
+  html += '</div>';
+  document.getElementById('results').innerHTML = html;
+}
+
+function _showAiLoading() {
+  _aiStep = 0;
+  _renderAiLoading();
+  clearInterval(_aiTimer);
+  _aiTimer = setInterval(function() {
+    if (_aiStep < AI_STEPS.length - 1) { _aiStep++; _renderAiLoading(); }
+  }, 4000);
+}
+
+function _clearAiLoading() {
+  clearInterval(_aiTimer);
+  _aiTimer = null;
+}
+
+document.body.addEventListener('htmx:beforeRequest', function(evt) {
+  if (evt.detail.elt.id !== 'q') return;
+  if (!document.getElementById('ai-toggle').checked) return;
+  _showAiLoading();
+});
+document.body.addEventListener('htmx:afterRequest', function(evt) {
+  if (evt.detail.elt.id !== 'q') return;
+  _clearAiLoading();
+});
+
 function switchSearchMode(aiOn) {
   var input  = document.getElementById('q');
   var wrap   = document.querySelector('.ai-toggle-wrap');
