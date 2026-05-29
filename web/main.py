@@ -72,11 +72,12 @@ async def search_ai(
     status = ai_status()
     if not status["ok"]:
         return templates.TemplateResponse("_ai_answer.html", {
-            "request":  request,
-            "question": q,
-            "answer":   None,
-            "sources":  [],
-            "error":    status["reason"],
+            "request":       request,
+            "question":      q,
+            "answer":        None,
+            "sources":       [],
+            "error":         status["reason"],
+            "ollama_missing": status.get("ollama_missing", False),
         })
 
     conn  = connection.get_connection()
@@ -131,11 +132,12 @@ async def search_ai(
         sources = _rerank_by_answer(sources, answer)
 
     return templates.TemplateResponse("_ai_answer.html", {
-        "request":  request,
-        "question": q,
-        "answer":   answer,
-        "sources":  sources,
-        "error":    error,
+        "request":       request,
+        "question":      q,
+        "answer":        answer,
+        "sources":       sources,
+        "error":         error,
+        "ollama_missing": False,
     })
 
 # ── Routen ────────────────────────────────────────────────────────────────────

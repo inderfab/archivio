@@ -2,9 +2,11 @@
 from __future__ import annotations
 
 import logging
+import shutil
 import sqlite3
 import numpy as np
 import httpx
+from pathlib import Path
 
 log = logging.getLogger(__name__)
 
@@ -14,6 +16,14 @@ LLM_MODEL   = "llama3.2:3b"
 
 
 # ── Verfügbarkeit ─────────────────────────────────────────────────────────────
+
+def is_ollama_installed() -> bool:
+    return bool(
+        shutil.which("ollama") or
+        Path("/usr/local/bin/ollama").exists() or
+        Path("/opt/homebrew/bin/ollama").exists()
+    )
+
 
 def is_ollama_running() -> bool:
     try:
@@ -33,13 +43,19 @@ def model_available(model: str) -> bool:
 
 
 def ai_status() -> dict:
+    if not is_ollama_installed():
+        return {"ok": False, "ollama_missing": True,
+                "reason": "Ollama nicht installiert"}
     if not is_ollama_running():
-        return {"ok": False, "reason": "Ollama läuft nicht"}
+        return {"ok": False, "ollama_missing": False,
+                "reason": "Ollama läuft nicht"}
     if not model_available(EMBED_MODEL):
-        return {"ok": False, "reason": f"Modell {EMBED_MODEL} nicht geladen"}
+        return {"ok": False, "ollama_missing": False,
+                "reason": f"Modell {EMBED_MODEL} nicht geladen"}
     if not model_available(LLM_MODEL):
-        return {"ok": False, "reason": f"Modell {LLM_MODEL} nicht geladen"}
-    return {"ok": True, "reason": ""}
+        return {"ok": False, "ollama_missing": False,
+                "reason": f"Modell {LLM_MODEL} nicht geladen"}
+    return {"ok": True, "ollama_missing": False, "reason": ""}
 
 
 # ── Embeddings ────────────────────────────────────────────────────────────────

@@ -1,4 +1,16 @@
 {% if error %}
+{% if ollama_missing %}
+<div class="ai-error ai-error-ollama">
+  <div class="ai-error-title">KI-Suche nicht verfügbar</div>
+  <div class="ai-error-body">
+    Ollama ist nicht installiert. Ollama ist die lokale KI-Engine — ohne sie kann
+    keine KI-Antwort generiert werden. Die Installation dauert ca. 2 Minuten.
+  </div>
+  <a class="btn-ollama-install" href="https://ollama.com/download" target="_blank">
+    Ollama herunterladen →
+  </a>
+</div>
+{% else %}
 <div class="ai-error">
   <span class="ai-error-icon">⚠</span>
   {{ error }}
@@ -6,6 +18,7 @@
   — <a href="#" onclick="fetch('/api/ai/backfill',{method:'POST'}).then(function(){alert('Backfill gestartet. Das kann einige Minuten dauern.')});return false">Jetzt generieren</a>
   {% endif %}
 </div>
+{% endif %}
 
 {% else %}
 <div class="ai-answer-block">

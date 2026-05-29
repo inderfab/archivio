@@ -304,7 +304,7 @@ class ArchivioServer(rumps.App):
         self._version_item  = rumps.MenuItem(f"Version {_local_version()}")
         self._server_item   = rumps.MenuItem("⬤  Server …")
         self._nas_item      = rumps.MenuItem("⬤  NAS …")
-        self._ki_item       = rumps.MenuItem("⬤  KI-Suche …")
+        self._ki_item       = rumps.MenuItem("⬤  KI-Suche …", callback=self._ki_action)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
 
@@ -359,6 +359,16 @@ class ArchivioServer(rumps.App):
         new_state = sender.state != 1
         _set_autostart(new_state)
         sender.state = new_state
+
+    def _ki_action(self, _):
+        if not Path(_OLLAMA_BIN).exists():
+            subprocess.run(["open", "https://ollama.com/download"])
+        elif not _is_ollama_running():
+            rumps.alert(
+                title="KI-Suche",
+                message="Ollama ist installiert aber nicht aktiv. "
+                        "Archivio Server neu starten um Ollama zu starten."
+            )
 
     def check_update(self, _):
         result = _check_update()
