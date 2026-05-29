@@ -171,11 +171,26 @@ def _prepare_data_dir():
         )
 
 
+def _kill_port_8000():
+    """Beendet alle Prozesse die Port 8000 belegen (Überbleibsel älterer Instanzen)."""
+    try:
+        r = subprocess.run(["lsof", "-ti", ":8000"], capture_output=True, text=True)
+        for pid in r.stdout.strip().split():
+            try:
+                subprocess.run(["kill", "-9", pid], capture_output=True)
+                log.info("Alten Prozess auf Port 8000 beendet: PID %s", pid)
+            except Exception:
+                pass
+    except Exception:
+        pass
+
+
 def _start_server():
     global _server_proc
     with _server_lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        _kill_port_8000()
         if _IN_BUNDLE:
             _prepare_data_dir()
         python = str(_VENV / "bin" / "python3")
