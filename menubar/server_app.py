@@ -371,17 +371,44 @@ class ArchivioServer(rumps.App):
             )
 
     def check_update(self, _):
-        result = _check_update()
-        if result is None:
-            rumps.alert(f"Archivio Server {_local_version()} ist aktuell.")
-            return
-        version, url = result
-        if rumps.alert(
-            title="Update verfügbar",
-            message=f"Version {version} verfügbar. Jetzt installieren?",
-            ok="Installieren", cancel="Abbrechen",
-        ):
-            threading.Thread(target=_do_update, args=(version, url), daemon=True).start()
+        current = _local_version()
+        try:
+            resp = requests.get(
+                f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
+                timeout=10,
+                headers={"Accept": "application/vnd.github+json"},
+            )
+            if resp.status_code != 200:
+                rumps.alert(f"Update-Check fehlgeschlagen (HTTP {resp.status_code}).")
+                return
+            data       = resp.json()
+            remote_ver = data.get("tag_name", "").lstrip("v")
+            log.info("Update-Check: lokal=%s github=%s", current, remote_ver)
+            if not remote_ver:
+                rumps.alert("Kein Release auf GitHub gefunden.")
+                return
+            if remote_ver == current:
+                rumps.alert(f"Archivio Server {current} ist aktuell.")
+                return
+            download_url = next(
+                (a["browser_download_url"] for a in data.get("assets", [])
+                 if ASSET_NAME in a["name"] and a["name"].endswith(".zip")),
+                None,
+            )
+            if not download_url:
+                rumps.alert(f"Version {remote_ver} gefunden, aber kein ZIP-Asset.")
+                return
+            if rumps.alert(
+                title="Update verfügbar",
+                message=f"Version {remote_ver} verfügbar (aktuell: {current}). Jetzt installieren?",
+                ok="Installieren", cancel="Abbrechen",
+            ):
+                threading.Thread(
+                    target=_do_update, args=(remote_ver, download_url), daemon=True
+                ).start()
+        except Exception as e:
+            log.warning("Update-Check fehlgeschlagen: %s", e)
+            rumps.alert(f"Update-Check fehlgeschlagen:\n{e}")
 
     def quit_app(self, _):
         _stop_server()
