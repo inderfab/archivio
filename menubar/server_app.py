@@ -24,7 +24,7 @@ _HERE = Path(__file__).parent
 _IN_BUNDLE  = (_HERE / "web").exists()
 _CODE_ROOT  = _HERE if _IN_BUNDLE else _HERE.parent
 _DATA_DIR   = (Path.home() / "Library" / "Application Support" / "Archivio") if _IN_BUNDLE else _CODE_ROOT
-_VENV       = (_HERE if _IN_BUNDLE else _CODE_ROOT) / ".venv"
+_VENV       = _DATA_DIR / ".venv" if _IN_BUNDLE else _CODE_ROOT / ".venv"
 _VERSION    = _HERE / "VERSION" if _IN_BUNDLE else _CODE_ROOT / "VERSION"
 _EXAMPLE    = _CODE_ROOT / "config.yaml.example"
 

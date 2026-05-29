@@ -46,7 +46,9 @@ if [ -z "$PYTHON" ]; then
 fi
 echo "$(date): Python: $PYTHON"
 
-VENV="$DIR/.venv"
+DATA_DIR="$HOME/Library/Application Support/Archivio"
+mkdir -p "$DATA_DIR/logs"
+VENV="$DATA_DIR/.venv"
 if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Server"'
   echo "$(date): Erstinstallation – venv wird erstellt"
