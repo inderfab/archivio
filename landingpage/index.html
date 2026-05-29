@@ -20,12 +20,16 @@
       border-bottom: 1px solid #e8e8e8;
     }
     .wordmark {
+      display: inline-flex;
+      align-items: center;
+      gap: 9px;
       font-size: 18px;
       font-weight: 600;
       letter-spacing: -0.3px;
       color: #111;
       text-decoration: none;
     }
+    .wordmark svg { display: block; }
 
     /* ── Hero ── */
     .hero {
@@ -34,6 +38,14 @@
       padding: 100px 24px 80px;
       text-align: center;
     }
+    .hero-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .hero-logo svg { width: 52px; height: 52px; }
     .hero h1 {
       font-size: clamp(40px, 7vw, 64px);
       font-weight: 700;
@@ -138,11 +150,25 @@
 <body>
 
   <header>
-    <a class="wordmark" href="#">Archivio</a>
+    <a class="wordmark" href="#">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
   </header>
 
   <main>
     <section class="hero">
+      <div class="hero-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="1.5"/>
+          <path d="m8 13 4-7 4 7" stroke-width="1.5"/>
+          <path d="M9.1 11h5.7" stroke-width="1.5"/>
+        </svg>
+      </div>
       <h1>Archivio</h1>
       <p>Die lokale Wissensplattform für Architekturbüros</p>
       <a class="btn-download" href="https://github.com/inderfab/archivio/releases/latest"
@@ -159,7 +185,7 @@
     <section class="features">
       <ul>
         <li><span class="feat-dot"></span>Mails, Dokumente, Protokolle und Normen in einer Suche</li>
-        <li><span class="feat-dot"></span>KI-Suche mit lokalem LLM – keine Cloud</li>
+        <li><span class="feat-dot"></span>Volltext und KI-Suche mit lokalem LLM – keine Cloud</li>
         <li><span class="feat-dot"></span>Vollständig lokal, keine Internetanbindung nötig</li>
       </ul>
     </section>
