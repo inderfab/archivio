@@ -256,25 +256,27 @@ def _do_update(version: str, url: str):
         rumps.alert(title="Update fehlgeschlagen", message=f"Download-Fehler:\n{e}")
         return
 
-    try:
-        # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
-        app_path = _HERE.parent.parent
-        dest_dir = app_path.parent
-        log.info("Extrahiere nach %s", dest_dir)
-        with zipfile.ZipFile(zip_path) as zf:
-            zf.extractall(dest_dir)
-        zip_path.unlink(missing_ok=True)
-        log.info("Update %s installiert in %s", version, dest_dir)
-    except Exception as e:
-        log.error("Extraktion fehlgeschlagen: %s", e)
-        rumps.alert(title="Update fehlgeschlagen", message=f"Installations-Fehler:\n{e}")
+    # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
+    app_path = _HERE.parent.parent
+    dest_dir = app_path.parent
+    log.info("Extrahiere %s nach %s", zip_path, dest_dir)
+    r = subprocess.run(
+        ["ditto", "-x", "-k", str(zip_path), str(dest_dir)],
+        capture_output=True, text=True,
+    )
+    if r.returncode != 0:
+        log.error("ditto Fehler: %s", r.stderr)
+        rumps.alert(title="Update fehlgeschlagen",
+                    message=f"Extraktion fehlgeschlagen:\n{r.stderr or 'Unbekannter Fehler'}")
         return
+    zip_path.unlink(missing_ok=True)
+    log.info("Update %s installiert in %s", version, dest_dir)
 
     # App neu starten mit neuem Code
     restart = Path("/tmp/archivio-server-restart.sh")
     restart.write_text("#!/bin/bash\nsleep 2\nopen -a 'Archivio Server'\n")
     restart.chmod(0o755)
-    subprocess.Popen(["bash", str(restart)])
+    subprocess.Popen(["bash", str(restart)], start_new_session=True)
     rumps.alert(
         title="Update installiert",
         message=f"Version {version} wurde installiert. Die App wird neu gestartet.",

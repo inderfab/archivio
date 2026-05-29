@@ -180,12 +180,18 @@ async def update_server():
                 code_root  = Path(__file__).parent.parent   # Contents/Resources
                 app_bundle = code_root.parent.parent        # Archivio Server.app
                 dest_dir   = app_bundle.parent              # /Applications/
-                with zipfile.ZipFile(zip_path) as zf:
-                    zf.extractall(dest_dir)
+                _log(f"Extrahiere nach {dest_dir}")
+                r = subprocess.run(
+                    ["ditto", "-x", "-k", str(zip_path), str(dest_dir)],
+                    capture_output=True, text=True,
+                )
+                if r.returncode != 0:
+                    _log(f"ditto Fehler: {r.stderr}")
+                    return
                 zip_path.unlink(missing_ok=True)
                 _log(f"Update nach {dest_dir} extrahiert")
 
-                # App neu starten (3 Sek. Verzögerung damit der Response noch gesendet wird)
+                # App neu starten
                 restart = Path("/tmp/archivio-restart.sh")
                 restart.write_text(
                     "#!/bin/bash\nsleep 4\n"
@@ -193,7 +199,7 @@ async def update_server():
                     "sleep 2\nopen -a 'Archivio Server'\n"
                 )
                 restart.chmod(0o755)
-                subprocess.Popen(["bash", str(restart)])
+                subprocess.Popen(["bash", str(restart)], start_new_session=True)
                 _log("Server wird neu gestartet…")
             except Exception as e:
                 _log(f"Update-Fehler: {e}")
