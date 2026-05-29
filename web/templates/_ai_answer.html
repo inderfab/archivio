@@ -3,12 +3,13 @@
 <div class="ai-error ai-error-ollama">
   <div class="ai-error-title">KI-Suche nicht verfügbar</div>
   <div class="ai-error-body">
-    Ollama ist nicht installiert. Ollama ist die lokale KI-Engine — ohne sie kann
-    keine KI-Antwort generiert werden. Die Installation dauert ca. 2 Minuten.
+    Ollama ist auf dem Archivio-Server nicht installiert.<br>
+    Ollama ist die lokale KI-Engine — sie muss auf dem
+    <strong>Server-Computer</strong> (nicht auf diesem Mac) installiert werden.<br><br>
+    Bitte den Server-Administrator bitten, Ollama auf dem Server zu installieren
+    (<a href="https://ollama.com/download" target="_blank" style="color:#7f1d1d;">ollama.com/download</a>)
+    und danach die Archivio Server App neu zu starten.
   </div>
-  <a class="btn-ollama-install" href="https://ollama.com/download" target="_blank">
-    Ollama herunterladen →
-  </a>
 </div>
 {% else %}
 <div class="ai-error">
