@@ -1,10 +1,13 @@
 """Gemeinsame Ressourcen für alle web-Module (Templates, Filter)."""
 from __future__ import annotations
 
+from pathlib import Path
 from urllib.parse import quote
 from fastapi.templating import Jinja2Templates
 
-templates = Jinja2Templates(directory="web/templates")
+templates = Jinja2Templates(
+    directory=str(Path(__file__).resolve().parent / "templates")
+)
 
 
 def _office_name() -> str:
