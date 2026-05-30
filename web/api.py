@@ -118,6 +118,53 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
+_ollama_install_state: dict = {"running": False, "done": False, "error": "", "log": []}
+
+
+@router.post("/ai/install-ollama")
+async def install_ollama():
+    if _ollama_install_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Installation läuft bereits"})
+
+    def _run():
+        _ollama_install_state.update({"running": True, "done": False, "error": "", "log": []})
+        brew = next(
+            (p for p in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] if Path(p).exists()),
+            None
+        )
+        if not brew:
+            _ollama_install_state.update({
+                "running": False,
+                "error": "Homebrew nicht gefunden. Bitte Homebrew zuerst installieren (brew.sh)."
+            })
+            return
+        try:
+            proc = subprocess.Popen(
+                [brew, "install", "ollama"],
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
+            )
+            for line in proc.stdout:
+                _ollama_install_state["log"].append(line.rstrip())
+            proc.wait()
+            if proc.returncode == 0:
+                _ollama_install_state.update({"running": False, "done": True})
+            else:
+                _ollama_install_state.update({
+                    "running": False,
+                    "error": f"Installation fehlgeschlagen (Exit {proc.returncode})"
+                })
+        except Exception as e:
+            _ollama_install_state.update({"running": False, "error": str(e)})
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True})
+
+
+@router.get("/ai/install-ollama/status")
+async def install_ollama_status():
+    return JSONResponse(_ollama_install_state)
+
+
 _update_log: list[str] = []
 
 

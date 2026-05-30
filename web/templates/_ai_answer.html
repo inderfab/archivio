@@ -1,16 +1,44 @@
 {% if error %}
 {% if ollama_missing %}
-<div class="ai-error ai-error-ollama">
+<div class="ai-error ai-error-ollama" id="ollama-missing-box">
   <div class="ai-error-title">KI-Suche nicht verfügbar</div>
   <div class="ai-error-body">
-    Ollama ist auf dem Archivio-Server nicht installiert.<br>
-    Ollama ist die lokale KI-Engine — sie muss auf dem
-    <strong>Server-Computer</strong> (nicht auf diesem Mac) installiert werden.<br><br>
-    Bitte den Server-Administrator bitten, Ollama auf dem Server zu installieren
-    (<a href="https://ollama.com/download" target="_blank" style="color:#7f1d1d;">ollama.com/download</a>)
-    und danach die Archivio Server App neu zu starten.
+    Ollama ist auf diesem Server nicht installiert.<br>
+    Ollama ist die lokale KI-Engine und muss per Terminal installiert werden.<br><br>
+    <button class="btn-ollama-install" id="btn-install-ollama" onclick="installOllama()">
+      Ollama jetzt installieren
+    </button>
   </div>
+  <div id="ollama-install-log" style="display:none;margin-top:14px;background:#1a1a1a;color:#d4d4d4;font-family:monospace;font-size:12px;padding:12px;border-radius:6px;max-height:200px;overflow-y:auto;white-space:pre-wrap;"></div>
+  <div id="ollama-install-status" style="margin-top:10px;font-size:13px;"></div>
 </div>
+<script>
+function installOllama() {
+  document.getElementById('btn-install-ollama').disabled = true;
+  document.getElementById('btn-install-ollama').textContent = 'Wird installiert…';
+  document.getElementById('ollama-install-log').style.display = 'block';
+  fetch('/api/ai/install-ollama', {method: 'POST'}).then(function() {
+    pollOllamaInstall();
+  });
+}
+function pollOllamaInstall() {
+  fetch('/api/ai/install-ollama/status').then(r => r.json()).then(function(s) {
+    var log = document.getElementById('ollama-install-log');
+    var status = document.getElementById('ollama-install-status');
+    log.textContent = s.log.join('\n');
+    log.scrollTop = log.scrollHeight;
+    if (s.done) {
+      status.innerHTML = '<span style="color:#16a34a;font-weight:600;">✓ Ollama erfolgreich installiert. Bitte Archivio Server neu starten.</span>';
+    } else if (s.error) {
+      status.innerHTML = '<span style="color:#dc2626;">' + s.error + '</span>';
+      document.getElementById('btn-install-ollama').disabled = false;
+      document.getElementById('btn-install-ollama').textContent = 'Erneut versuchen';
+    } else if (s.running) {
+      setTimeout(pollOllamaInstall, 1000);
+    }
+  });
+}
+</script>
 {% else %}
 <div class="ai-error">
   <span class="ai-error-icon">⚠</span>
