@@ -138,59 +138,6 @@ def _thread_alert(title: str, message: str):
                    timeout=60)
 
 
-def _do_update(version: str, url: str):
-    import os
-    import shutil
-    log.info("Helper-Update starten: %s", version)
-    zip_path = Path("/tmp/archivio-helper-update.zip")
-
-    # ── Download ──────────────────────────────────────────────────────────────
-    try:
-        resp = requests.get(url, timeout=120, stream=True)
-        resp.raise_for_status()
-        with open(zip_path, "wb") as f:
-            for chunk in resp.iter_content(65536):
-                f.write(chunk)
-        log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
-    except Exception as e:
-        log.error("Download fehlgeschlagen: %s", e)
-        _thread_alert("Update fehlgeschlagen", f"Download-Fehler: {e}")
-        return
-
-    # ── App ersetzen via ditto ────────────────────────────────────────────────
-    app_path = Path(sys.executable).parent.parent.parent.parent.parent
-    log.info("Ersetze %s mit ditto", app_path)
-    r = subprocess.run(
-        ["ditto", "-x", "-k", str(zip_path), str(app_path.parent)],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        log.info("ditto fehlgeschlagen, versuche mit Admin-Rechten: %s", r.stderr)
-        src = str(zip_path).replace('"', '\\"')
-        dst = str(app_path.parent).replace('"', '\\"')
-        r2 = subprocess.run(
-            ["osascript", "-e",
-             f'do shell script "ditto -x -k \\"{src}\\" \\"{dst}\\"" '
-             f'with administrator privileges'],
-            capture_output=True, text=True,
-        )
-        if r2.returncode != 0:
-            log.error("Admin-ditto fehlgeschlagen: %s", r2.stderr)
-            _thread_alert("Update fehlgeschlagen",
-                          f"Konnte App nicht ersetzen: {r2.stderr or 'Abgebrochen'}")
-            return
-
-    zip_path.unlink(missing_ok=True)
-    log.info("Update %s installiert", version)
-
-    # ── Neustart ──────────────────────────────────────────────────────────────
-    restart = Path("/tmp/archivio-helper-restart.sh")
-    restart.write_text(f'#!/bin/bash\nsleep 2\nopen "{app_path}"\n')
-    restart.chmod(0o755)
-    subprocess.Popen(["bash", str(restart)], start_new_session=True)
-    _thread_alert("Update installiert",
-                  f"Version {version} installiert. Der Helper wird neu gestartet.")
-    os._exit(0)
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
@@ -276,11 +223,11 @@ class ArchivioHelper(rumps.App):
         if result:
             version, url = result
             self._pending_update = (version, url)
-            self._update_item.title = f"🟡  Update: v{version} installieren"
+            self._update_item.title = f"🟡  Update: v{version} verfügbar"
             rumps.notification(
                 "Archivio Helper",
                 f"Update verfügbar: Version {version}",
-                "Im Menü auf «Update installieren» klicken.",
+                "Im Menü auf «Update verfügbar» klicken.",
             )
             log.info("Update verfügbar: %s", version)
         else:
@@ -288,33 +235,31 @@ class ArchivioHelper(rumps.App):
             self._update_item.title = "Auf Updates prüfen"
 
     def _update_action(self, _):
+        cfg = _load_config()
+        server = cfg.get("server_url", "http://localhost:8000").rstrip("/")
+        settings_url = f"{server}/dashboard/settings"
         if self._pending_update:
-            version, url = self._pending_update
+            version, _ = self._pending_update
             if rumps.alert(
                 title="Update verfügbar",
-                message=f"Version {version} verfügbar. Jetzt installieren?",
-                ok="Installieren", cancel="Abbrechen",
+                message=f"Version {version} verfügbar. Zur Download-Seite öffnen?",
+                ok="Zur Download-Seite", cancel="Abbrechen",
             ):
-                threading.Thread(
-                    target=_do_update, args=(version, url), daemon=True
-                ).start()
+                subprocess.run(["open", settings_url])
         else:
-            # Manuell prüfen
             result = _check_update()
             if result is None:
                 rumps.alert(f"Archivio Helper {_local_version()} ist aktuell.")
             else:
-                version, url = result
-                self._pending_update = (version, url)
-                self._update_item.title = f"🟡  Update: v{version} installieren"
+                version, _ = result
+                self._pending_update = (version, _)
+                self._update_item.title = f"🟡  Update: v{version} verfügbar"
                 if rumps.alert(
                     title="Update verfügbar",
-                    message=f"Version {version} verfügbar. Jetzt installieren?",
-                    ok="Installieren", cancel="Abbrechen",
+                    message=f"Version {version} verfügbar. Zur Download-Seite öffnen?",
+                    ok="Zur Download-Seite", cancel="Abbrechen",
                 ):
-                    threading.Thread(
-                        target=_do_update, args=(version, url), daemon=True
-                    ).start()
+                    subprocess.run(["open", settings_url])
 
     def _status_loop(self):
         import time

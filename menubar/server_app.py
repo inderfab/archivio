@@ -264,46 +264,6 @@ def _thread_alert(title: str, message: str):
                    timeout=60)
 
 
-def _do_update(version: str, url: str):
-    import os
-    log.info("Update starten: %s von %s", version, url)
-    zip_path = Path("/tmp/archivio-server-update.zip")
-    try:
-        resp = requests.get(url, timeout=180, stream=True)
-        resp.raise_for_status()
-        with open(zip_path, "wb") as f:
-            for chunk in resp.iter_content(65536):
-                f.write(chunk)
-        log.info("ZIP heruntergeladen: %s bytes", zip_path.stat().st_size)
-    except Exception as e:
-        log.error("Download fehlgeschlagen: %s", e)
-        _thread_alert("Update fehlgeschlagen", f"Download-Fehler: {e}")
-        return
-
-    # _HERE = Contents/Resources  →  .parent.parent = Archivio Server.app
-    app_path = _HERE.parent.parent
-    dest_dir = app_path.parent
-    log.info("Extrahiere %s nach %s", zip_path, dest_dir)
-    r = subprocess.run(
-        ["ditto", "-x", "-k", str(zip_path), str(dest_dir)],
-        capture_output=True, text=True,
-    )
-    if r.returncode != 0:
-        log.error("ditto Fehler: %s", r.stderr)
-        _thread_alert("Update fehlgeschlagen",
-                      f"Extraktion fehlgeschlagen: {r.stderr or 'Unbekannter Fehler'}")
-        return
-    zip_path.unlink(missing_ok=True)
-    log.info("Update %s installiert in %s", version, dest_dir)
-
-    restart = Path("/tmp/archivio-server-restart.sh")
-    restart.write_text("#!/bin/bash\nsleep 2\nopen -a 'Archivio Server'\n")
-    restart.chmod(0o755)
-    subprocess.Popen(["bash", str(restart)], start_new_session=True)
-    _thread_alert("Update installiert",
-                  f"Version {version} installiert. Die App wird neu gestartet.")
-    _stop_server()
-    os._exit(0)
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
@@ -434,22 +394,12 @@ class ArchivioServer(rumps.App):
             if remote_ver == current:
                 rumps.alert(f"Archivio Server {current} ist aktuell.")
                 return
-            download_url = next(
-                (a["browser_download_url"] for a in data.get("assets", [])
-                 if ASSET_NAME in a["name"] and a["name"].endswith(".zip")),
-                None,
-            )
-            if not download_url:
-                rumps.alert(f"Version {remote_ver} gefunden, aber kein ZIP-Asset.")
-                return
             if rumps.alert(
                 title="Update verfügbar",
-                message=f"Version {remote_ver} verfügbar (aktuell: {current}). Jetzt installieren?",
-                ok="Installieren", cancel="Abbrechen",
+                message=f"Version {remote_ver} verfügbar (aktuell: {current}).\nZur Download-Seite öffnen?",
+                ok="Zur Download-Seite", cancel="Abbrechen",
             ):
-                threading.Thread(
-                    target=_do_update, args=(remote_ver, download_url), daemon=True
-                ).start()
+                subprocess.run(["open", "https://inderfab.github.io/archivio/index.html"])
         except Exception as e:
             log.warning("Update-Check fehlgeschlagen: %s", e)
             rumps.alert(f"Update-Check fehlgeschlagen:\n{e}")
