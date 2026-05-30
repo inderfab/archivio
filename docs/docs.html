@@ -361,11 +361,11 @@
         <p>Ollama wird direkt aus Archivio heraus installiert — kein manuelles Herunterladen nötig.</p>
         <ol class="step-list">
           <li>KI-Suche öffnen. Falls Ollama fehlt, erscheint die Meldung „KI-Suche nicht verfügbar" mit einem Button <strong>„Ollama jetzt installieren"</strong>.</li>
-          <li>Button klicken — Archivio führt die Installation automatisch per Terminal aus. Der Fortschritt wird direkt angezeigt.</li>
+          <li>Button klicken — Archivio führt <code>brew install ollama</code> automatisch aus. Der Fortschritt wird direkt angezeigt.</li>
           <li>Nach erfolgreicher Installation: Archivio Server neu starten. Er lädt das Sprachmodell automatisch beim ersten Start.</li>
         </ol>
         <div class="callout">
-          <strong>Wichtig:</strong> Ollama muss auf dem Computer installiert sein, auf dem der Archivio Server läuft. Das Modell wird lokal geladen, keine Daten verlassen das Büro.
+          <strong>Wichtig:</strong> Ollama muss per Terminal (<code>brew install ollama</code>) installiert werden — die Ollama.app von ollama.com funktioniert nicht, da sie keine Terminal-Verbindung herstellt. Archivio installiert Ollama korrekt per Button automatisch.
         </div>
         <h3>KI-Suche verwenden</h3>
         <p>Im Suchfeld oben den Tab <strong>„KI-Suche"</strong> wählen und eine Frage in ganzen Sätzen stellen, z.&nbsp;B.: <em>„Welche Anforderungen gelten für den Brandschutz im Treppenhaus?"</em></p>
