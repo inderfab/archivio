@@ -43,9 +43,12 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None):
         # Ausgeschlossene Ordner in-place entfernen → os.walk steigt nicht hinein
         dirnames[:] = [
             d for d in dirnames
-            if not any(excl in unicodedata.normalize('NFC', d.lower()) for excl in excluded)
+            if not d.startswith('.')
+            and not any(excl in unicodedata.normalize('NFC', d.lower()) for excl in excluded)
         ]
         for filename in filenames:
+            if filename.startswith('.'):
+                continue
             path = Path(dirpath) / filename
             if path.suffix.lower() not in supported:
                 continue
