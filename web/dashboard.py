@@ -333,7 +333,7 @@ async def browse(
     try:
         with os.scandir(path) as it:
             for entry in sorted(it, key=lambda e: e.name.lower()):
-                if not entry.is_dir():
+                if not entry.is_dir() or entry.name.startswith('.'):
                     continue
                 subdirs.append({
                     "name":         entry.name,
@@ -615,7 +615,7 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     try:
         with os.scandir(base) as it:
             for entry in sorted(it, key=lambda e: e.name.lower()):
-                if not entry.is_dir():
+                if not entry.is_dir() or entry.name.startswith('.'):
                     continue
                 path = entry.path
                 db   = db_by_path.get(path)
@@ -681,7 +681,7 @@ def _global_stats(conn) -> dict:
 def _has_subdirs(path: str) -> bool:
     try:
         with os.scandir(path) as it:
-            return any(e.is_dir() for e in it)
+            return any(e.is_dir() and not e.name.startswith('.') for e in it)
     except PermissionError:
         return False
 
