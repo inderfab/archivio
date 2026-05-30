@@ -228,12 +228,16 @@ async def update_server():
                 app_bundle = code_root.parent.parent        # Archivio Server.app
                 dest_dir   = app_bundle.parent              # /Applications/
                 _log(f"Extrahiere nach {dest_dir}")
+                shell_cmd = (
+                    f"ditto -x -k {str(zip_path)!r} {str(dest_dir)!r}"
+                )
                 r = subprocess.run(
-                    ["ditto", "-x", "-k", str(zip_path), str(dest_dir)],
+                    ["osascript", "-e",
+                     f'do shell script "{shell_cmd}" with administrator privileges'],
                     capture_output=True, text=True,
                 )
                 if r.returncode != 0:
-                    _log(f"ditto Fehler: {r.stderr}")
+                    _log(f"Extraktion fehlgeschlagen: {r.stderr.strip() or r.stdout.strip()}")
                     return
                 zip_path.unlink(missing_ok=True)
                 _log(f"Update nach {dest_dir} extrahiert")
