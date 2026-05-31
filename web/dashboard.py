@@ -838,13 +838,14 @@ def _scan_badge(project_id: int, status: str) -> str:
         total     = _scans.get(project_id, {}).get("total", 0)
         label     = f"Scannt… {processed}/{total}" if total else "Scannt…"
         return (
-            f'<span class="scan-badge running" '
+            f'<span class="scan-running-wrap" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '
             f'hx-trigger="every 3s" hx-swap="outerHTML">'
-            f'{label}</span>'
+            f'<span class="scan-badge running">{label}</span>'
             f'<button class="btn btn-cancel" style="margin-left:6px;" '
             f'hx-post="/dashboard/projects/{project_id}/scan/cancel" '
-            f'hx-swap="outerHTML" hx-target="previous span">Abbrechen</button>'
+            f'hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>'
+            f'</span>'
         )
     if status == "cancelled":
         processed = _scans.get(project_id, {}).get("processed", 0)
