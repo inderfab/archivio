@@ -283,6 +283,13 @@ def _rerank_by_answer(sources: list, answer: str) -> list:
     return sorted(sources, key=score, reverse=True)
 
 
+def _filename_score(filename: str, q: str) -> int:
+    """Gibt Anzahl der Suchwörter zurück die im Dateinamen vorkommen (Stoppwörter ignoriert)."""
+    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.lower().split()]
+    words = [w for w in words if w and w not in _STOPWORDS]
+    fn = filename.lower()
+    return sum(1 for w in words if w in fn)
+
 def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
         return _search_filtered(conn, filters, filter_params)
@@ -295,6 +302,8 @@ def _search(conn, q: str, filters: str, filter_params: list):
     for r in fname_results:
         if r["id"] not in seen:
             results.append(r)
+    # Filename-Treffer nach oben schieben
+    results.sort(key=lambda r: _filename_score(r.get("filename", ""), q), reverse=True)
     if results:
         return results, None
     results, error = _search_like(conn, q, filters, filter_params)
@@ -533,9 +542,20 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
         return []
 
 
+_STOPWORDS = {
+    "und", "oder", "der", "die", "das", "dem", "den", "des",
+    "ein", "eine", "einen", "einem", "einer", "eines",
+    "ist", "sind", "hat", "haben", "wird", "werden",
+    "von", "bei", "mit", "zu", "in", "an", "auf", "für",
+    "als", "auch", "aber", "noch", "nur", "schon",
+    "wenn", "dann", "so", "wie", "was", "wer", "wo",
+    "nicht", "kein", "keine", "keinen", "keinem",
+    "sich", "es", "er", "sie", "wir", "ihr", "du", "ich",
+}
+
 def _make_fts_query(q: str) -> str:
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split()]
-    words = [w for w in words if w]
+    words = [w for w in words if w and w.lower() not in _STOPWORDS]
     if not words:
         return '""'
     return " AND ".join(f"{w}*" for w in words)
