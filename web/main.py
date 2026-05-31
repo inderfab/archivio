@@ -197,7 +197,9 @@ async def search(
 @app.get("/open")
 async def open_file(path: str = Query(...)):
     try:
-        subprocess.run(["open", path], check=True, timeout=5)
+        result = subprocess.run(["open", path], capture_output=True, text=True, timeout=5)
+        if result.returncode != 0:
+            return JSONResponse({"ok": False, "error": result.stderr or result.stdout}, status_code=500)
         return JSONResponse({"ok": True})
     except Exception as exc:
         return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
