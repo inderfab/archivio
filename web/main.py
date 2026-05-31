@@ -33,7 +33,11 @@ def _scheduler_loop():
             if scan_time:
                 now = datetime.now()
                 today = now.strftime("%Y-%m-%d")
-                if now.strftime("%H:%M") == scan_time and triggered_today != today:
+                # 2-Minuten-Fenster: verhindert dass sleep(60)-Drift die Minute verpasst
+                h, m = map(int, scan_time.split(":"))
+                target = now.replace(hour=h, minute=m, second=0, microsecond=0)
+                diff = abs((now - target).total_seconds())
+                if diff < 120 and triggered_today != today:
                     triggered_today = today
                     try:
                         import requests as _req
@@ -281,8 +285,16 @@ def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
         return _search_filtered(conn, filters, filter_params)
     results, error = _search_fts(conn, q, filters, filter_params)
-    if results or error:
+    if error:
         return results, error
+    # Dateinamen-Treffer immer zusätzlich prüfen — chunks_fts enthält keine Dateinamen
+    fname_results = _search_filename(conn, q, filters, filter_params)
+    seen = {r["id"] for r in results}
+    for r in fname_results:
+        if r["id"] not in seen:
+            results.append(r)
+    if results:
+        return results, None
     results, error = _search_like(conn, q, filters, filter_params)
     for r in results:
         r["fallback"] = True
@@ -481,6 +493,42 @@ def _excerpt(text: str, query: str, window: int = 220) -> str:
         )
 
     return ("…" if start > 0 else "") + snippet + ("…" if end < len(text) else "")
+
+
+def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[dict]:
+    """Sucht per documents_fts nach Dateinamen-Treffern (chunks_fts hat keine Dateinamen)."""
+    fts_q = _make_fts_query(q)
+    sql = f"""
+        SELECT
+            d.id, d.filename, d.extension, d.filesize, d.modified_at,
+            d.extraction_status, d.source_type,
+            p.name      AS project_name,
+            dp.path     AS filepath,
+            NULL        AS raw_content,
+            NULL        AS page_number,
+            m.sender    AS mail_sender,
+            m.date      AS mail_date
+        FROM documents_fts
+        JOIN  documents       d  ON documents_fts.rowid = d.id
+        JOIN  projects        p  ON p.id = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN mails       m  ON m.document_id = d.id
+        WHERE documents_fts MATCH ?
+        {filters}
+        LIMIT 50
+    """
+    try:
+        rows = conn.execute(sql, [fts_q] + filter_params).fetchall()
+        results = []
+        for r in rows:
+            d = dict(r)
+            d["fallback"] = False
+            d["excerpt"]  = ""
+            d.pop("raw_content", None)
+            results.append(d)
+        return results
+    except Exception:
+        return []
 
 
 def _make_fts_query(q: str) -> str:

@@ -22,6 +22,8 @@ log = logging.getLogger(__name__)
 
 # In-Memory Scan-Status  {project_id: {status, count, started_at, ...}}
 _scans: dict[int, dict] = {}
+# Cancel-Flags {project_id: {"cancel": bool}}
+_cancel_flags: dict[int, dict] = {}
 # Mail-Scan-Status
 _mail_scan: dict = {}
 
@@ -88,6 +90,18 @@ async def download_server():
 
 # ── Projektliste (HTMX-Partial) ───────────────────────────────────────────────
 
+@router.get("/projects/list", response_class=HTMLResponse)
+async def projects_list(request: Request):
+    """Projektliste neu laden (z.B. nach Abbrechen eines Dialogs)."""
+    conn = connection.get_connection()
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request, "groups": groups, "stats": stats,
+    })
+
+
 @router.post("/projects/toggle", response_class=HTMLResponse)
 async def toggle_project(
     request: Request,
@@ -97,26 +111,71 @@ async def toggle_project(
     conn = connection.get_connection()
     row  = conn.execute("SELECT * FROM projects WHERE path=?", (path,)).fetchone()
     if row is None:
+        # Neu aktivieren
         with conn:
             conn.execute(
                 "INSERT INTO projects (name, path, active) VALUES (?,?,1)",
                 (name, path),
             )
+        _rematch_unassigned_mailboxes(conn)
+        groups = _project_groups(conn)
+        stats  = _global_stats(conn)
+        conn.close()
+        return templates.TemplateResponse("_dashboard_projects.html", {
+            "request": request, "groups": groups, "stats": stats,
+        })
+    elif row["active"]:
+        # Aktives Projekt deaktivieren → Rückfrage ob aus DB entfernen
+        doc_count = conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE project_id=?", (row["id"],)
+        ).fetchone()[0]
+        conn.close()
+        return templates.TemplateResponse("_dashboard_project_confirm_remove.html", {
+            "request":   request,
+            "project_id": row["id"],
+            "name":      row["name"],
+            "path":      path,
+            "doc_count": doc_count,
+        })
     else:
+        # Wieder aktivieren
         with conn:
-            conn.execute(
-                "UPDATE projects SET active=? WHERE id=?",
-                (0 if row["active"] else 1, row["id"]),
-            )
-    # Mailbox-Zuordnung für bisher ungematchte Postfächer aktualisieren
+            conn.execute("UPDATE projects SET active=1 WHERE id=?", (row["id"],))
+        _rematch_unassigned_mailboxes(conn)
+        groups = _project_groups(conn)
+        stats  = _global_stats(conn)
+        conn.close()
+        return templates.TemplateResponse("_dashboard_projects.html", {
+            "request": request, "groups": groups, "stats": stats,
+        })
+
+
+@router.post("/projects/{project_id}/deactivate", response_class=HTMLResponse)
+async def deactivate_project(request: Request, project_id: int):
+    """Nur deaktivieren, Daten behalten."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute("UPDATE projects SET active=0 WHERE id=?", (project_id,))
     _rematch_unassigned_mailboxes(conn)
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
     return templates.TemplateResponse("_dashboard_projects.html", {
-        "request": request,
-        "groups":  groups,
-        "stats":   stats,
+        "request": request, "groups": groups, "stats": stats,
+    })
+
+
+@router.post("/projects/{project_id}/delete", response_class=HTMLResponse)
+async def delete_project(request: Request, project_id: int):
+    """Projekt und alle Dokumente aus DB entfernen."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request, "groups": groups, "stats": stats,
     })
 
 
@@ -143,6 +202,7 @@ async def start_scan(request: Request, project_id: int):
         "current_file": "",
         "started_at":   _now(),
     }
+    _cancel_flags[project_id] = {"cancel": False}
     threading.Thread(
         target=_run_scan, args=(project_id, row["path"]), daemon=True
     ).start()
@@ -153,6 +213,17 @@ async def start_scan(request: Request, project_id: int):
 async def scan_status(project_id: int):
     status = _scans.get(project_id, {}).get("status", "idle")
     return HTMLResponse(_scan_badge(project_id, status))
+
+
+@router.post("/projects/{project_id}/scan/cancel", response_class=HTMLResponse)
+async def cancel_scan(project_id: int):
+    flag = _cancel_flags.get(project_id)
+    if flag:
+        flag["cancel"] = True
+    s = _scans.get(project_id, {})
+    if s.get("status") == "running":
+        s["status"] = "cancelled"
+    return HTMLResponse(_scan_badge(project_id, "cancelled"))
 
 
 @router.get("/projects/{project_id}/scan-progress")
@@ -330,6 +401,7 @@ async def browse(
     excluded = {unicodedata.normalize('NFC', f.lower()) for f in settings.get("scanner.excluded_folders", [])}
 
     subdirs: list[dict] = []
+    error_msg: str = ""
     try:
         with os.scandir(path) as it:
             for entry in sorted(it, key=lambda e: e.name.lower()):
@@ -343,11 +415,19 @@ async def browse(
                     "has_children": _has_subdirs(entry.path),
                 })
     except PermissionError:
-        pass
+        log.warning("Kein Zugriff auf Ordner: %s (macOS Full Disk Access prüfen)", path)
+        error_msg = "Kein Zugriff auf diesen Ordner. macOS-Berechtigungen (Datenschutz → Festplattenvollzugriff) prüfen."
+    except FileNotFoundError:
+        log.warning("Ordner nicht gefunden: %s", path)
+        error_msg = f"Ordner nicht gefunden: {path}"
+    except OSError as exc:
+        log.warning("Fehler beim Lesen von %s: %s", path, exc)
+        error_msg = f"Ordner konnte nicht gelesen werden: {exc}"
 
     return templates.TemplateResponse("_dashboard_browse.html", {
         "request":      request,
         "subdirs":      subdirs,
+        "error_msg":    error_msg,
         "current_path": path,
         "project_id":   project_id,
         "depth":        depth,
@@ -719,8 +799,15 @@ def _run_mail_scan():
 
 def _run_scan(project_id: int, path: str):
     progress = _scans[project_id]
+    cancel_flag = _cancel_flags.get(project_id, {})
     try:
-        scan_project(project_id, Path(path), progress=progress)
+        scan_project(project_id, Path(path), progress=progress, cancel_flag=cancel_flag)
+        if progress.get("phase") == "error":
+            progress.update({"status": "error", "finished_at": _now()})
+            return
+        if cancel_flag.get("cancel"):
+            progress.update({"status": "cancelled", "finished_at": _now()})
+            return
         conn  = connection.get_connection()
         count = conn.execute(
             "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
@@ -747,14 +834,32 @@ def _now() -> str:
 
 def _scan_badge(project_id: int, status: str) -> str:
     if status == "running":
+        processed = _scans.get(project_id, {}).get("processed", 0)
+        total     = _scans.get(project_id, {}).get("total", 0)
+        label     = f"Scannt… {processed}/{total}" if total else "Scannt…"
         return (
             f'<span class="scan-badge running" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '
-            f'hx-trigger="every 3s" hx-swap="outerHTML">Scannt…</span>'
+            f'hx-trigger="every 3s" hx-swap="outerHTML">'
+            f'{label}</span>'
+            f'<button class="btn btn-cancel" style="margin-left:6px;" '
+            f'hx-post="/dashboard/projects/{project_id}/scan/cancel" '
+            f'hx-swap="outerHTML" hx-target="previous span">Abbrechen</button>'
         )
+    if status == "cancelled":
+        processed = _scans.get(project_id, {}).get("processed", 0)
+        return f'<span class="scan-badge error">⏹ Abgebrochen ({processed} verarbeitet)</span>'
     if status == "done":
         count = _scans.get(project_id, {}).get("count", "?")
+        if count == 0 or count == "0":
+            return (
+                f'<span class="scan-badge error" title="0 Dokumente gefunden — '
+                f'Dateitypen, Pfad und macOS-Zugriffsrechte prüfen (Vollzugriff auf Festplatte).">'
+                f'⚠ 0 Dok. gefunden</span>'
+            )
         return f'<span class="scan-badge done">✓ {count} Dok.</span>'
     if status == "error":
-        return '<span class="scan-badge error">Fehler beim Scan</span>'
+        error = _scans.get(project_id, {}).get("error", "")
+        title = f' title="{error}"' if error else ""
+        return f'<span class="scan-badge error"{title}>Fehler beim Scan</span>'
     return ""

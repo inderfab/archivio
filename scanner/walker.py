@@ -27,13 +27,27 @@ def _excluded_folders() -> set[str]:
     return {unicodedata.normalize('NFC', f.lower()) for f in settings.get("scanner.excluded_folders", [])}
 
 
-def scan_project(project_id: int, root: Path, progress: dict | None = None):
+def scan_project(project_id: int, root: Path, progress: dict | None = None, cancel_flag: dict | None = None):
     """Walk root, hash every supported file, extract text, persist to DB."""
     supported = _supported_extensions()
     excluded = _excluded_folders()
 
     if progress is not None:
         progress["phase"] = "collecting"
+
+    if not root.exists():
+        log.error("Scan abgebrochen: Pfad existiert nicht: %s", root)
+        if progress is not None:
+            progress["phase"] = "error"
+        return
+    if not os.access(root, os.R_OK):
+        log.error(
+            "Scan abgebrochen: Kein Lesezugriff auf %s — "
+            "macOS Full Disk Access in Systemeinstellungen → Datenschutz prüfen.", root
+        )
+        if progress is not None:
+            progress["phase"] = "error"
+        return
 
     batch: list[Path] = []
 
@@ -54,11 +68,20 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None):
                 continue
             batch.append(path)
 
-    log.info(
-        "Scan: %d Dateien gefunden (ohne Ordner: %s)",
-        len(batch),
-        ", ".join(settings.get("scanner.excluded_folders", [])),
-    )
+    if len(batch) == 0:
+        log.warning(
+            "Scan: 0 Dateien gefunden in %s — "
+            "Mögliche Ursachen: Keine unterstützten Dateitypen (%s), "
+            "macOS Full Disk Access fehlt, oder Pfad nicht zugänglich.",
+            root,
+            ", ".join(supported) if supported else "keine Extensions konfiguriert",
+        )
+    else:
+        log.info(
+            "Scan: %d Dateien gefunden (ohne Ordner: %s)",
+            len(batch),
+            ", ".join(settings.get("scanner.excluded_folders", [])),
+        )
 
     if progress is not None:
         progress["phase"] = "processing"
@@ -66,6 +89,10 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None):
 
     conn = connection.get_connection()
     for path in batch:
+        if cancel_flag and cancel_flag.get("cancel"):
+            log.info("Scan abgebrochen durch Benutzer nach %d/%d Dateien.",
+                     progress.get("processed", 0) if progress else 0, len(batch))
+            break
         if progress is not None:
             progress["current_file"] = path.name
         result = _process_file(conn, project_id, path)

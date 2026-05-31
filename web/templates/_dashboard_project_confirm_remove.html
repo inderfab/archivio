@@ -1,0 +1,33 @@
+<div class="project-remove-confirm" style="
+    padding: 14px 16px;
+    background: var(--bg-2, #f5f5f5);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 4px 0;
+">
+  <div style="font-weight:600; margin-bottom:6px;">{{ name }} deaktivieren</div>
+  <div style="font-size:12px; color:var(--text-2); margin-bottom:12px;">
+    Dieses Projekt hat <strong>{{ doc_count }} indexierte Dokumente</strong>.
+    Sollen die Daten aus der Datenbank entfernt werden?
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <button class="btn btn-danger"
+            hx-post="/dashboard/projects/{{ project_id }}/delete"
+            hx-target="#project-list"
+            hx-swap="innerHTML">
+      Aus DB entfernen
+    </button>
+    <button class="btn"
+            hx-post="/dashboard/projects/{{ project_id }}/deactivate"
+            hx-target="#project-list"
+            hx-swap="innerHTML">
+      Nur deaktivieren
+    </button>
+    <button class="btn"
+            hx-get="/dashboard/projects/list"
+            hx-target="#project-list"
+            hx-swap="innerHTML">
+      Abbrechen
+    </button>
+  </div>
+</div>

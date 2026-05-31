@@ -1,5 +1,7 @@
 <div class="browse-col" data-depth="{{ depth }}">
-  {% if subdirs %}
+  {% if error_msg %}
+    <div style="padding:12px; font-size:12px; color:#c0392b;">⚠ {{ error_msg }}</div>
+  {% elif subdirs %}
     {% for d in subdirs %}
     <button
       class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }}"
@@ -32,4 +34,5 @@
   {% else %}
     <div style="padding:12px; font-size:12px; color:var(--text-3);">Keine Unterordner</div>
   {% endif %}
+
 </div>

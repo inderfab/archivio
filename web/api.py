@@ -12,7 +12,7 @@ from fastapi.responses import JSONResponse
 
 from config import settings
 from db import connection
-from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _now
+from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _cancel_flags, _now
 
 router = APIRouter(prefix="/api")
 

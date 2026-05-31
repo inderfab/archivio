@@ -32,34 +32,67 @@ def extract_txt(path: Path) -> tuple[str, str]:
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
-def extract_pdf(path: Path) -> tuple[str, str]:
-    try:
-        import pypdf
-    except ImportError:
-        raise UnsupportedFormat("pypdf not installed")
-    try:
-        reader = pypdf.PdfReader(str(path))
-        parts = [t for page in reader.pages if (t := page.extract_text())]
-        return "\n".join(parts), ""
-    except Exception as exc:
-        raise ExtractionError(str(exc)) from exc
-
-
-def extract_pdf_pages(path: Path) -> list[dict]:
-    """Gibt [{page_number, content}] zurück; leere Seiten (<50 Zeichen) werden übersprungen."""
-    try:
-        import pypdf
-    except ImportError:
-        raise UnsupportedFormat("pypdf not installed")
-    try:
-        reader = pypdf.PdfReader(str(path))
-        result = []
-        for i, page in enumerate(reader.pages, start=1):
-            text = (page.extract_text() or "").strip()
+def _pdf_pages_pymupdf(path: Path) -> list[dict]:
+    """Primäre PDF-Extraktion via PyMuPDF — besser bei custom Fonts."""
+    import fitz  # pymupdf
+    result = []
+    with fitz.open(str(path)) as doc:
+        for i, page in enumerate(doc, start=1):
+            text = page.get_text().strip()
             if len(text) < 50:
                 continue
             result.append({"page_number": i, "content": text})
-        return result
+    return result
+
+
+def _pdf_pages_pypdf(path: Path) -> list[dict]:
+    """Fallback-Extraktion via pypdf."""
+    import pypdf
+    reader = pypdf.PdfReader(str(path))
+    result = []
+    for i, page in enumerate(reader.pages, start=1):
+        text = (page.extract_text() or "").strip()
+        if len(text) < 50:
+            continue
+        result.append({"page_number": i, "content": text})
+    return result
+
+
+def _has_mojibake(pages: list[dict]) -> bool:
+    """True wenn >30 % der Zeichen Replacement-Characters sind (Encoding-Fehler)."""
+    if not pages:
+        return False
+    sample = "".join(p["content"] for p in pages[:5])
+    if not sample:
+        return False
+    ratio = sample.count("�") / len(sample)
+    return ratio > 0.30
+
+
+def extract_pdf(path: Path) -> tuple[str, str]:
+    pages = extract_pdf_pages(path)
+    return "\n".join(p["content"] for p in pages), ""
+
+
+def extract_pdf_pages(path: Path) -> list[dict]:
+    """Gibt [{page_number, content}] zurück. PyMuPDF primär, pypdf als Fallback."""
+    # PyMuPDF versuchen
+    try:
+        pages = _pdf_pages_pymupdf(path)
+        if not _has_mojibake(pages):
+            return pages
+    except ImportError:
+        pass  # pymupdf nicht installiert → pypdf versuchen
+    except Exception as exc:
+        raise ExtractionError(str(exc)) from exc
+
+    # Fallback: pypdf
+    try:
+        import pypdf  # noqa: F401
+    except ImportError:
+        raise UnsupportedFormat("Weder pymupdf noch pypdf installiert")
+    try:
+        return _pdf_pages_pypdf(path)
     except Exception as exc:
         raise ExtractionError(str(exc)) from exc
 
