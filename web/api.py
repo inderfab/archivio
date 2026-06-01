@@ -134,17 +134,15 @@ async def ai_rechunk():
         _rechunk_state.update({"running": True, "done": 0, "total": 0, "error": "", "fixed": 0})
         conn = connection.get_connection()
         try:
-            # Finde alle Nicht-PDF Dokumente mit 1 Chunk der > 1000 Zeichen ist
+            # GROUP BY statt korrelierter Subquery — schnell auch bei grossen DBs
             rows = conn.execute("""
-                SELECT dc.document_id, dc.id as chunk_id, dc.content
+                SELECT dc.document_id, dc.content
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                 WHERE d.extension NOT IN ('.pdf')
-                AND (
-                    SELECT COUNT(*) FROM document_chunks dc2
-                    WHERE dc2.document_id = dc.document_id
-                ) = 1
                 AND length(dc.content) > 1000
+                GROUP BY dc.document_id
+                HAVING COUNT(*) = 1
             """).fetchall()
 
             _rechunk_state["total"] = len(rows)
@@ -203,8 +201,9 @@ async def ai_diagnostics():
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                 WHERE d.extension NOT IN ('.pdf')
-                AND (SELECT COUNT(*) FROM document_chunks dc2 WHERE dc2.document_id = dc.document_id) = 1
                 AND length(dc.content) > 1000
+                GROUP BY dc.document_id
+                HAVING COUNT(*) = 1
             )
         """).fetchone()[0]
         return JSONResponse({

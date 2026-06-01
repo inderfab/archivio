@@ -466,6 +466,8 @@ function pollRechunk() {
       el.innerHTML = '<span style="color:#166534;">✓ Abgeschlossen — ' + s.fixed + ' Dokumente neu gechunked und embedded.</span>';
       clearInterval(_pollTimer);
       loadDiag();
+    } else if (s.total === 0) {
+      el.textContent = 'Suche nach Dokumenten…';
     } else {
       el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente…';
     }
