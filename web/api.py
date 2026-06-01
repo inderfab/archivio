@@ -130,11 +130,9 @@ async def ai_rechunk():
 
     def _run():
         from scanner.extractors import split_text_into_chunks
-        from scanner.embedder import is_ollama_running, embed_document_chunks
         _rechunk_state.update({"running": True, "done": 0, "total": 0, "error": "", "fixed": 0})
         conn = connection.get_connection()
         try:
-            # GROUP BY statt korrelierter Subquery — schnell auch bei grossen DBs
             rows = conn.execute("""
                 SELECT dc.document_id, dc.content
                 FROM document_chunks dc
@@ -146,7 +144,6 @@ async def ai_rechunk():
             """).fetchall()
 
             _rechunk_state["total"] = len(rows)
-            ollama_ok = is_ollama_running()
 
             for row in rows:
                 doc_id  = row["document_id"]
@@ -155,15 +152,19 @@ async def ai_rechunk():
                 if len(parts) <= 1:
                     _rechunk_state["done"] += 1
                     continue
+                # Nur neu chunken — Embeddings macht danach der Backfill
                 with conn:
-                    conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
+                    conn.execute(
+                        "DELETE FROM document_chunks WHERE document_id = ?",
+                        (doc_id,)
+                    )
                     for i, part in enumerate(parts):
                         conn.execute(
-                            "INSERT INTO document_chunks (document_id, chunk_index, page_number, content) VALUES (?,?,?,?)",
+                            """INSERT INTO document_chunks
+                               (document_id, chunk_index, page_number, content)
+                               VALUES (?, ?, ?, ?)""",
                             (doc_id, i, None, part)
                         )
-                if ollama_ok:
-                    embed_document_chunks(conn, doc_id)
                 _rechunk_state["done"]  += 1
                 _rechunk_state["fixed"] += 1
         except Exception as e:
