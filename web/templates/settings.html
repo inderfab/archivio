@@ -464,13 +464,24 @@ function pollRechunk() {
       el.innerHTML = '<span style="color:#dc2626;">Fehler: ' + s.error + '</span>';
       clearInterval(_pollTimer);
     } else if (!s.running && s.total > 0) {
-      el.innerHTML = '<span style="color:#166534;">✓ Abgeschlossen — ' + s.fixed + ' Dokumente neu gechunked und embedded.</span>';
+      var html = '<span style="color:#166534;">✓ Abgeschlossen — ' + s.fixed + ' neu gechunked';
+      if (s.skipped > 0) html += ', ' + s.skipped + ' übersprungen';
+      html += '.</span>';
+      if (s.failed_docs && s.failed_docs.length > 0) {
+        html += '<details style="margin-top:8px;"><summary style="cursor:pointer;font-size:12px;color:var(--text-2);">Übersprungene Dokumente (' + s.failed_docs.length + ')</summary>';
+        html += '<div style="margin-top:6px;font-size:12px;font-family:monospace;background:var(--bg-2);border:1px solid var(--border);border-radius:4px;padding:8px;max-height:200px;overflow-y:auto;">';
+        s.failed_docs.forEach(function(d) {
+          html += '<div style="margin-bottom:4px;"><strong>' + d.filename + '</strong><br><span style="color:var(--text-3);">' + d.reason + '</span></div>';
+        });
+        html += '</div></details>';
+      }
+      el.innerHTML = html;
       clearInterval(_pollTimer);
-      loadDiag();
     } else if (s.total === 0) {
       el.textContent = 'Suche nach Dokumenten…';
     } else {
-      el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente…';
+      var skip = s.skipped > 0 ? ', ' + s.skipped + ' übersprungen' : '';
+      el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente' + skip + '…';
     }
   });
 }

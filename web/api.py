@@ -118,26 +118,50 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
-_rechunk_state: dict = {"running": False, "done": 0, "total": 0, "error": "", "fixed": 0}
+_rechunk_state: dict = {
+    "running": False, "done": 0, "total": 0,
+    "fixed": 0, "skipped": 0, "error": "",
+    "failed_docs": [],  # [{id, filename, reason}]
+}
+
+DOC_TIMEOUT = 60  # Sekunden pro Dokument
 
 
 @router.post("/ai/rechunk")
 async def ai_rechunk():
-    """Re-chunked Nicht-PDF-Dokumente die einen einzigen zu-grossen Chunk haben.
-    Löscht alte Chunks, erstellt neue überlappende Chunks und berechnet Embeddings neu."""
+    """Re-chunked Nicht-PDF-Dokumente die einen einzigen zu-grossen Chunk haben."""
     if _rechunk_state.get("running"):
         return JSONResponse({"ok": False, "message": "Läuft bereits"})
 
+    def _rechunk_one(doc_id: int, parts: list[str]) -> str | None:
+        """Führt DELETE+INSERT in eigener Connection aus. Gibt Fehlermeldung zurück oder None."""
+        try:
+            c = connection.get_connection()
+            c.execute("PRAGMA busy_timeout = 5000")
+            with c:
+                c.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
+                c.executemany(
+                    "INSERT INTO document_chunks (document_id, chunk_index, page_number, content) VALUES (?,?,?,?)",
+                    [(doc_id, i, None, part) for i, part in enumerate(parts)]
+                )
+            c.close()
+            return None
+        except Exception as e:
+            return str(e)
+
     def _run():
         from scanner.extractors import split_text_into_chunks
-        _rechunk_state.update({"running": True, "done": 0, "total": 0, "error": "", "fixed": 0})
+        _rechunk_state.update({
+            "running": True, "done": 0, "total": 0,
+            "fixed": 0, "skipped": 0, "error": "", "failed_docs": [],
+        })
 
-        # Kandidaten-Liste lesen
+        # Kandidaten lesen — kurze eigene Connection
         try:
             conn = connection.get_connection()
-            conn.execute("PRAGMA busy_timeout = 8000")
+            conn.execute("PRAGMA busy_timeout = 15000")
             rows = conn.execute("""
-                SELECT dc.document_id, dc.content
+                SELECT dc.document_id, dc.content, d.filename
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
                 WHERE d.extension NOT IN ('.pdf')
@@ -153,26 +177,41 @@ async def ai_rechunk():
         _rechunk_state["total"] = len(rows)
 
         for row in rows:
-            doc_id  = row["document_id"]
-            content = row["content"]
-            parts   = split_text_into_chunks(content)
+            doc_id   = row["document_id"]
+            filename = row["filename"]
+            content  = row["content"]
+            parts    = split_text_into_chunks(content)
             _rechunk_state["done"] += 1
+
             if len(parts) <= 1:
                 continue
-            # Pro Dokument eigene Connection — verhindert WAL-Deadlock
-            try:
-                c = connection.get_connection()
-                c.execute("PRAGMA busy_timeout = 8000")
-                with c:
-                    c.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
-                    c.executemany(
-                        "INSERT INTO document_chunks (document_id, chunk_index, page_number, content) VALUES (?,?,?,?)",
-                        [(doc_id, i, None, part) for i, part in enumerate(parts)]
-                    )
-                c.close()
+
+            # Mit Timeout ausführen
+            result_holder: list = []
+            def _do(doc_id=doc_id, parts=parts, holder=result_holder):
+                holder.append(_rechunk_one(doc_id, parts))
+
+            t = threading.Thread(target=_do, daemon=True)
+            t.start()
+            t.join(timeout=DOC_TIMEOUT)
+
+            if t.is_alive():
+                # Timeout — überspringen
+                reason = f"Timeout nach {DOC_TIMEOUT}s"
+                log.warning("Rechunk timeout doc %s (%s)", doc_id, filename)
+                _rechunk_state["skipped"] += 1
+                _rechunk_state["failed_docs"].append(
+                    {"id": doc_id, "filename": filename, "reason": reason}
+                )
+            elif result_holder and result_holder[0] is not None:
+                # Fehler
+                log.warning("Rechunk doc %s (%s): %s", doc_id, filename, result_holder[0])
+                _rechunk_state["skipped"] += 1
+                _rechunk_state["failed_docs"].append(
+                    {"id": doc_id, "filename": filename, "reason": result_holder[0]}
+                )
+            else:
                 _rechunk_state["fixed"] += 1
-            except Exception as e:
-                log.warning("Rechunk doc %s fehlgeschlagen: %s", doc_id, e)
 
         _rechunk_state["running"] = False
 
