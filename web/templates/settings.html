@@ -285,8 +285,9 @@
   <div class="settings-section" style="margin-top: 8px;" id="ki-diag-section">
     <div class="settings-section-title">KI-Suche — Embedding-Diagnose</div>
     <div class="settings-body">
-      <div id="ki-diag-info" style="font-size:13px; color:var(--text-2);">Lade…</div>
+      <div id="ki-diag-info" style="font-size:13px; color:var(--text-2);">—</div>
       <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+        <button class="btn-save" style="background:#6b7280;" onclick="loadDiag()">Diagnose laden</button>
         <button class="btn-save" style="background:#1f2937;" onclick="startBackfill()">Fehlende Embeddings generieren</button>
         <button class="btn-save" style="background:#374151;" onclick="startRechunk()">Dokumente neu chunken (danach Backfill starten)</button>
       </div>
@@ -474,7 +475,7 @@ function pollRechunk() {
   });
 }
 
-loadDiag();
+// loadDiag() nur auf Knopfdruck — nicht beim Laden (blockiert sonst den Event Loop)
 
 </script>
 {% endblock %}

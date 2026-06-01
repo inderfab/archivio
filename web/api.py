@@ -184,40 +184,40 @@ async def ai_rechunk_status():
 
 @router.get("/ai/diagnostics")
 async def ai_diagnostics():
-    """Gibt den Embedding-Zustand als JSON zurück."""
-    conn = connection.get_connection()
-    try:
-        total_docs    = conn.execute("SELECT COUNT(*) FROM documents WHERE source_type='filesystem'").fetchone()[0]
-        total_chunks  = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
-        with_emb      = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL").fetchone()[0]
-        missing_emb   = total_chunks - with_emb
-        no_chunks_ok  = conn.execute("""
-            SELECT COUNT(*) FROM documents
-            WHERE extraction_status='ok'
-            AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = documents.id)
-        """).fetchone()[0]
-        oversized = conn.execute("""
-            SELECT COUNT(*) FROM (
-                SELECT dc.document_id
-                FROM document_chunks dc
-                JOIN documents d ON d.id = dc.document_id
-                WHERE d.extension NOT IN ('.pdf')
-                AND length(dc.content) > 1000
-                GROUP BY dc.document_id
-                HAVING COUNT(*) = 1
-            )
-        """).fetchone()[0]
-        return JSONResponse({
-            "total_docs":   total_docs,
-            "total_chunks": total_chunks,
-            "with_embedding": with_emb,
-            "missing_embedding": missing_emb,
-            "ok_docs_without_chunks": no_chunks_ok,
-            "oversized_single_chunks": oversized,
-            "embedding_coverage_pct": round(with_emb / total_chunks * 100, 1) if total_chunks else 0,
-        })
-    finally:
-        conn.close()
+    """Gibt den Embedding-Zustand als JSON zurück (läuft im Thread-Pool)."""
+    import asyncio
+    loop = asyncio.get_event_loop()
+
+    def _query():
+        conn = connection.get_connection()
+        try:
+            total_chunks = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+            with_emb     = conn.execute(
+                "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL"
+            ).fetchone()[0]
+            oversized = conn.execute("""
+                SELECT COUNT(*) FROM (
+                    SELECT dc.document_id
+                    FROM document_chunks dc
+                    JOIN documents d ON d.id = dc.document_id
+                    WHERE d.extension NOT IN ('.pdf')
+                    AND length(dc.content) > 1000
+                    GROUP BY dc.document_id
+                    HAVING COUNT(*) = 1
+                )
+            """).fetchone()[0]
+            return {
+                "total_chunks":           total_chunks,
+                "with_embedding":         with_emb,
+                "missing_embedding":      total_chunks - with_emb,
+                "oversized_single_chunks": oversized,
+                "embedding_coverage_pct": round(with_emb / total_chunks * 100, 1) if total_chunks else 0,
+            }
+        finally:
+            conn.close()
+
+    data = await loop.run_in_executor(None, _query)
+    return JSONResponse(data)
 
 
 _ollama_install_state: dict = {"running": False, "done": False, "error": "", "log": []}
