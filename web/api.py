@@ -131,8 +131,11 @@ async def ai_rechunk():
     def _run():
         from scanner.extractors import split_text_into_chunks
         _rechunk_state.update({"running": True, "done": 0, "total": 0, "error": "", "fixed": 0})
-        conn = connection.get_connection()
+
+        # Kandidaten-Liste lesen
         try:
+            conn = connection.get_connection()
+            conn.execute("PRAGMA busy_timeout = 8000")
             rows = conn.execute("""
                 SELECT dc.document_id, dc.content
                 FROM document_chunks dc
@@ -142,36 +145,36 @@ async def ai_rechunk():
                 GROUP BY dc.document_id
                 HAVING COUNT(*) = 1
             """).fetchall()
-
-            _rechunk_state["total"] = len(rows)
-
-            for row in rows:
-                doc_id  = row["document_id"]
-                content = row["content"]
-                parts   = split_text_into_chunks(content)
-                if len(parts) <= 1:
-                    _rechunk_state["done"] += 1
-                    continue
-                # Nur neu chunken — Embeddings macht danach der Backfill
-                with conn:
-                    conn.execute(
-                        "DELETE FROM document_chunks WHERE document_id = ?",
-                        (doc_id,)
-                    )
-                    for i, part in enumerate(parts):
-                        conn.execute(
-                            """INSERT INTO document_chunks
-                               (document_id, chunk_index, page_number, content)
-                               VALUES (?, ?, ?, ?)""",
-                            (doc_id, i, None, part)
-                        )
-                _rechunk_state["done"]  += 1
-                _rechunk_state["fixed"] += 1
-        except Exception as e:
-            _rechunk_state["error"] = str(e)
-        finally:
-            _rechunk_state["running"] = False
             conn.close()
+        except Exception as e:
+            _rechunk_state.update({"running": False, "error": str(e)})
+            return
+
+        _rechunk_state["total"] = len(rows)
+
+        for row in rows:
+            doc_id  = row["document_id"]
+            content = row["content"]
+            parts   = split_text_into_chunks(content)
+            _rechunk_state["done"] += 1
+            if len(parts) <= 1:
+                continue
+            # Pro Dokument eigene Connection — verhindert WAL-Deadlock
+            try:
+                c = connection.get_connection()
+                c.execute("PRAGMA busy_timeout = 8000")
+                with c:
+                    c.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
+                    c.executemany(
+                        "INSERT INTO document_chunks (document_id, chunk_index, page_number, content) VALUES (?,?,?,?)",
+                        [(doc_id, i, None, part) for i, part in enumerate(parts)]
+                    )
+                c.close()
+                _rechunk_state["fixed"] += 1
+            except Exception as e:
+                log.warning("Rechunk doc %s fehlgeschlagen: %s", doc_id, e)
+
+        _rechunk_state["running"] = False
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Re-chunk gestartet"})
