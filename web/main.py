@@ -62,38 +62,20 @@ app.include_router(api_router)
 
 # ── KI-Suche ──────────────────────────────────────────────────────────────────
 
-@app.get("/search/ai", response_class=HTMLResponse)
-async def search_ai(
-    request:    Request,
-    q:          str = Query(default=""),
-    project_id: str = Query(default=""),
-):
-    if not q.strip():
-        return HTMLResponse("")
-
-    from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks, llm_answer
+def _ai_vector_search(q: str, project_id: str):
+    """Gemeinsame Logik: Embeddings + Vektorsuche. Gibt (sources, error, ollama_missing) zurück."""
+    from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks
 
     status = ai_status()
     if not status["ok"]:
-        return templates.TemplateResponse("_ai_answer.html", {
-            "request":       request,
-            "question":      q,
-            "answer":        None,
-            "sources":       [],
-            "error":         status["reason"],
-            "ollama_missing": status.get("ollama_missing", False),
-        })
+        return None, status["reason"], status.get("ollama_missing", False)
 
     conn  = connection.get_connection()
     qvec  = embed_query(q)
     if qvec is None:
         conn.close()
-        return templates.TemplateResponse("_ai_answer.html", {
-            "request": request, "question": q, "answer": None, "sources": [],
-            "error": "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?",
-        })
+        return None, "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?", False
 
-    # Hybrid: Keyword-Treffer zuerst, dann Vektor-Treffer auffüllen
     kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=6)
     vec_sources = vector_search(conn, qvec, project_id=project_id, limit=8)
     seen_ids = {s["id"] for s in kw_sources}
@@ -131,17 +113,60 @@ async def search_ai(
             )
 
     conn.close()
-    answer = llm_answer(q, sources) if sources else None
+    return sources, error, False
+
+
+@app.get("/search/ai", response_class=HTMLResponse)
+async def search_ai(
+    request:    Request,
+    q:          str = Query(default=""),
+    project_id: str = Query(default=""),
+):
+    """Schritt 1 (schnell): Vektorsuche → Quellen sofort anzeigen. Antwort lädt separat nach."""
+    if not q.strip():
+        return HTMLResponse("")
+
+    sources, error, ollama_missing = _ai_vector_search(q, project_id)
+
+    if error and sources is None:
+        return templates.TemplateResponse("_ai_answer.html", {
+            "request": request, "question": q, "answer": None, "sources": [],
+            "error": error, "ollama_missing": ollama_missing,
+        })
+
+    return templates.TemplateResponse("_ai_sources.html", {
+        "request":    request,
+        "question":   q,
+        "project_id": project_id,
+        "sources":    sources or [],
+        "error":      error,
+    })
+
+
+@app.get("/search/ai/answer", response_class=HTMLResponse)
+async def search_ai_answer(
+    request:    Request,
+    q:          str = Query(default=""),
+    project_id: str = Query(default=""),
+):
+    """Schritt 2 (langsam): LLM-Antwort generieren."""
+    if not q.strip():
+        return HTMLResponse("")
+
+    from scanner.embedder import llm_answer
+
+    sources, error, _ = _ai_vector_search(q, project_id)
+    if not sources:
+        return HTMLResponse('<div class="ai-no-answer">Keine Antwort generiert — keine relevanten Quellen gefunden.</div>')
+
+    answer = llm_answer(q, sources)
     if answer and sources:
         sources = _rerank_by_answer(sources, answer)
 
-    return templates.TemplateResponse("_ai_answer.html", {
-        "request":       request,
-        "question":      q,
-        "answer":        answer,
-        "sources":       sources,
-        "error":         error,
-        "ollama_missing": False,
+    return templates.TemplateResponse("_ai_answer_only.html", {
+        "request":  request,
+        "question": q,
+        "answer":   answer,
     })
 
 # ── Routen ────────────────────────────────────────────────────────────────────
@@ -172,8 +197,10 @@ async def search(
     date_to:         str = Query(default=""),
     filesize:        str = Query(default=""),
     duplicates_only: str = Query(default=""),
+    show_folders:    str = Query(default=""),
 ):
     results, error, total = [], None, 0
+    folder_results = []
     has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only])
     if q.strip() or has_filters:
         conn = connection.get_connection()
@@ -183,13 +210,17 @@ async def search(
         )
         results, error = _search(conn, q.strip(), filters_str, filter_params)
         total = len(results)
+        if show_folders and q.strip():
+            folder_results = _search_folders(conn, q.strip(), project_id)
         conn.close()
     return templates.TemplateResponse("search_results.html", {
-        "request": request,
-        "results": results,
-        "query":   q,
-        "total":   total,
-        "error":   error,
+        "request":        request,
+        "results":        results,
+        "query":          q,
+        "total":          total,
+        "error":          error,
+        "folder_results": folder_results,
+        "show_folders":   bool(show_folders),
     })
 
 
@@ -537,6 +568,51 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
             d["excerpt"]  = ""
             d.pop("raw_content", None)
             results.append(d)
+        return results
+    except Exception:
+        return []
+
+
+def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
+    """Findet Ordner deren Name die Suchbegriffe enthält (aus document_paths)."""
+    words = [w.lower() for w in q.split() if len(w) > 1]
+    if not words:
+        return []
+    try:
+        sql = """
+            SELECT DISTINCT dp.path, p.name AS project_name, p.id AS project_id
+            FROM document_paths dp
+            JOIN documents d ON d.id = dp.document_id
+            JOIN projects p ON p.id = d.project_id
+            WHERE 1=1
+        """
+        params = []
+        if project_id:
+            try:
+                sql += " AND d.project_id = ?"
+                params.append(int(project_id))
+            except ValueError:
+                pass
+        rows = conn.execute(sql, params).fetchall()
+
+        seen_dirs: set[str] = set()
+        results = []
+        for row in rows:
+            file_path = Path(row["path"])
+            for folder in list(file_path.parents):
+                folder_str = str(folder)
+                if folder_str in seen_dirs:
+                    continue
+                seen_dirs.add(folder_str)
+                folder_lower = folder.name.lower()
+                if all(w in folder_lower for w in words) and folder.exists():
+                    results.append({
+                        "path":         folder_str,
+                        "name":         folder.name,
+                        "project_name": row["project_name"],
+                    })
+                    if len(results) >= 10:
+                        return results
         return results
     except Exception:
         return []

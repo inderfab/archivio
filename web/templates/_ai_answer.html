@@ -87,7 +87,7 @@ function pollOllamaInstall() {
       Öffnen
     </button>
     <button class="btn-sm" data-path="{{ s.filepath }}"
-      onclick="fetch('/reveal?path='+encodeURIComponent(this.dataset.path))">
+      onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
       Im Finder zeigen
     </button>
     {% endif %}

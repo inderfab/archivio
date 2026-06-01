@@ -1,7 +1,7 @@
 {% if error %}
   <div class="search-error">Fehler: {{ error }}</div>
 
-{% elif not results %}
+{% elif not results and not folder_results %}
   <div class="empty-state">
     <p>Keine Dokumente gefunden für <strong>„{{ query }}"</strong>.</p>
   </div>
@@ -13,6 +13,32 @@
       <span style="color:var(--text-3); font-style:italic;"> · Teilwort-Suche</span>
     {% endif %}
   </div>
+
+  {% if folder_results %}
+  <div style="margin-bottom:12px;">
+    <div style="font-size:12px; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin-bottom:6px;">Ordner</div>
+    {% for f in folder_results %}
+    <div class="result" style="padding:10px 14px; display:flex; align-items:center; gap:10px;">
+      <span style="font-size:18px; line-height:1;">📁</span>
+      <div style="flex:1; min-width:0;">
+        <div class="result-title" style="font-size:14px;">{{ f.name }}</div>
+        <div class="result-path" style="margin-top:2px;">{{ f.path }}</div>
+        <div style="font-size:12px; color:var(--text-3);">{{ f.project_name }}</div>
+      </div>
+      <div style="display:flex; gap:6px; flex-shrink:0;">
+        <button class="btn-sm" data-path="{{ f.path }}"
+          onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path))">
+          Öffnen
+        </button>
+        <button class="btn-sm" data-path="{{ f.path }}"
+          onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
+          Im Finder zeigen
+        </button>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 
   {% for r in results %}
   {% set ext = r.extension.lstrip('.') if r.extension else 'eml' %}
@@ -66,7 +92,7 @@
           Öffnen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"
-          onclick="fetch('/reveal?path='+encodeURIComponent(this.dataset.path)).then(function(res){if(!res.ok)alert('Fehler')})">
+          onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
           Im Finder zeigen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"

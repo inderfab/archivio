@@ -281,6 +281,19 @@
 
   </form>
 
+  {# ── KI-Suche Diagnose ── #}
+  <div class="settings-section" style="margin-top: 8px;" id="ki-diag-section">
+    <div class="settings-section-title">KI-Suche — Embedding-Diagnose</div>
+    <div class="settings-body">
+      <div id="ki-diag-info" style="font-size:13px; color:var(--text-2);">Lade…</div>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
+        <button class="btn-save" style="background:#1f2937;" onclick="startBackfill()">Fehlende Embeddings generieren</button>
+        <button class="btn-save" style="background:#374151;" onclick="startRechunk()">Dokumente neu chunken + re-embedden</button>
+      </div>
+      <div id="ki-diag-progress" style="font-size:13px; margin-top:8px; color:var(--text-2);"></div>
+    </div>
+  </div>
+
   {# ── Mitarbeiter-Setup ── #}
   <div class="settings-section" style="margin-top: 8px;">
     <div class="settings-section-title">Mitarbeiter-Setup</div>
@@ -388,6 +401,78 @@ function addExcludedFolder() {
   document.getElementById('excluded-folders-list').appendChild(item);
   item.querySelector('input').focus();
 }
+
+// ── KI-Suche Diagnose ─────────────────────────────────────────────────────────
+
+function loadDiag() {
+  fetch('/api/ai/diagnostics').then(r => r.json()).then(function(d) {
+    var issues = [];
+    if (d.missing_embedding > 0)
+      issues.push('<span style="color:#b45309;">⚠ ' + d.missing_embedding + ' Chunks ohne Embedding</span>');
+    if (d.oversized_single_chunks > 0)
+      issues.push('<span style="color:#b45309;">⚠ ' + d.oversized_single_chunks + ' Dokumente mit zu grossem Chunk (DOCX/XLSX)</span>');
+    if (d.ok_docs_without_chunks > 0)
+      issues.push('<span style="color:var(--text-3);">ℹ ' + d.ok_docs_without_chunks + ' Dokumente ohne Text (Pläne/Bilder)</span>');
+
+    var cov = d.embedding_coverage_pct;
+    var covColor = cov >= 95 ? '#166534' : cov >= 80 ? '#92400e' : '#991b1b';
+    document.getElementById('ki-diag-info').innerHTML =
+      '<strong>' + d.total_chunks + '</strong> Chunks total · ' +
+      '<strong style="color:' + covColor + '">' + cov + '%</strong> mit Embedding ' +
+      '(' + d.with_embedding + ' / ' + d.total_chunks + ')' +
+      (issues.length ? '<br><br>' + issues.join('<br>') : '<br><br><span style="color:#166534;">✓ Alles in Ordnung</span>');
+  });
+}
+
+var _pollTimer = null;
+
+function startBackfill() {
+  fetch('/api/ai/backfill', {method: 'POST'}).then(r => r.json()).then(function(d) {
+    document.getElementById('ki-diag-progress').textContent = d.message;
+    _pollTimer = setInterval(pollBackfill, 2000);
+  });
+}
+
+function pollBackfill() {
+  fetch('/api/ai/backfill/status').then(r => r.json()).then(function(s) {
+    var el = document.getElementById('ki-diag-progress');
+    if (s.error) {
+      el.innerHTML = '<span style="color:#dc2626;">Fehler: ' + s.error + '</span>';
+      clearInterval(_pollTimer);
+    } else if (!s.running && s.total > 0) {
+      el.innerHTML = '<span style="color:#166534;">✓ Abgeschlossen — ' + s.done + ' Dokumente embedded.</span>';
+      clearInterval(_pollTimer);
+      loadDiag();
+    } else {
+      el.textContent = 'Embeddings: ' + s.done + ' / ' + s.total + ' Dokumente…';
+    }
+  });
+}
+
+function startRechunk() {
+  fetch('/api/ai/rechunk', {method: 'POST'}).then(r => r.json()).then(function(d) {
+    document.getElementById('ki-diag-progress').textContent = d.message;
+    _pollTimer = setInterval(pollRechunk, 2000);
+  });
+}
+
+function pollRechunk() {
+  fetch('/api/ai/rechunk/status').then(r => r.json()).then(function(s) {
+    var el = document.getElementById('ki-diag-progress');
+    if (s.error) {
+      el.innerHTML = '<span style="color:#dc2626;">Fehler: ' + s.error + '</span>';
+      clearInterval(_pollTimer);
+    } else if (!s.running && s.total > 0) {
+      el.innerHTML = '<span style="color:#166534;">✓ Abgeschlossen — ' + s.fixed + ' Dokumente neu gechunked und embedded.</span>';
+      clearInterval(_pollTimer);
+      loadDiag();
+    } else {
+      el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente…';
+    }
+  });
+}
+
+loadDiag();
 
 </script>
 {% endblock %}

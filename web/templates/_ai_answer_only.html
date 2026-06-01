@@ -1,0 +1,13 @@
+{% if answer %}
+<div class="ai-answer-block" style="margin-top:20px;">
+  <div class="ai-answer-header">
+    <span class="ai-label">KI-Antwort</span>
+    <span class="ai-model">llama3.2</span>
+  </div>
+  <div class="ai-answer-text">{{ answer }}</div>
+</div>
+{% else %}
+<div class="ai-no-answer" style="margin-top:16px; color:var(--text-3); font-size:13px;">
+  Keine Antwort generiert.
+</div>
+{% endif %}

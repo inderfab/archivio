@@ -118,6 +118,108 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
+_rechunk_state: dict = {"running": False, "done": 0, "total": 0, "error": "", "fixed": 0}
+
+
+@router.post("/ai/rechunk")
+async def ai_rechunk():
+    """Re-chunked Nicht-PDF-Dokumente die einen einzigen zu-grossen Chunk haben.
+    Löscht alte Chunks, erstellt neue überlappende Chunks und berechnet Embeddings neu."""
+    if _rechunk_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Läuft bereits"})
+
+    def _run():
+        from scanner.extractors import split_text_into_chunks
+        from scanner.embedder import is_ollama_running, embed_document_chunks
+        _rechunk_state.update({"running": True, "done": 0, "total": 0, "error": "", "fixed": 0})
+        conn = connection.get_connection()
+        try:
+            # Finde alle Nicht-PDF Dokumente mit 1 Chunk der > 1000 Zeichen ist
+            rows = conn.execute("""
+                SELECT dc.document_id, dc.id as chunk_id, dc.content
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE d.extension NOT IN ('.pdf')
+                AND (
+                    SELECT COUNT(*) FROM document_chunks dc2
+                    WHERE dc2.document_id = dc.document_id
+                ) = 1
+                AND length(dc.content) > 1000
+            """).fetchall()
+
+            _rechunk_state["total"] = len(rows)
+            ollama_ok = is_ollama_running()
+
+            for row in rows:
+                doc_id  = row["document_id"]
+                content = row["content"]
+                parts   = split_text_into_chunks(content)
+                if len(parts) <= 1:
+                    _rechunk_state["done"] += 1
+                    continue
+                with conn:
+                    conn.execute("DELETE FROM document_chunks WHERE document_id = ?", (doc_id,))
+                    for i, part in enumerate(parts):
+                        conn.execute(
+                            "INSERT INTO document_chunks (document_id, chunk_index, page_number, content) VALUES (?,?,?,?)",
+                            (doc_id, i, None, part)
+                        )
+                if ollama_ok:
+                    embed_document_chunks(conn, doc_id)
+                _rechunk_state["done"]  += 1
+                _rechunk_state["fixed"] += 1
+        except Exception as e:
+            _rechunk_state["error"] = str(e)
+        finally:
+            _rechunk_state["running"] = False
+            conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Re-chunk gestartet"})
+
+
+@router.get("/ai/rechunk/status")
+async def ai_rechunk_status():
+    return JSONResponse(_rechunk_state)
+
+
+@router.get("/ai/diagnostics")
+async def ai_diagnostics():
+    """Gibt den Embedding-Zustand als JSON zurück."""
+    conn = connection.get_connection()
+    try:
+        total_docs    = conn.execute("SELECT COUNT(*) FROM documents WHERE source_type='filesystem'").fetchone()[0]
+        total_chunks  = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        with_emb      = conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL").fetchone()[0]
+        missing_emb   = total_chunks - with_emb
+        no_chunks_ok  = conn.execute("""
+            SELECT COUNT(*) FROM documents
+            WHERE extraction_status='ok'
+            AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = documents.id)
+        """).fetchone()[0]
+        oversized = conn.execute("""
+            SELECT COUNT(*) FROM (
+                SELECT dc.document_id
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE d.extension NOT IN ('.pdf')
+                AND (SELECT COUNT(*) FROM document_chunks dc2 WHERE dc2.document_id = dc.document_id) = 1
+                AND length(dc.content) > 1000
+            )
+        """).fetchone()[0]
+        return JSONResponse({
+            "total_docs":   total_docs,
+            "total_chunks": total_chunks,
+            "with_embedding": with_emb,
+            "missing_embedding": missing_emb,
+            "ok_docs_without_chunks": no_chunks_ok,
+            "oversized_single_chunks": oversized,
+            "embedding_coverage_pct": round(with_emb / total_chunks * 100, 1) if total_chunks else 0,
+        })
+    finally:
+        conn.close()
+
+
 _ollama_install_state: dict = {"running": False, "done": False, "error": "", "log": []}
 
 

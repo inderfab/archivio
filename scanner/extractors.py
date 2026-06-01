@@ -97,7 +97,12 @@ def extract_pdf_pages(path: Path) -> list[dict]:
         raise ExtractionError(str(exc)) from exc
 
 
+CHUNK_SIZE    = 800   # Zeichen pro Chunk
+CHUNK_OVERLAP = 120  # Überlapp zwischen benachbarten Chunks
+
+
 def _split_long_text(page_number, text: str, max_len: int = 3000) -> list[dict]:
+    """PDF-seitenweises Splitting (Fallback für sehr lange Seiten)."""
     if len(text) <= max_len:
         return [{"page_number": page_number, "content": text}]
     mid = len(text) // 2
@@ -110,11 +115,45 @@ def _split_long_text(page_number, text: str, max_len: int = 3000) -> list[dict]:
     ]
 
 
+def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
+    """Teilt Text in überlappende Chunks auf. Trennt bevorzugt an Absatz- oder Wortgrenzen."""
+    text = text.strip()
+    if not text:
+        return []
+    if len(text) <= chunk_size:
+        return [text]
+
+    chunks = []
+    start  = 0
+    while start < len(text):
+        end = start + chunk_size
+        if end >= len(text):
+            chunks.append(text[start:].strip())
+            break
+        # Absatzgrenze bevorzugen
+        split_at = text.rfind("\n\n", start, end)
+        if split_at == -1 or split_at <= start:
+            # Zeilenumbruch
+            split_at = text.rfind("\n", start + chunk_size // 2, end)
+        if split_at == -1 or split_at <= start:
+            # Wortgrenze
+            split_at = text.rfind(" ", start + chunk_size // 2, end)
+        if split_at == -1 or split_at <= start:
+            split_at = end
+        chunk = text[start:split_at].strip()
+        if chunk:
+            chunks.append(chunk)
+        start = split_at - overlap
+        if start < 0:
+            start = 0
+    return [c for c in chunks if len(c) > 20]
+
+
 def extract_chunks(path: Path) -> list[dict]:
     """Gibt [{page_number, chunk_index, content}] zurück.
 
     PDF: ein Chunk pro Seite (lange Seiten werden gesplittet).
-    Alle anderen Formate: ein einzelner Chunk ohne Seitenangabe.
+    Andere Formate: Text wird in überlappende Chunks von ~800 Zeichen aufgeteilt.
     """
     ext = path.suffix.lower()
     if ext == ".pdf":
@@ -134,7 +173,11 @@ def extract_chunks(path: Path) -> list[dict]:
         text, _ = extract(path)
         if not text:
             return []
-        return [{"page_number": None, "chunk_index": 0, "content": text}]
+        parts = split_text_into_chunks(text)
+        return [
+            {"page_number": None, "chunk_index": i, "content": part}
+            for i, part in enumerate(parts)
+        ]
 
 
 # ── DOCX ──────────────────────────────────────────────────────────────────────

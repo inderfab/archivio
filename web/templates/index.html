@@ -18,7 +18,7 @@
           onchange="switchSearchMode(this.checked)">
         <span class="ai-toggle-thumb"></span>
       </span>
-      <span class="ai-toggle-label ai-toggle-right">KI-Suche</span>
+      <span class="ai-toggle-label ai-toggle-right">KI-Suche <span style="font-size:10px; color:var(--text-3); font-weight:400;">(experimentell)</span></span>
     </label>
   </div>
 
@@ -146,6 +146,16 @@
           <option value="1">Nur Dubletten</option>
         </select>
       </div>
+      <div style="margin-top:4px;">
+        <label class="filter-label">Ordner</label>
+        <select name="show_folders" class="filter-input" style="width:auto;"
+          hx-get="/search" hx-trigger="change"
+          hx-target="#results" hx-include="#search-form"
+          onchange="updateChips()">
+          <option value="">Ohne Ordner</option>
+          <option value="1">Ordner anzeigen</option>
+        </select>
+      </div>
     </div>
 
   </div>
@@ -249,7 +259,6 @@ var _aiStep  = 0;
 var AI_STEPS = [
   'Durchsucht Dokumente…',
   'Analysiert relevante Abschnitte…',
-  'Generiert Antwort…',
 ];
 
 function _renderAiLoading() {

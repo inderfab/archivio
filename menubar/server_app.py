@@ -82,6 +82,50 @@ def _start_ollama():
             log.error("Ollama start fehlgeschlagen: %s", e)
 
 
+def _handle_archivio_url(url_str: str):
+    from urllib.parse import parse_qs, unquote, urlparse
+    try:
+        parsed = urlparse(url_str)
+        if parsed.scheme != "archivio":
+            return
+        path = unquote(parse_qs(parsed.query).get("path", [""])[0])
+        if not path:
+            return
+        if parsed.hostname == "open":
+            subprocess.run(["open", path], timeout=5)
+        elif parsed.hostname == "reveal":
+            if Path(path).exists():
+                subprocess.run(["open", "-R", path], timeout=5)
+    except Exception as e:
+        log.error("URL handling error: %s", e)
+
+
+def _register_url_handler():
+    try:
+        from Foundation import NSAppleEventManager, NSObject
+        kInternetEventClass = 0x4755524C
+        kAEGetURL           = 0x4755524C
+        keyDirectObject     = 0x2D2D2D2D
+
+        class _Handler(NSObject):
+            def handleGetURLEvent_withReplyEvent_(self, event, reply):
+                url = str(event.paramDescriptorForKeyword_(keyDirectObject).stringValue())
+                _handle_archivio_url(url)
+
+        handler = _Handler.alloc().init()
+        _register_url_handler._handler = handler
+        NSAppleEventManager.sharedAppleEventManager() \
+            .setEventHandler_andSelector_forEventClass_andEventID_(
+                handler,
+                "handleGetURLEvent:withReplyEvent:",
+                kInternetEventClass,
+                kAEGetURL,
+            )
+        log.info("URL scheme handler registered")
+    except Exception as e:
+        log.warning("URL scheme handler not available: %s", e)
+
+
 def _stop_ollama():
     global _ollama_proc
     with _ollama_lock:
@@ -329,6 +373,7 @@ class ArchivioServer(rumps.App):
         ]
         self._autostart_item.state = _autostart_enabled()
 
+        _register_url_handler()
         threading.Thread(target=self._boot, daemon=True).start()
 
     def _boot(self):

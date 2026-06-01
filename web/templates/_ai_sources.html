@@ -1,0 +1,56 @@
+{% if error %}
+<div class="ai-error">
+  <span class="ai-error-icon">⚠</span>
+  {{ error }}
+</div>
+{% endif %}
+
+{% if sources %}
+<div class="result-count" style="margin-top:{% if error %}12{% else %}0{% endif %}px;">
+  {{ sources|length }} relevante Quellen für „{{ question }}"
+</div>
+
+{% for s in sources %}
+{% set ext = s.extension.lstrip('.') if s.extension else 'pdf' %}
+<div class="result">
+  <div class="result-header">
+    <span class="result-title">{{ s.filename }}</span>
+    <span class="badge badge-{{ ext }}">{{ ext | upper }}</span>
+    {% if s.page_number %}<span class="badge badge-page">Seite {{ s.page_number }}</span>{% endif %}
+    <span class="ai-score" title="Relevanz">{{ "%.0f"|format(s.score * 100) }}%</span>
+  </div>
+  <div class="result-meta">
+    <span>{{ s.project_name }}</span>
+  </div>
+  {% if s.filepath %}
+  <div class="result-path">{{ s.filepath }}</div>
+  {% endif %}
+  <div class="result-excerpt">{{ s.content[:300] }}{% if s.content|length > 300 %}…{% endif %}</div>
+  <div class="result-actions">
+    {% if s.filepath %}
+    <button class="btn-sm" data-path="{{ s.filepath }}"
+      onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path))">
+      Öffnen
+    </button>
+    <button class="btn-sm" data-path="{{ s.filepath }}"
+      onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
+      Im Finder zeigen
+    </button>
+    {% endif %}
+  </div>
+</div>
+{% endfor %}
+{% endif %}
+
+{# Antwort nachladen — lädt automatisch wenn dieser Block im DOM erscheint #}
+<div id="ai-answer-placeholder"
+  hx-get="/search/ai/answer?q={{ question | urlencode }}&project_id={{ project_id | urlencode }}"
+  hx-trigger="load"
+  hx-swap="outerHTML">
+  <div class="ai-thinking" style="margin-top:20px;">
+    <div class="ai-thinking-step active">
+      <span class="ai-thinking-dot"></span>
+      <span>Generiert Antwort…</span>
+    </div>
+  </div>
+</div>

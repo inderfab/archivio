@@ -75,6 +75,14 @@ def _handle_archivio_url(url_str: str):
             path = unquote(parse_qs(parsed.query).get("path", [""])[0])
             if path:
                 _open_path(path)
+        elif parsed.hostname == "reveal":
+            path = unquote(parse_qs(parsed.query).get("path", [""])[0])
+            if path:
+                p = Path(path)
+                if p.exists():
+                    subprocess.run(["open", "-R", path], timeout=5)
+                else:
+                    rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
     except Exception as e:
         log.error("URL handling error: %s", e)
 
