@@ -18,6 +18,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "002_ignored_paths", _m002)
     _apply(conn, "003_mail_integration", _m003)
     _apply(conn, "004_add_chunks", _m004)
+    _apply(conn, "005_chunk_doc_index", _m005)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -31,6 +32,15 @@ def _apply(conn: sqlite3.Connection, migration_id: str, fn):
     conn.execute("INSERT INTO _migrations (id) VALUES (?)", (migration_id,))
     conn.commit()
     log.info("Migration abgeschlossen: %s", migration_id)
+
+
+def _m005(conn: sqlite3.Connection):
+    """Index auf document_chunks(document_id) — macht per-Doc-Queries O(log n) statt O(n)."""
+    conn.execute("""
+        CREATE INDEX IF NOT EXISTS idx_document_chunks_doc
+        ON document_chunks(document_id)
+    """)
+    log.info("Index idx_document_chunks_doc erstellt")
 
 
 def _m001(conn: sqlite3.Connection):

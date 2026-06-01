@@ -156,24 +156,44 @@ async def ai_rechunk():
             "fixed": 0, "skipped": 0, "error": "", "failed_docs": [],
         })
 
-        # Kandidaten lesen — kurze eigene Connection
+        # Kandidaten: erst alle nicht-PDF Docs holen (kleine Tabelle),
+        # dann pro Doc einen schnellen Index-Lookup auf document_chunks.
+        # Vermeidet Full Table Scan der riesigen chunks-Tabelle.
         try:
             conn = connection.get_connection()
-            conn.execute("PRAGMA busy_timeout = 15000")
-            rows = conn.execute("""
-                SELECT dc.document_id, dc.content, d.filename
-                FROM document_chunks dc
-                JOIN documents d ON d.id = dc.document_id
-                WHERE d.extension NOT IN ('.pdf')
-                AND length(dc.content) > 1000
-                GROUP BY dc.document_id
-                HAVING COUNT(*) = 1
+            conn.execute("PRAGMA busy_timeout = 10000")
+            doc_rows = conn.execute("""
+                SELECT id, filename FROM documents
+                WHERE extraction_status = 'ok'
+                AND extension NOT IN ('.pdf', '')
+                AND source_type = 'filesystem'
             """).fetchall()
             conn.close()
         except Exception as e:
             _rechunk_state.update({"running": False, "error": str(e)})
             return
 
+        # Pro Doc prüfen ob genau 1 Chunk > 1000 Zeichen (Index-Lookup)
+        candidates = []
+        for doc in doc_rows:
+            try:
+                c = connection.get_connection()
+                c.execute("PRAGMA busy_timeout = 5000")
+                chunk_rows = c.execute(
+                    "SELECT id, content FROM document_chunks WHERE document_id = ? LIMIT 2",
+                    (doc["id"],)
+                ).fetchall()
+                c.close()
+                if len(chunk_rows) == 1 and len(chunk_rows[0]["content"] or "") > 1000:
+                    candidates.append({
+                        "document_id": doc["id"],
+                        "filename":    doc["filename"],
+                        "content":     chunk_rows[0]["content"],
+                    })
+            except Exception:
+                pass
+
+        rows = candidates
         _rechunk_state["total"] = len(rows)
 
         for row in rows:
