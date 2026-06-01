@@ -156,42 +156,32 @@ async def ai_rechunk():
             "fixed": 0, "skipped": 0, "error": "", "failed_docs": [],
         })
 
-        # Kandidaten: erst alle nicht-PDF Docs holen (kleine Tabelle),
-        # dann pro Doc einen schnellen Index-Lookup auf document_chunks.
-        # Vermeidet Full Table Scan der riesigen chunks-Tabelle.
+        # Kandidaten mit einer einzigen Connection finden
         try:
             conn = connection.get_connection()
-            conn.execute("PRAGMA busy_timeout = 10000")
-            doc_rows = conn.execute("""
-                SELECT id, filename FROM documents
-                WHERE extraction_status = 'ok'
-                AND extension NOT IN ('.pdf', '')
-                AND source_type = 'filesystem'
+            conn.execute("PRAGMA busy_timeout = 30000")
+            # Direkte JOIN-Query — funktioniert schnell sobald Migration 005
+            # den Index idx_document_chunks_doc erstellt hat
+            rows = conn.execute("""
+                SELECT d.id AS document_id, d.filename, dc.content
+                FROM documents d
+                JOIN document_chunks dc ON dc.document_id = d.id
+                WHERE d.extraction_status = 'ok'
+                AND d.extension NOT IN ('.pdf', '')
+                AND d.source_type = 'filesystem'
+                AND length(dc.content) > 1000
+                GROUP BY d.id
+                HAVING COUNT(dc.id) = 1
             """).fetchall()
             conn.close()
         except Exception as e:
             _rechunk_state.update({"running": False, "error": str(e)})
             return
 
-        # Pro Doc prüfen ob genau 1 Chunk > 1000 Zeichen (Index-Lookup)
-        candidates = []
-        for doc in doc_rows:
-            try:
-                c = connection.get_connection()
-                c.execute("PRAGMA busy_timeout = 5000")
-                chunk_rows = c.execute(
-                    "SELECT id, content FROM document_chunks WHERE document_id = ? LIMIT 2",
-                    (doc["id"],)
-                ).fetchall()
-                c.close()
-                if len(chunk_rows) == 1 and len(chunk_rows[0]["content"] or "") > 1000:
-                    candidates.append({
-                        "document_id": doc["id"],
-                        "filename":    doc["filename"],
-                        "content":     chunk_rows[0]["content"],
-                    })
-            except Exception:
-                pass
+        candidates = [
+            {"document_id": r["document_id"], "filename": r["filename"], "content": r["content"]}
+            for r in rows
+        ]
 
         _rechunk_state["total"] = len(candidates)
 

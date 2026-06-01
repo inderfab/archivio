@@ -51,6 +51,15 @@ def _scheduler_loop():
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
+    # Migrations beim Start ausführen — auch bei bestehenden DBs
+    try:
+        from db import migrations as _mig
+        _conn = connection.get_connection()
+        _mig.run(_conn)
+        _conn.close()
+    except Exception as _e:
+        import logging
+        logging.getLogger(__name__).warning("Migration fehlgeschlagen: %s", _e)
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     yield
 
