@@ -289,7 +289,7 @@
       <div style="display:flex; gap:10px; flex-wrap:wrap; margin-top:8px;">
         <button class="btn-save" style="background:#6b7280;" onclick="loadDiag()">Diagnose laden</button>
         <button class="btn-save" style="background:#1f2937;" onclick="startBackfill()">Fehlende Embeddings generieren</button>
-        <button class="btn-save" style="background:#374151;" onclick="startRechunk()">Dokumente neu chunken (danach Backfill starten)</button>
+        <button class="btn-save" style="background:#7c3aed;" onclick="resetOversized()">Falsch gechunkte Docs zurücksetzen + neu scannen</button>
       </div>
       <div id="ki-diag-progress" style="font-size:13px; margin-top:8px; color:var(--text-2);"></div>
     </div>
@@ -482,6 +482,18 @@ function pollRechunk() {
     } else {
       var skip = s.skipped > 0 ? ', ' + s.skipped + ' übersprungen' : '';
       el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente' + skip + '…';
+    }
+  });
+}
+
+function resetOversized() {
+  var el = document.getElementById('ki-diag-progress');
+  el.textContent = 'Setze Dokumente zurück…';
+  fetch('/api/ai/reset-oversized', {method: 'POST'}).then(r => r.json()).then(function(d) {
+    if (d.ok) {
+      el.innerHTML = '<span style="color:#166534;">✓ ' + d.message + '</span>';
+    } else {
+      el.innerHTML = '<span style="color:#dc2626;">Fehler: ' + d.error + '</span>';
     }
   });
 }

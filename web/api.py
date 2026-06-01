@@ -118,6 +118,46 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
+@router.post("/ai/reset-oversized")
+async def ai_reset_oversized():
+    """Löscht Chunks von Nicht-PDF Docs die einen einzigen zu-grossen Chunk haben
+    und setzt extraction_status auf 'pending' damit der Scanner sie neu verarbeitet."""
+    def _run():
+        try:
+            conn = connection.get_connection()
+            conn.execute("PRAGMA busy_timeout = 30000")
+            # Alle betroffenen document_ids finden
+            rows = conn.execute("""
+                SELECT dc.document_id
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE d.extension NOT IN ('.pdf', '')
+                AND d.source_type = 'filesystem'
+                AND length(dc.content) > 1000
+                GROUP BY dc.document_id
+                HAVING COUNT(dc.id) = 1
+            """).fetchall()
+            doc_ids = [r["document_id"] for r in rows]
+            if not doc_ids:
+                conn.close()
+                return 0
+            placeholders = ",".join("?" * len(doc_ids))
+            with conn:
+                conn.execute(f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})", doc_ids)
+                conn.execute(f"UPDATE documents SET extraction_status='pending' WHERE id IN ({placeholders})", doc_ids)
+            conn.close()
+            return len(doc_ids)
+        except Exception as e:
+            return str(e)
+
+    import asyncio
+    result = await asyncio.get_event_loop().run_in_executor(None, _run)
+    if isinstance(result, str):
+        return JSONResponse({"ok": False, "error": result})
+    return JSONResponse({"ok": True, "reset": result,
+                         "message": f"{result} Dokumente zurückgesetzt — bitte jetzt Scan starten"})
+
+
 _rechunk_state: dict = {
     "running": False, "done": 0, "total": 0,
     "fixed": 0, "skipped": 0, "error": "",
