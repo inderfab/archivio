@@ -193,47 +193,55 @@ async def ai_rechunk():
             except Exception:
                 pass
 
-        rows = candidates
-        _rechunk_state["total"] = len(rows)
+        _rechunk_state["total"] = len(candidates)
 
-        for row in rows:
-            doc_id   = row["document_id"]
-            filename = row["filename"]
-            content  = row["content"]
-            parts    = split_text_into_chunks(content)
-            _rechunk_state["done"] += 1
+        try:
+            for row in candidates:
+                doc_id   = row["document_id"]
+                filename = row["filename"]
+                content  = row.get("content") or ""
+                try:
+                    parts = split_text_into_chunks(content)
+                except Exception as e:
+                    _rechunk_state["done"]    += 1
+                    _rechunk_state["skipped"] += 1
+                    _rechunk_state["failed_docs"].append(
+                        {"id": doc_id, "filename": filename, "reason": f"Split-Fehler: {e}"}
+                    )
+                    continue
 
-            if len(parts) <= 1:
-                continue
+                _rechunk_state["done"] += 1
 
-            # Mit Timeout ausführen
-            result_holder: list = []
-            def _do(doc_id=doc_id, parts=parts, holder=result_holder):
-                holder.append(_rechunk_one(doc_id, parts))
+                if len(parts) <= 1:
+                    continue
 
-            t = threading.Thread(target=_do, daemon=True)
-            t.start()
-            t.join(timeout=DOC_TIMEOUT)
+                # Mit Timeout ausführen
+                result_holder: list = []
+                def _do(doc_id=doc_id, parts=parts, holder=result_holder):
+                    holder.append(_rechunk_one(doc_id, parts))
 
-            if t.is_alive():
-                # Timeout — überspringen
-                reason = f"Timeout nach {DOC_TIMEOUT}s"
-                log.warning("Rechunk timeout doc %s (%s)", doc_id, filename)
-                _rechunk_state["skipped"] += 1
-                _rechunk_state["failed_docs"].append(
-                    {"id": doc_id, "filename": filename, "reason": reason}
-                )
-            elif result_holder and result_holder[0] is not None:
-                # Fehler
-                log.warning("Rechunk doc %s (%s): %s", doc_id, filename, result_holder[0])
-                _rechunk_state["skipped"] += 1
-                _rechunk_state["failed_docs"].append(
-                    {"id": doc_id, "filename": filename, "reason": result_holder[0]}
-                )
-            else:
-                _rechunk_state["fixed"] += 1
+                t = threading.Thread(target=_do, daemon=True)
+                t.start()
+                t.join(timeout=DOC_TIMEOUT)
 
-        _rechunk_state["running"] = False
+                if t.is_alive():
+                    log.warning("Rechunk timeout doc %s (%s)", doc_id, filename)
+                    _rechunk_state["skipped"] += 1
+                    _rechunk_state["failed_docs"].append(
+                        {"id": doc_id, "filename": filename, "reason": f"Timeout nach {DOC_TIMEOUT}s"}
+                    )
+                elif result_holder and result_holder[0] is not None:
+                    log.warning("Rechunk doc %s (%s): %s", doc_id, filename, result_holder[0])
+                    _rechunk_state["skipped"] += 1
+                    _rechunk_state["failed_docs"].append(
+                        {"id": doc_id, "filename": filename, "reason": result_holder[0]}
+                    )
+                else:
+                    _rechunk_state["fixed"] += 1
+        except Exception as e:
+            _rechunk_state["error"] = str(e)
+        finally:
+            _rechunk_state["running"] = False
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "message": "Re-chunk gestartet"})
