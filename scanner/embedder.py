@@ -91,7 +91,8 @@ def embed_query(text: str) -> np.ndarray | None:
 
 # ── Chunks einbetten und speichern ────────────────────────────────────────────
 
-EMBED_BATCH_SIZE = 20  # Chunks pro Ollama-Request
+EMBED_BATCH_SIZE = 20   # Chunks pro Ollama-Request
+EMBED_MAX_CHARS  = 5500  # nomic-embed-text Kontextlimit (~8192 Token)
 
 
 def embed_document_chunks(conn: sqlite3.Connection, document_id: int) -> int:
@@ -106,7 +107,7 @@ def embed_document_chunks(conn: sqlite3.Connection, document_id: int) -> int:
     # In kleinen Batches einbetten — verhindert Timeout bei grossen Dokumenten
     for i in range(0, len(rows), EMBED_BATCH_SIZE):
         batch = rows[i:i + EMBED_BATCH_SIZE]
-        texts = [r["content"] or "" for r in batch]
+        texts = [(r["content"] or "")[:EMBED_MAX_CHARS] for r in batch]
         vecs  = embed_texts(texts)
         if vecs is None:
             log.warning("Embedding fehlgeschlagen für doc %s batch %d", document_id, i)

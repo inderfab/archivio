@@ -102,17 +102,19 @@ CHUNK_OVERLAP = 120  # Überlapp zwischen benachbarten Chunks
 
 
 def _split_long_text(page_number, text: str, max_len: int = 3000) -> list[dict]:
-    """PDF-seitenweises Splitting (Fallback für sehr lange Seiten)."""
+    """PDF-seitenweises Splitting — rekursiv bis alle Teile ≤ max_len Zeichen."""
     if len(text) <= max_len:
         return [{"page_number": page_number, "content": text}]
     mid = len(text) // 2
-    split_at = text.rfind(" ", max(0, mid - 200), min(len(text), mid + 200))
-    if split_at == -1:
+    split_at = text.rfind(" ", max(0, mid - 300), min(len(text), mid + 300))
+    if split_at <= 0:
         split_at = mid
-    return [
-        {"page_number": page_number, "content": text[:split_at].strip()},
-        {"page_number": page_number, "content": text[split_at:].strip()},
-    ]
+    left  = text[:split_at].strip()
+    right = text[split_at:].strip()
+    return (
+        _split_long_text(page_number, left,  max_len) +
+        _split_long_text(page_number, right, max_len)
+    )
 
 
 def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int = CHUNK_OVERLAP) -> list[str]:
