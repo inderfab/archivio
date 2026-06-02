@@ -377,6 +377,51 @@ async def ai_rechunk_status():
     return JSONResponse(_rechunk_state)
 
 
+@router.get("/ai/embed-test")
+async def ai_embed_test():
+    """Testet Ollama-Embedding mit einem Chunk aus einem fehlenden Dokument."""
+    import asyncio, httpx
+
+    def _run():
+        conn = connection.get_connection()
+        try:
+            row = conn.execute("""
+                SELECT dc.id, dc.content, d.filename
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE dc.embedding IS NULL AND dc.content IS NOT NULL
+                LIMIT 1
+            """).fetchone()
+            if not row:
+                return {"error": "Keine Chunks ohne Embedding gefunden"}
+            text = row["content"][:500]
+            try:
+                resp = httpx.post(
+                    "http://localhost:11434/api/embed",
+                    json={"model": "nomic-embed-text", "input": [text]},
+                    timeout=30,
+                )
+                data = resp.json()
+                vecs = data.get("embeddings", [])
+                return {
+                    "filename": row["filename"],
+                    "chunk_id": row["id"],
+                    "text_len": len(row["content"]),
+                    "http_status": resp.status_code,
+                    "embeddings_count": len(vecs),
+                    "first_vec_len": len(vecs[0]) if vecs else 0,
+                    "raw_keys": list(data.keys()),
+                    "error_field": data.get("error"),
+                }
+            except Exception as e:
+                return {"filename": row["filename"], "chunk_id": row["id"], "exception": str(e)}
+        finally:
+            conn.close()
+
+    result = await asyncio.get_event_loop().run_in_executor(None, _run)
+    return JSONResponse(result)
+
+
 @router.get("/ai/diagnostics")
 async def ai_diagnostics():
     """Gibt den Embedding-Zustand als JSON zurück (läuft im Thread-Pool)."""
