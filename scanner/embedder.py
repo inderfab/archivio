@@ -91,25 +91,34 @@ def embed_query(text: str) -> np.ndarray | None:
 
 # ── Chunks einbetten und speichern ────────────────────────────────────────────
 
+EMBED_BATCH_SIZE = 20  # Chunks pro Ollama-Request
+
+
 def embed_document_chunks(conn: sqlite3.Connection, document_id: int) -> int:
-    """Berechnet Embeddings für alle Chunks eines Dokuments. Gibt Anzahl zurück."""
+    """Berechnet Embeddings für alle Chunks eines Dokuments in Batches. Gibt Anzahl zurück."""
     rows = conn.execute(
         "SELECT id, content FROM document_chunks WHERE document_id = ? ORDER BY chunk_index",
         (document_id,)
     ).fetchall()
     if not rows:
         return 0
-    texts = [r["content"] or "" for r in rows]
-    vecs  = embed_texts(texts)
-    if vecs is None:
-        return 0
-    with conn:
-        for row, vec in zip(rows, vecs):
-            conn.execute(
-                "UPDATE document_chunks SET embedding = ? WHERE id = ?",
-                (vec.tobytes(), row["id"])
-            )
-    return len(rows)
+    total = 0
+    # In kleinen Batches einbetten — verhindert Timeout bei grossen Dokumenten
+    for i in range(0, len(rows), EMBED_BATCH_SIZE):
+        batch = rows[i:i + EMBED_BATCH_SIZE]
+        texts = [r["content"] or "" for r in batch]
+        vecs  = embed_texts(texts)
+        if vecs is None:
+            log.warning("Embedding fehlgeschlagen für doc %s batch %d", document_id, i)
+            continue
+        with conn:
+            for row, vec in zip(batch, vecs):
+                conn.execute(
+                    "UPDATE document_chunks SET embedding = ? WHERE id = ?",
+                    (vec.tobytes(), row["id"])
+                )
+        total += len(batch)
+    return total
 
 
 # ── Vektor-Suche ──────────────────────────────────────────────────────────────
