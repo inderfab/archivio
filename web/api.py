@@ -118,6 +118,80 @@ async def ai_backfill_status():
     return JSONResponse(_backfill_state)
 
 
+_filter_lang_state: dict = {"running": False, "done": 0, "total": 0, "deleted": 0, "error": ""}
+
+
+@router.post("/ai/filter-german")
+async def ai_filter_german():
+    """Löscht nicht-deutsche Chunks (FR/IT) und Müll-Chunks (nur Punkte/Zahlen)
+    aus Dokumenten die noch fehlende Embeddings haben."""
+    if _filter_lang_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Läuft bereits"})
+
+    def _is_german(text: str) -> bool:
+        """Gibt True zurück wenn Text deutsch ist oder behalten werden soll."""
+        from langdetect import detect, LangDetectException
+        # Müll-Chunks: überwiegend Punkte, Zahlen oder Leerzeichen
+        clean = text.strip()
+        if not clean or len(clean) < 30:
+            return False
+        non_dot = clean.replace(".", "").replace(" ", "").replace("\n", "").replace("-", "")
+        if len(non_dot) < len(clean) * 0.15:
+            return False  # >85% Punkte/Leerzeichen → Inhaltsverzeichnis-Linie
+        try:
+            lang = detect(text)
+            return lang == "de"
+        except LangDetectException:
+            return False
+
+    def _run():
+        _filter_lang_state.update({"running": True, "done": 0, "total": 0, "deleted": 0, "error": ""})
+        try:
+            conn = connection.get_connection()
+            conn.execute("PRAGMA busy_timeout = 15000")
+            # Nur Chunks aus Dokumenten mit fehlenden Embeddings
+            rows = conn.execute("""
+                SELECT dc.id, dc.document_id, dc.content
+                FROM document_chunks dc
+                WHERE dc.embedding IS NULL
+                AND dc.content IS NOT NULL
+            """).fetchall()
+            conn.close()
+
+            _filter_lang_state["total"] = len(rows)
+            to_delete = []
+
+            for row in rows:
+                if not _is_german(row["content"] or ""):
+                    to_delete.append(row["id"])
+                _filter_lang_state["done"] += 1
+
+            if to_delete:
+                conn = connection.get_connection()
+                conn.execute("PRAGMA busy_timeout = 30000")
+                batch = 500
+                for i in range(0, len(to_delete), batch):
+                    ids = to_delete[i:i+batch]
+                    ph  = ",".join("?" * len(ids))
+                    with conn:
+                        conn.execute(f"DELETE FROM document_chunks WHERE id IN ({ph})", ids)
+                conn.close()
+
+            _filter_lang_state["deleted"] = len(to_delete)
+        except Exception as e:
+            _filter_lang_state["error"] = str(e)
+        finally:
+            _filter_lang_state["running"] = False
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Sprachfilter gestartet"})
+
+
+@router.get("/ai/filter-german/status")
+async def ai_filter_german_status():
+    return JSONResponse(_filter_lang_state)
+
+
 @router.post("/ai/reset-oversized")
 async def ai_reset_oversized():
     """Löscht Chunks von Nicht-PDF Docs die einen einzigen zu-grossen Chunk haben

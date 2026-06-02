@@ -290,6 +290,7 @@
         <button class="btn-save" style="background:#6b7280;" onclick="loadDiag()">Diagnose laden</button>
         <button class="btn-save" style="background:#1f2937;" onclick="startBackfill()">Fehlende Embeddings generieren</button>
         <button class="btn-save" style="background:#7c3aed;" onclick="resetOversized()">Falsch gechunkte Docs zurücksetzen + neu scannen</button>
+        <button class="btn-save" style="background:#b45309;" onclick="startFilterGerman()">Nicht-deutsche Chunks löschen (FR/IT/Müll)</button>
       </div>
       <div id="ki-diag-progress" style="font-size:13px; margin-top:8px; color:var(--text-2);"></div>
     </div>
@@ -483,6 +484,27 @@ function pollRechunk() {
       var skip = s.skipped > 0 ? ', ' + s.skipped + ' übersprungen' : '';
       el.textContent = 'Re-chunk: ' + s.done + ' / ' + s.total + ' Dokumente' + skip + '…';
     }
+  });
+}
+
+function startFilterGerman() {
+  var el = document.getElementById('ki-diag-progress');
+  el.textContent = 'Sprachfilter läuft…';
+  fetch('/api/ai/filter-german', {method: 'POST'}).then(r => r.json()).then(function(d) {
+    if (!d.ok) { el.innerHTML = '<span style="color:#dc2626;">' + d.message + '</span>'; return; }
+    var t = setInterval(function() {
+      fetch('/api/ai/filter-german/status').then(r => r.json()).then(function(s) {
+        if (s.error) {
+          el.innerHTML = '<span style="color:#dc2626;">Fehler: ' + s.error + '</span>';
+          clearInterval(t);
+        } else if (!s.running) {
+          el.innerHTML = '<span style="color:#166534;">✓ ' + s.deleted + ' nicht-deutsche/Müll-Chunks gelöscht. Jetzt Backfill starten.</span>';
+          clearInterval(t);
+        } else {
+          el.textContent = 'Sprachfilter: ' + s.done + ' / ' + s.total + ' geprüft, ' + s.deleted + ' zum Löschen…';
+        }
+      });
+    }, 2000);
   });
 }
 
