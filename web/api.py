@@ -129,20 +129,41 @@ async def ai_filter_german():
         return JSONResponse({"ok": False, "message": "Läuft bereits"})
 
     def _is_german(text: str) -> bool:
-        """Gibt True zurück wenn Text deutsch ist oder behalten werden soll."""
-        from langdetect import detect, LangDetectException
-        # Müll-Chunks: überwiegend Punkte, Zahlen oder Leerzeichen
+        """Heuristik: True wenn Text deutsch ist (kein externes Paket nötig)."""
         clean = text.strip()
         if not clean or len(clean) < 30:
             return False
-        non_dot = clean.replace(".", "").replace(" ", "").replace("\n", "").replace("-", "")
-        if len(non_dot) < len(clean) * 0.15:
-            return False  # >85% Punkte/Leerzeichen → Inhaltsverzeichnis-Linie
-        try:
-            lang = detect(text)
-            return lang == "de"
-        except LangDetectException:
+        # Müll-Chunks: überwiegend Punkte/Striche (Inhaltsverzeichnis-Linien)
+        meaningful = clean.replace(".", "").replace("-", "").replace(" ", "").replace("\n", "")
+        if len(meaningful) < len(clean) * 0.15:
             return False
+        t = clean.lower()
+        # Deutsche Sonderzeichen
+        de_chars = sum(t.count(c) for c in "äöüßÄÖÜ")
+        # Französische/Italienische Sonderzeichen
+        fr_it_chars = sum(t.count(c) for c in "àâèéêëîïôùûçœæìò")
+        # Wenn deutlich mehr FR/IT-Zeichen als DE-Zeichen → nicht deutsch
+        if fr_it_chars > de_chars + 3:
+            return False
+        # Häufige deutsche Wörter
+        de_words = {"der", "die", "das", "und", "für", "von", "mit", "bei",
+                    "auf", "als", "ist", "sind", "wird", "werden", "nicht",
+                    "des", "dem", "den", "einer", "eine", "einem", "auch",
+                    "nach", "zum", "zur", "oder", "wenn", "durch", "diese"}
+        # Häufige französische Wörter
+        fr_words = {"les", "des", "est", "pas", "une", "qui", "que", "sur",
+                    "par", "dans", "sont", "avec", "pour", "cette", "ces"}
+        # Häufige italienische Wörter
+        it_words = {"della", "delle", "degli", "del", "nel", "nella", "negli",
+                    "per", "che", "con", "una", "uno", "sono", "essere"}
+        words = set(t.split())
+        de_score = len(words & de_words)
+        fr_score = len(words & fr_words)
+        it_score = len(words & it_words)
+        # Deutsch wenn mehr DE-Treffer als FR+IT zusammen, oder DE-Sonderzeichen vorhanden
+        if de_score == 0 and fr_score == 0 and it_score == 0:
+            return True  # Neutral (Zahlen, Fachbegriffe) → behalten
+        return de_score >= (fr_score + it_score)
 
     def _run():
         _filter_lang_state.update({"running": True, "done": 0, "total": 0, "deleted": 0, "error": ""})
