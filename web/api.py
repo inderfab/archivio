@@ -379,42 +379,50 @@ async def ai_rechunk_status():
 
 @router.get("/ai/embed-test")
 async def ai_embed_test():
-    """Testet Ollama-Embedding mit einem Chunk aus einem fehlenden Dokument."""
+    """Testet Ollama-Embedding — versucht 3 Chunks aus failing docs, Batch-1 und Batch-20."""
     import asyncio, httpx
 
     def _run():
         conn = connection.get_connection()
         try:
-            row = conn.execute("""
-                SELECT dc.id, dc.content, d.filename
+            # 3 chunks aus Dokumenten die komplett ohne Embedding sind
+            rows = conn.execute("""
+                SELECT dc.id, dc.content, d.filename, length(dc.content) as clen
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
-                WHERE dc.embedding IS NULL AND dc.content IS NOT NULL
-                LIMIT 1
-            """).fetchone()
-            if not row:
-                return {"error": "Keine Chunks ohne Embedding gefunden"}
-            text = row["content"][:500]
-            try:
-                resp = httpx.post(
-                    "http://localhost:11434/api/embed",
-                    json={"model": "nomic-embed-text", "input": [text]},
-                    timeout=30,
-                )
-                data = resp.json()
-                vecs = data.get("embeddings", [])
-                return {
-                    "filename": row["filename"],
-                    "chunk_id": row["id"],
-                    "text_len": len(row["content"]),
-                    "http_status": resp.status_code,
-                    "embeddings_count": len(vecs),
-                    "first_vec_len": len(vecs[0]) if vecs else 0,
-                    "raw_keys": list(data.keys()),
-                    "error_field": data.get("error"),
-                }
-            except Exception as e:
-                return {"filename": row["filename"], "chunk_id": row["id"], "exception": str(e)}
+                WHERE dc.embedding IS NULL
+                ORDER BY clen DESC
+                LIMIT 3
+            """).fetchall()
+            if not rows:
+                return {"status": "Alle Chunks haben Embeddings — fertig!"}
+
+            results = []
+            for row in rows:
+                text = row["content"] or ""
+                # Test 1: Einzelner Chunk
+                try:
+                    resp = httpx.post("http://localhost:11434/api/embed",
+                        json={"model": "nomic-embed-text", "input": [text]},
+                        timeout=60)
+                    data = resp.json()
+                    vecs = data.get("embeddings", [])
+                    results.append({
+                        "filename": row["filename"],
+                        "chunk_id": row["id"],
+                        "text_len": row["clen"],
+                        "http_status": resp.status_code,
+                        "ok": len(vecs) > 0 and len(vecs[0]) > 0,
+                        "error": data.get("error"),
+                    })
+                except Exception as e:
+                    results.append({
+                        "filename": row["filename"],
+                        "chunk_id": row["id"],
+                        "text_len": row["clen"],
+                        "exception": str(e),
+                    })
+            return {"tests": results}
         finally:
             conn.close()
 
