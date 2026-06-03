@@ -375,14 +375,20 @@ def _fetch_full(client: imaplib.IMAP4_SSL, uid):
 
 # ── Postfach scannen ──────────────────────────────────────────────────────────
 
-def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int) -> dict:
-    """Scannt ein Postfach incremental. Gibt {new, skipped, errors} zurück."""
+def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int,
+                 progress: dict | None = None) -> dict:
+    """Scannt ein Postfach incremental. Gibt {new, skipped, errors} zurück.
+    progress: optionales Dict, das mit processed/total aktualisiert wird (für Nav-Status).
+    """
     conn   = connection.get_connection()
     new    = skipped = errors = 0
 
     try:
         uids = _fetch_uids(client, mailbox)
         log.info("Postfach '%s': %d Nachrichten", mailbox, len(uids))
+        if progress is not None:
+            progress["total"]     = len(uids)
+            progress["processed"] = 0
 
         for uid in uids:
             try:
@@ -391,6 +397,8 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int) -> di
 
                 if not message_id or mail_exists(conn, message_id):
                     skipped += 1
+                    if progress is not None:
+                        progress["processed"] = progress.get("processed", 0) + 1
                     continue
 
                 full_msg = _fetch_full(client, uid)
@@ -415,9 +423,13 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int) -> di
                     new += 1
                 else:
                     skipped += 1
+                if progress is not None:
+                    progress["processed"] = progress.get("processed", 0) + 1
 
             except Exception as exc:
                 errors += 1
+                if progress is not None:
+                    progress["processed"] = progress.get("processed", 0) + 1
                 log.warning("UID %s in '%s' übersprungen: %s", uid, mailbox, exc)
 
         # Statistik aktualisieren

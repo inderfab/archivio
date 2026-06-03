@@ -76,15 +76,28 @@ async def scan_all():
 async def scan_nav_status():
     """Mini-Indikator für die globale Navigation — leer wenn kein Scan aktiv."""
     from fastapi.responses import HTMLResponse as _HTML
+
+    # Dokument-Scan
     running = [s for s in _scans.values() if s.get("status") == "running"]
-    if not running:
-        return _HTML("")
-    s         = running[0]
-    total     = s.get("total", 0)
-    processed = s.get("processed", 0)
-    pct       = f"{int(processed/total*100)}%" if total > 0 else "…"
-    label     = f"⟳ Scan läuft {pct}" if total > 0 else "⟳ Scan läuft…"
-    return _HTML(f'<span class="nav-scan-pill">{label}</span>')
+    if running:
+        s         = running[0]
+        total     = s.get("total", 0)
+        processed = s.get("processed", 0)
+        pct       = f"{int(processed/total*100)}%" if total > 0 else "…"
+        label     = f"⟳ Scan läuft {pct}" if total > 0 else "⟳ Scan läuft…"
+        return _HTML(f'<span class="nav-scan-pill">{label}</span>')
+
+    # Mail-Scan
+    if _mail_scan.get("status") == "running":
+        done  = _mail_scan.get("processed", 0)
+        total = _mail_scan.get("total", 0)
+        if total > 0:
+            label = f"⟳ Mail-Scan {done}/{total}"
+        else:
+            label = "⟳ Mail-Scan läuft…"
+        return _HTML(f'<span class="nav-scan-pill">{label}</span>')
+
+    return _HTML("")
 
 
 @router.post("/reset-and-rescan")

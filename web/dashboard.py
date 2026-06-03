@@ -864,7 +864,8 @@ def _run_mail_scan():
         total_new = 0
         for row in active:
             try:
-                stats      = scan_mailbox(client, row["mailbox_name"], row["project_id"])
+                stats      = scan_mailbox(client, row["mailbox_name"], row["project_id"],
+                                          progress=_mail_scan)
                 total_new += stats["new"]
             except Exception as exc:
                 log.error("Postfach '%s' fehlgeschlagen: %s", row["mailbox_name"], exc)
