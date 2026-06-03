@@ -196,6 +196,7 @@ async def search_ai_answer(
         "request":  request,
         "question": q,
         "answer":   answer,
+        "sources":  sources[:3],   # Top-3 nach Reranking — als Quellenangabe
     })
 
 # ── Routen ────────────────────────────────────────────────────────────────────

@@ -5,6 +5,23 @@
     <span class="ai-model">llama3.2</span>
   </div>
   <div class="ai-answer-text">{{ answer }}</div>
+
+  {% if sources %}
+  <div class="ai-answer-sources">
+    <span class="ai-answer-sources-label">Gefunden in:</span>
+    {% for s in sources %}
+    {% set ext = s.extension.lstrip('.') if s.extension else 'pdf' %}
+    <div class="ai-answer-source-row">
+      <span class="ai-answer-source-name">{{ s.filename }}</span>
+      {% if s.page_number %}<span class="badge badge-page" style="margin-left:4px;">Seite {{ s.page_number }}</span>{% endif %}
+      {% if s.filepath %}
+      <button class="btn-sm" data-path="{{ s.filepath }}" onclick="helperOpen(this.dataset.path)">Öffnen</button>
+      <button class="btn-sm" data-path="{{ s.filepath }}" onclick="helperReveal(this.dataset.path)">Im Finder</button>
+      {% endif %}
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
 </div>
 {% else %}
 <div style="color:var(--text-3); font-size:13px; margin-bottom:8px;">Keine Antwort generiert.</div>
