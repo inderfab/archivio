@@ -11,6 +11,13 @@
        hx-swap="innerHTML">
   </div>
 
+  {# ── Alles scannen ── #}
+  <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+    <button class="btn btn-primary" id="scan-all-btn" onclick="scanAll(this)">
+      ⟳ Alle aktiven Projekte jetzt scannen
+    </button>
+  </div>
+
   {# ── Statistiken ── #}
   <div class="stats-bar">
     <div class="stat">
@@ -114,6 +121,29 @@
         if (badge) badge.remove();
       }
     }
+  }
+
+  function scanAll(btn) {
+    btn.disabled = true;
+    btn.textContent = '⟳ Scan gestartet…';
+    fetch('/api/scan/all', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          btn.textContent = '✓ ' + d.projects_started + ' Projekt(e) + Mails werden gescannt';
+          setTimeout(function() {
+            btn.disabled = false;
+            btn.textContent = '⟳ Alle aktiven Projekte jetzt scannen';
+          }, 5000);
+        } else {
+          btn.disabled = false;
+          btn.textContent = '⟳ Alle aktiven Projekte jetzt scannen';
+        }
+      })
+      .catch(function() {
+        btn.disabled = false;
+        btn.textContent = '⟳ Alle aktiven Projekte jetzt scannen';
+      });
   }
 
   function selectEntry(el, projectId, path) {

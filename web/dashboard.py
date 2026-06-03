@@ -368,14 +368,8 @@ async def mail_toggle(request: Request, mailbox_name: str = Form(...)):
                 "UPDATE mail_scan_config SET active=? WHERE mailbox_name=?",
                 (0 if row["active"] else 1, mailbox_name),
             )
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
     conn.close()
-    return templates.TemplateResponse("_dashboard_projects.html", {
-        "request": request,
-        "groups":  groups,
-        "stats":   stats,
-    })
+    return await mail_dashboard(request)
 
 
 @router.post("/mail/scan", response_class=HTMLResponse)
