@@ -199,12 +199,16 @@ async def fix_garbage_docs():
                     f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})",
                     garbage_ids
                 )
+                conn.execute(
+                    f"DELETE FROM document_content WHERE document_id IN ({placeholders})",
+                    garbage_ids
+                )
                 try:
                     conn.execute("DELETE FROM chunks_fts")
                 except Exception:
                     pass
                 conn.execute(
-                    f"UPDATE documents SET extraction_status='pending', content=NULL"
+                    f"UPDATE documents SET extraction_status='pending'"
                     f" WHERE id IN ({placeholders})",
                     garbage_ids
                 )

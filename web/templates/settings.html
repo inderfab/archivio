@@ -310,7 +310,10 @@
         btn.disabled = false;
         btn.textContent = 'PDFs mit Zeichensalat reparieren';
         var el = document.getElementById('fix-garbage-result');
-        if (d.count === 0) {
+        if (!d.ok) {
+          el.style.color = '#dc2626';
+          el.innerHTML = '⚠ Fehler:<br><pre style="font-size:11px;overflow:auto;max-height:200px">' + (d.error || JSON.stringify(d)) + '</pre>';
+        } else if (d.count === 0) {
           el.style.color = 'var(--text-2)';
           el.textContent = '✓ Keine defekten Dokumente gefunden.';
         } else {
