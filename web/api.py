@@ -150,6 +150,67 @@ async def reset_and_rescan():
     })
 
 
+@router.get("/debug/extract-error")
+async def debug_extract_error(filename: str = ""):
+    """Versucht eine Datei zu extrahieren und gibt den genauen Fehler zurück."""
+    if not filename:
+        return JSONResponse({"error": "filename parameter required"}, status_code=400)
+    conn = connection.get_connection()
+    try:
+        row = conn.execute("""
+            SELECT dp.path FROM documents d
+            JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE d.filename LIKE ? AND d.extraction_status = 'error'
+            LIMIT 1
+        """, (f"%{filename}%",)).fetchone()
+        if not row:
+            return JSONResponse({"error": f"Keine error-Datei gefunden mit: {filename}"})
+        path = row[0]
+    finally:
+        conn.close()
+
+    import traceback
+    from pathlib import Path
+    result = {"path": path, "fitz": None, "ocr": None, "pypdf": None}
+
+    # Test 1: fitz.open
+    try:
+        import fitz
+        doc = fitz.open(path)
+        result["fitz"] = f"ok — {doc.page_count} Seiten, encrypted={doc.is_encrypted}, needs_pass={doc.needs_pass}"
+        page = doc[0]
+        text = page.get_text().strip()
+        result["fitz_text_sample"] = repr(text[:100])
+        doc.close()
+    except Exception as e:
+        result["fitz"] = f"FEHLER: {traceback.format_exc()}"
+
+    # Test 2: OCR
+    try:
+        import fitz
+        doc = fitz.open(path)
+        page = doc[0]
+        tp = page.get_textpage_ocr(flags=0, language="deu+eng", dpi=72, full=True)
+        text = page.get_text(textpage=tp).strip()
+        result["ocr"] = f"ok — {len(text)} Zeichen"
+        result["ocr_sample"] = repr(text[:100])
+        doc.close()
+    except Exception as e:
+        result["ocr"] = f"FEHLER: {str(e)}"
+
+    # Test 3: pypdf
+    try:
+        import pypdf
+        reader = pypdf.PdfReader(path)
+        text = reader.pages[0].extract_text() or ""
+        result["pypdf"] = f"ok — {len(text)} Zeichen"
+        result["pypdf_sample"] = repr(text[:100])
+    except Exception as e:
+        result["pypdf"] = f"FEHLER: {str(e)}"
+
+    return JSONResponse(result)
+
+
 @router.get("/debug/db-quality")
 async def db_quality():
     """Umfassende DB-Qualitätsanalyse für KI-Suche-Diagnose."""
