@@ -410,6 +410,41 @@
     .stat-n { display: block; font-size: 26px; font-weight: 700; color: var(--accent); line-height: 1.1; }
     .stat-l { display: block; font-size: 12px; color: var(--text-3); margin-top: 2px; }
 
+    .problem-docs { border: 1px solid var(--border); border-radius: var(--radius); }
+    .problem-docs-summary {
+      display: flex; align-items: center; gap: 8px;
+      padding: 10px 14px; cursor: pointer; user-select: none;
+      font-size: 12px; font-weight: 600; color: var(--text-2);
+      text-transform: uppercase; letter-spacing: .05em;
+      list-style: none;
+    }
+    .problem-docs-summary::-webkit-details-marker { display: none; }
+    .problem-docs-summary::before { content: '▶'; font-size: 9px; transition: transform .15s; }
+    details[open] .problem-docs-summary::before { transform: rotate(90deg); }
+    .problem-docs-badge {
+      background: var(--bg-2); border: 1px solid var(--border);
+      border-radius: 10px; padding: 1px 7px;
+      font-size: 11px; font-weight: 700; color: var(--text-3);
+    }
+    .problem-docs-list {
+      max-height: 260px; overflow-y: auto;
+      border-top: 1px solid var(--border);
+      padding: 4px 0;
+    }
+    .problem-doc-row {
+      display: flex; align-items: baseline; gap: 10px;
+      padding: 5px 14px; font-size: 12px; line-height: 1.4;
+    }
+    .problem-doc-row:hover { background: var(--bg-2); }
+    .problem-doc-name {
+      flex: 0 0 auto; max-width: 55%; overflow: hidden;
+      text-overflow: ellipsis; white-space: nowrap;
+      font-weight: 500; color: var(--text);
+    }
+    .problem-doc-reason { flex: 1; color: var(--text-3); font-size: 11px; }
+    .problem-doc-error .problem-doc-reason { color: #b45309; }
+    .problem-doc-no_text .problem-doc-reason { color: var(--text-3); }
+
     .section-title {
       font-size: 12px; font-weight: 700; letter-spacing: .06em;
       text-transform: uppercase; color: var(--text);

@@ -63,13 +63,15 @@ def _server_info() -> tuple[bool, str]:
 async def dashboard(request: Request):
     conn = connection.get_connection()
     connection.init_schema()
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
+    groups       = _project_groups(conn)
+    stats        = _global_stats(conn)
+    problem_docs = _problem_documents(conn)
     conn.close()
     return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "groups":  groups,
-        "stats":   stats,
+        "request":      request,
+        "groups":       groups,
+        "stats":        stats,
+        "problem_docs": problem_docs,
     })
 
 
@@ -749,6 +751,78 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     except PermissionError:
         pass
     return results
+
+
+def _problem_documents(conn) -> list[dict]:
+    """Gibt alle nicht vollständig verarbeiteten Dokumente zurück mit wahrscheinlichem Grund."""
+    result = []
+
+    # 1. error / unsupported
+    rows = conn.execute("""
+        SELECT d.filename, d.extension, d.filesize, dp.path, d.extraction_status
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.extraction_status IN ('error', 'unsupported')
+        ORDER BY d.extension, d.filename
+    """).fetchall()
+
+    for row in rows:
+        result.append({
+            "filename": row["filename"],
+            "reason":   _error_reason(row["extension"], row["path"]),
+            "category": "error",
+        })
+
+    # 2. ok aber keine Chunks — bildbasierte PDFs (Pläne, Scans)
+    empty_rows = conn.execute("""
+        SELECT d.filename, d.filesize
+        FROM documents d
+        WHERE d.extraction_status = 'ok'
+          AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+        ORDER BY d.filename
+    """).fetchall()
+
+    _PLAN_KEYWORDS = ("grundriss", "lageplan", "situation", "aushub", "schnitt",
+                      "ansicht", "plan", "fassade", "detail")
+    for row in empty_rows:
+        nl = row["filename"].lower()
+        if any(kw in nl for kw in _PLAN_KEYWORDS):
+            reason = "Kein Textinhalt – Architekturplan"
+        elif row["filesize"] > 5 * 1024 * 1024:
+            reason = "Kein Textinhalt – Bilddatei / gescanntes PDF"
+        else:
+            reason = "Kein Textinhalt – Bildbasiertes PDF"
+        result.append({
+            "filename": row["filename"],
+            "reason":   reason,
+            "category": "no_text",
+        })
+
+    return result
+
+
+def _error_reason(extension: str, path: str | None) -> str:
+    """Ermittelt den wahrscheinlichen Fehlergrund eines Dokuments."""
+    if extension == ".xlsx":
+        return "Timeout – Datei zu komplex für Extraktion"
+    if extension == ".pdf" and path:
+        try:
+            import fitz
+            doc = fitz.open(path)
+            needs_pass = doc.needs_pass
+            is_enc     = doc.is_encrypted
+            doc.close()
+            if needs_pass:
+                return "Passwortgeschützt – Öffnen nicht möglich"
+            if is_enc:
+                return "Verschlüsselt – Kopieren/Lesen eingeschränkt"
+            return "PDF fehlerhaft oder unlesbar"
+        except Exception as exc:
+            msg = str(exc).lower()
+            if "password" in msg or "encrypted" in msg:
+                return "Passwortgeschützt"
+            return "PDF kann nicht geöffnet werden"
+    return "Datei fehlerhaft oder Format nicht unterstützt"
 
 
 def _global_stats(conn) -> dict:

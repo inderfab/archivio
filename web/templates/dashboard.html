@@ -35,6 +35,24 @@
   {# ── Mail-Integration ── #}
   {% include "_dashboard_mail.html" %}
 
+  {# ── Fehlerhafte Dokumente ── #}
+  {% if problem_docs %}
+  <details class="problem-docs" style="margin-top: 32px;">
+    <summary class="problem-docs-summary">
+      Nicht verarbeitbare Dokumente
+      <span class="problem-docs-badge">{{ problem_docs|length }}</span>
+    </summary>
+    <div class="problem-docs-list">
+      {% for doc in problem_docs %}
+      <div class="problem-doc-row problem-doc-{{ doc.category }}">
+        <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
+        <span class="problem-doc-reason">{{ doc.reason }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
 </div>
 
 <script>
