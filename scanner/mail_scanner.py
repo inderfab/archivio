@@ -27,7 +27,9 @@ def connect_imap(password: str | None = None) -> imaplib.IMAP4_SSL:
     port     = int(settings.get("mail.port", 993))
     username = settings.get("mail.username", "")
     pw       = password or settings.get("mail.password", "")
+    # Socket-Timeout: hängende IMAP-Operationen nach 30s abbrechen
     client   = imaplib.IMAP4_SSL(host, port)
+    client.socket().settimeout(30)
     client.login(username, pw)
     log.info("IMAP verbunden: %s@%s", username, host)
     return client
@@ -394,7 +396,22 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int) -> di
                 full_msg = _fetch_full(client, uid)
                 record   = build_email_record(full_msg, mailbox)
 
-                if save_mail_to_db(conn, record, project_id):
+                # save_mail_to_db inkl. Chunking + Embedding in eigenem Thread (60s Timeout)
+                result_box: list = []
+                def _save(rec=record):
+                    try:
+                        result_box.append(save_mail_to_db(conn, rec, project_id))
+                    except Exception as exc:
+                        log.warning("save_mail_to_db Fehler UID %s: %s", uid, exc)
+                        result_box.append(False)
+                import threading as _t
+                t = _t.Thread(target=_save, daemon=True)
+                t.start()
+                t.join(timeout=60)
+                if not result_box:
+                    log.warning("UID %s Timeout (60s) — übersprungen", uid)
+                    errors += 1
+                elif result_box[0]:
                     new += 1
                 else:
                     skipped += 1
