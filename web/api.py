@@ -154,59 +154,61 @@ async def reset_and_rescan():
 async def fix_garbage_docs():
     """Findet Dokumente mit unlesbaren Font-Encoding (Mojibake/Zeichensalat) und setzt sie
     auf 'pending' zurück. Danach werden sie beim nächsten Scan mit OCR neu extrahiert.
+
+    Garbage-Erkennung via SQL: CHAR(65533) = U+FFFD (Replacement Character).
+    Nur erste 5 Chunks pro Dokument werden geprüft (effizient, kein Memory-Problem).
     """
     def _find_and_reset():
         conn = connection.get_connection()
         try:
-            # Alle Chunks laden und auf Mojibake prüfen
-            # (Nur Dokumente die als 'ok' markiert sind — 'error'/'pending' ignorieren)
-            rows = conn.execute("""
-                SELECT dc.document_id, dc.content
-                FROM document_chunks dc
-                JOIN documents d ON d.id = dc.document_id
-                WHERE d.extraction_status = 'ok'
-                ORDER BY dc.document_id, dc.chunk_index
-            """).fetchall()
-
-            # Pro Dokument: Anteil Replacement-Characters berechnen
-            from collections import defaultdict
-            doc_chars: dict[int, list] = defaultdict(list)
-            for r in rows:
-                doc_chars[r["document_id"]].append(r["content"] or "")
-
-            garbage_ids = []
-            for doc_id, contents in doc_chars.items():
-                sample = "".join(contents[:5])
-                if not sample:
-                    continue
-                ratio = sample.count("�") / len(sample)
-                if ratio > 0.30:
-                    garbage_ids.append(doc_id)
+            # Garbage-Docs via SQL finden — CHAR(65533) = U+FFFD
+            # Pro Dokument: Anteil Replacement-Characters in den ersten 5 Chunks
+            garbage_ids = [
+                r[0] for r in conn.execute("""
+                    SELECT dc.document_id
+                    FROM document_chunks dc
+                    JOIN documents d ON d.id = dc.document_id
+                    WHERE d.extraction_status = 'ok'
+                      AND dc.chunk_index < 5
+                    GROUP BY dc.document_id
+                    HAVING
+                        SUM(LENGTH(dc.content) - LENGTH(REPLACE(dc.content, CHAR(65533), ''))) * 1.0
+                        / MAX(SUM(LENGTH(dc.content)), 1) > 0.30
+                """).fetchall()
+            ]
 
             if not garbage_ids:
                 return 0, []
 
-            # Chunks löschen und Status zurücksetzen
             placeholders = ",".join("?" * len(garbage_ids))
+
             filenames = [
                 r[0] for r in conn.execute(
                     f"SELECT filename FROM documents WHERE id IN ({placeholders})",
                     garbage_ids
                 ).fetchall()
             ]
-            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_delete")
-            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_insert")
-            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_update")
-            conn.execute(f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})", garbage_ids)
-            try:
-                conn.execute("DELETE FROM chunks_fts")
-            except Exception:
-                pass
-            conn.execute(
-                f"UPDATE documents SET extraction_status='pending', content=NULL WHERE id IN ({placeholders})",
-                garbage_ids
-            )
-            conn.commit()
+
+            # Triggers deaktivieren damit DELETE schnell ist
+            conn.executescript("DROP TRIGGER IF EXISTS chunks_fts_delete;"
+                               "DROP TRIGGER IF EXISTS chunks_fts_insert;"
+                               "DROP TRIGGER IF EXISTS chunks_fts_update;")
+
+            with conn:
+                conn.execute(
+                    f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})",
+                    garbage_ids
+                )
+                try:
+                    conn.execute("DELETE FROM chunks_fts")
+                except Exception:
+                    pass
+                conn.execute(
+                    f"UPDATE documents SET extraction_status='pending', content=NULL"
+                    f" WHERE id IN ({placeholders})",
+                    garbage_ids
+                )
+
             # FTS-Triggers neu anlegen
             conn.executescript("""
                 CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON document_chunks BEGIN
@@ -225,7 +227,11 @@ async def fix_garbage_docs():
             conn.close()
 
     import asyncio
-    count, filenames = await asyncio.get_event_loop().run_in_executor(None, _find_and_reset)
+    import traceback
+    try:
+        count, filenames = await asyncio.get_event_loop().run_in_executor(None, _find_and_reset)
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": traceback.format_exc()}, status_code=500)
 
     if count == 0:
         return JSONResponse({"ok": True, "count": 0,
@@ -235,7 +241,8 @@ async def fix_garbage_docs():
         "ok": True,
         "count": count,
         "files": filenames,
-        "message": f"{count} Dokument(e) zurückgesetzt. Bitte jetzt 'Jetzt scannen' starten — sie werden mit OCR neu extrahiert."
+        "message": (f"{count} Dokument(e) zurückgesetzt. "
+                    f"Bitte jetzt 'Jetzt scannen' starten — sie werden mit OCR neu extrahiert.")
     })
 
 
