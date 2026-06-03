@@ -1320,11 +1320,20 @@ async def fix_mail_chunks():
                                   for i, p in enumerate(parts)]
                         with conn:
                             queries.save_chunks(conn, row["id"], chunks)
-                        try:
-                            if is_ollama_running():
-                                embed_document_chunks(conn, row["id"])
-                        except Exception as emb_e:
-                            log.warning("Embedding übersprungen doc %s: %s", row["id"], emb_e)
+                        # Embedding mit hartem Threading-Timeout (30s) damit kein Hängenbleiben
+                        if is_ollama_running():
+                            emb_done = []
+                            def _embed():
+                                try:
+                                    embed_document_chunks(conn, row["id"])
+                                    emb_done.append(True)
+                                except Exception:
+                                    pass
+                            t = threading.Thread(target=_embed, daemon=True)
+                            t.start()
+                            t.join(timeout=30)
+                            if not emb_done:
+                                log.warning("Embedding Timeout doc %s — Chunk gespeichert, Embedding übersprungen", row["id"])
                 except Exception as e:
                     log.warning("Mail-Chunk fehlgeschlagen doc %s: %s", row["id"], e)
                     _mail_chunk_state["error"] = str(e)
