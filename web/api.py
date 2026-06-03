@@ -1196,3 +1196,87 @@ async def test_recall_multi(n: int = 10, runs: int = 5):
         "vector_pass": avg_vec >= 70,
         "per_run": results,
     }
+
+
+@router.get("/debug/mail")
+async def debug_mail():
+    """Mail-Konfiguration und Status für Diagnose."""
+    conn = connection.get_connection()
+    try:
+        # mail_scan_config Status
+        configs = [dict(r) for r in conn.execute("""
+            SELECT msc.*, p.name AS project_name
+            FROM mail_scan_config msc
+            LEFT JOIN projects p ON p.id = msc.project_id
+        """).fetchall()]
+
+        # Wie viele Email-Dokumente existieren
+        email_count = conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE source_type='email'"
+        ).fetchone()[0]
+
+        # Mail-Einstellungen
+        mail_cfg = {
+            "host":     settings.get("mail.host", ""),
+            "port":     settings.get("mail.port", 993),
+            "username": settings.get("mail.username", ""),
+            "has_password": bool(settings.get("mail.password", "")),
+        }
+
+        return JSONResponse({
+            "mail_config": mail_cfg,
+            "mailboxes": configs,
+            "email_docs_in_db": email_count,
+        })
+    finally:
+        conn.close()
+
+
+@router.post("/debug/mail/scan-test")
+async def debug_mail_scan_test(mailbox: str = ""):
+    """Testet den Mail-Scan für ein Postfach und gibt Details zurück."""
+    import traceback
+    try:
+        from scanner.mail_scanner import connect_imap, _fetch_uids, _fetch_header, build_email_record, mail_exists
+
+        conn = connection.get_connection()
+        row = conn.execute(
+            "SELECT * FROM mail_scan_config WHERE mailbox_name LIKE ? LIMIT 1",
+            (f"%{mailbox}%",)
+        ).fetchone() if mailbox else conn.execute(
+            "SELECT * FROM mail_scan_config WHERE active=1 AND project_id IS NOT NULL LIMIT 1"
+        ).fetchone()
+        conn.close()
+
+        if not row:
+            return JSONResponse({"error": f"Kein aktives Postfach gefunden für: '{mailbox}'"})
+
+        mb_name    = row["mailbox_name"]
+        project_id = row["project_id"]
+
+        client = connect_imap()
+        uids   = _fetch_uids(client, mb_name)
+
+        results = {"mailbox": mb_name, "project_id": project_id,
+                   "total_uids": len(uids), "sample": []}
+
+        conn = connection.get_connection()
+        for uid in uids[:5]:
+            try:
+                hdr = _fetch_header(client, uid)
+                mid = (hdr.get("Message-ID") or "").strip()
+                exists = mail_exists(conn, mid) if mid else False
+                results["sample"].append({
+                    "uid":        uid.decode(),
+                    "message_id": mid[:60] if mid else "(fehlt)",
+                    "subject":    str(hdr.get("Subject", ""))[:60],
+                    "already_in_db": exists,
+                })
+            except Exception as e:
+                results["sample"].append({"uid": str(uid), "error": str(e)})
+        conn.close()
+        client.logout()
+        return JSONResponse(results)
+
+    except Exception:
+        return JSONResponse({"error": traceback.format_exc()}, status_code=500)
