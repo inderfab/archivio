@@ -150,6 +150,95 @@ async def reset_and_rescan():
     })
 
 
+@router.post("/fix/garbage-docs")
+async def fix_garbage_docs():
+    """Findet Dokumente mit unlesbaren Font-Encoding (Mojibake/Zeichensalat) und setzt sie
+    auf 'pending' zurück. Danach werden sie beim nächsten Scan mit OCR neu extrahiert.
+    """
+    def _find_and_reset():
+        conn = connection.get_connection()
+        try:
+            # Alle Chunks laden und auf Mojibake prüfen
+            # (Nur Dokumente die als 'ok' markiert sind — 'error'/'pending' ignorieren)
+            rows = conn.execute("""
+                SELECT dc.document_id, dc.content
+                FROM document_chunks dc
+                JOIN documents d ON d.id = dc.document_id
+                WHERE d.extraction_status = 'ok'
+                ORDER BY dc.document_id, dc.chunk_index
+            """).fetchall()
+
+            # Pro Dokument: Anteil Replacement-Characters berechnen
+            from collections import defaultdict
+            doc_chars: dict[int, list] = defaultdict(list)
+            for r in rows:
+                doc_chars[r["document_id"]].append(r["content"] or "")
+
+            garbage_ids = []
+            for doc_id, contents in doc_chars.items():
+                sample = "".join(contents[:5])
+                if not sample:
+                    continue
+                ratio = sample.count("�") / len(sample)
+                if ratio > 0.30:
+                    garbage_ids.append(doc_id)
+
+            if not garbage_ids:
+                return 0, []
+
+            # Chunks löschen und Status zurücksetzen
+            placeholders = ",".join("?" * len(garbage_ids))
+            filenames = [
+                r[0] for r in conn.execute(
+                    f"SELECT filename FROM documents WHERE id IN ({placeholders})",
+                    garbage_ids
+                ).fetchall()
+            ]
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_delete")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_insert")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_update")
+            conn.execute(f"DELETE FROM document_chunks WHERE document_id IN ({placeholders})", garbage_ids)
+            try:
+                conn.execute("DELETE FROM chunks_fts")
+            except Exception:
+                pass
+            conn.execute(
+                f"UPDATE documents SET extraction_status='pending', content=NULL WHERE id IN ({placeholders})",
+                garbage_ids
+            )
+            conn.commit()
+            # FTS-Triggers neu anlegen
+            conn.executescript("""
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+            """)
+            return len(garbage_ids), filenames
+        finally:
+            conn.close()
+
+    import asyncio
+    count, filenames = await asyncio.get_event_loop().run_in_executor(None, _find_and_reset)
+
+    if count == 0:
+        return JSONResponse({"ok": True, "count": 0,
+                             "message": "Keine Dokumente mit Zeichensalat gefunden."})
+
+    return JSONResponse({
+        "ok": True,
+        "count": count,
+        "files": filenames,
+        "message": f"{count} Dokument(e) zurückgesetzt. Bitte jetzt 'Jetzt scannen' starten — sie werden mit OCR neu extrahiert."
+    })
+
+
 @router.get("/ai/status")
 async def ai_status():
     from scanner.embedder import ai_status as _status

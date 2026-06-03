@@ -282,6 +282,53 @@
   </form>
 
 
+  {# ── Wartung ── #}
+  <div class="settings-section" style="margin-top: 8px;">
+    <div class="settings-section-title">Wartung</div>
+    <div class="settings-body">
+      <p style="font-size:13px; color:var(--text-2); margin:0 0 12px; line-height:1.5;">
+        Einige PDFs mit proprietärer Font-Kodierung können nicht direkt gelesen werden
+        (Zeichensalat statt Text). Diese Funktion setzt betroffene Dokumente zurück,
+        damit sie beim nächsten Scan mit OCR (Texterkennung) neu extrahiert werden.
+      </p>
+      <button class="btn-save" style="background:#0369a1;"
+        onclick="fixGarbage(this)">
+        PDFs mit Zeichensalat reparieren
+      </button>
+      <div id="fix-garbage-result" style="margin-top:10px; font-size:13px;"></div>
+    </div>
+  </div>
+
+  <script>
+  function fixGarbage(btn) {
+    btn.disabled = true;
+    btn.textContent = 'Suche…';
+    document.getElementById('fix-garbage-result').textContent = '';
+    fetch('/api/fix/garbage-docs', {method: 'POST'})
+      .then(r => r.json())
+      .then(d => {
+        btn.disabled = false;
+        btn.textContent = 'PDFs mit Zeichensalat reparieren';
+        var el = document.getElementById('fix-garbage-result');
+        if (d.count === 0) {
+          el.style.color = 'var(--text-2)';
+          el.textContent = '✓ Keine defekten Dokumente gefunden.';
+        } else {
+          el.style.color = '#0369a1';
+          el.innerHTML = '✓ ' + d.count + ' Dokument(e) zurückgesetzt:<br><small style="color:var(--text-2)">'
+            + (d.files || []).join('<br>') + '</small><br>'
+            + '<strong>Jetzt auf dem Dashboard "Jetzt scannen" starten.</strong>';
+        }
+      })
+      .catch(e => {
+        btn.disabled = false;
+        btn.textContent = 'PDFs mit Zeichensalat reparieren';
+        document.getElementById('fix-garbage-result').textContent = 'Fehler: ' + e;
+      });
+  }
+  </script>
+
+
   {# ── Mitarbeiter-Setup ── #}
   <div class="settings-section" style="margin-top: 8px;">
     <div class="settings-section-title">Mitarbeiter-Setup</div>

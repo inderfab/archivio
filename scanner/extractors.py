@@ -7,8 +7,11 @@ SICHERHEIT: Alle Extraktoren öffnen Dateien ausschliesslich lesend.
 Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb').
 """
 
+import logging
 import re
 from pathlib import Path
+
+log = logging.getLogger(__name__)
 
 
 class UnsupportedFormat(Exception):
@@ -111,6 +114,38 @@ def _pdf_pages_pypdf(path: Path) -> list[dict]:
     return result
 
 
+def _pdf_pages_ocr(path: Path) -> list[dict]:
+    """OCR-Fallback via PyMuPDF + Tesseract.
+
+    Wird verwendet wenn das PDF eine unleserliche Font-Kodierung hat (Mojibake).
+    full=True → komplette Seite OCR, ignoriert den unleserlichen Text-Layer.
+    Versucht Deutsch, fällt auf Englisch zurück falls Sprachpaket fehlt.
+    """
+    import fitz
+    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+    result = []
+    with fitz.open(str(path)) as doc:
+        for i, page in enumerate(doc, start=1):
+            text = ""
+            for lang in ("deu+eng", "deu", "eng"):
+                try:
+                    tp = page.get_textpage_ocr(
+                        flags=FLAGS,
+                        language=lang,
+                        dpi=150,
+                        full=True,   # Gesamte Seite neu OCR — ignoriert unlesbaren Text-Layer
+                    )
+                    text = page.get_text(textpage=tp, flags=FLAGS).strip()
+                    if text:
+                        break
+                except Exception:
+                    continue
+            if len(text) < 50:
+                continue
+            result.append({"page_number": i, "content": text})
+    return result
+
+
 def _has_mojibake(pages: list[dict]) -> bool:
     """True wenn >30 % der Zeichen Replacement-Characters sind (Encoding-Fehler)."""
     if not pages:
@@ -128,18 +163,36 @@ def extract_pdf(path: Path) -> tuple[str, str]:
 
 
 def extract_pdf_pages(path: Path) -> list[dict]:
-    """Gibt [{page_number, content}] zurück. PyMuPDF primär, pypdf als Fallback."""
-    # PyMuPDF versuchen
+    """Gibt [{page_number, content}] zurück.
+
+    Reihenfolge:
+    1. PyMuPDF (schnell, gute Font-Unterstützung)
+    2. PyMuPDF + OCR via Tesseract (Fallback bei unlesbaren Fonts / Mojibake)
+    3. pypdf (letzter Ausweg)
+    """
+    # Schritt 1: PyMuPDF Text-Extraktion
     try:
         pages = _pdf_pages_pymupdf(path)
         if not _has_mojibake(pages):
             return pages
+        # Font-Encoding unleserlich → OCR versuchen
+        log.info("Mojibake erkannt, versuche OCR-Fallback: %s", path.name)
     except ImportError:
-        pass  # pymupdf nicht installiert → pypdf versuchen
+        pass  # pymupdf nicht installiert → direkt zu pypdf
     except Exception as exc:
         raise ExtractionError(str(exc)) from exc
+    else:
+        # Schritt 2: OCR via Tesseract
+        try:
+            ocr_pages = _pdf_pages_ocr(path)
+            if ocr_pages and not _has_mojibake(ocr_pages):
+                log.info("OCR-Fallback erfolgreich: %s (%d Seiten)", path.name, len(ocr_pages))
+                return ocr_pages
+            log.warning("OCR liefert weiterhin Mojibake: %s", path.name)
+        except Exception as ocr_exc:
+            log.warning("OCR-Fallback fehlgeschlagen (%s): %s", path.name, ocr_exc)
 
-    # Fallback: pypdf
+    # Schritt 3: pypdf
     try:
         import pypdf  # noqa: F401
     except ImportError:
