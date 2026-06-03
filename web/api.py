@@ -150,6 +150,100 @@ async def reset_and_rescan():
     })
 
 
+@router.get("/debug/db-quality")
+async def db_quality():
+    """Umfassende DB-Qualitätsanalyse für KI-Suche-Diagnose."""
+    conn = connection.get_connection()
+    try:
+        r = {}
+
+        # 1. Extraction-Status Übersicht
+        r["status"] = {
+            row["extraction_status"]: row["cnt"]
+            for row in conn.execute(
+                "SELECT extraction_status, COUNT(*) AS cnt FROM documents GROUP BY extraction_status"
+            ).fetchall()
+        }
+
+        # 2. Fehler nach Dateitype
+        r["errors_by_ext"] = {
+            row["extension"]: row["cnt"]
+            for row in conn.execute(
+                "SELECT extension, COUNT(*) AS cnt FROM documents "
+                "WHERE extraction_status='error' GROUP BY extension ORDER BY cnt DESC"
+            ).fetchall()
+        }
+
+        # 3. Chunks ohne Embedding
+        no_emb = conn.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
+        ).fetchone()[0]
+        total_chunks = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        r["chunks"] = {"total": total_chunks, "missing_embedding": no_emb}
+
+        # 4. Dokumente ok aber keine Chunks
+        r["ok_without_chunks"] = conn.execute("""
+            SELECT COUNT(*) FROM documents d
+            WHERE d.extraction_status = 'ok'
+              AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+        """).fetchone()[0]
+
+        # 5. Verbleibende Mojibake-Dokumente (nach dem Fix)
+        r["remaining_mojibake"] = conn.execute("""
+            SELECT COUNT(DISTINCT dc.document_id)
+            FROM document_chunks dc
+            JOIN documents d ON d.id = dc.document_id
+            WHERE d.extraction_status = 'ok' AND dc.chunk_index < 5
+            GROUP BY dc.document_id
+            HAVING SUM(LENGTH(dc.content) - LENGTH(REPLACE(dc.content, CHAR(65533), ''))) * 1.0
+                   / MAX(SUM(LENGTH(dc.content)), 1) > 0.30
+        """).fetchone()
+        r["remaining_mojibake"] = r["remaining_mojibake"][0] if r["remaining_mojibake"] else 0
+
+        # 6. Sehr kurze Chunks (< 80 Zeichen — zu kurz für sinnvolle Suche)
+        r["very_short_chunks"] = conn.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE LENGTH(content) < 80"
+        ).fetchone()[0]
+
+        # 7. Chunk-Längen-Statistik
+        stats = conn.execute(
+            "SELECT AVG(LENGTH(content)), MIN(LENGTH(content)), MAX(LENGTH(content)) "
+            "FROM document_chunks"
+        ).fetchone()
+        r["chunk_length"] = {
+            "avg": round(stats[0] or 0),
+            "min": stats[1] or 0,
+            "max": stats[2] or 0,
+        }
+
+        # 8. Dateitypen der erfolgreichen Docs
+        r["ok_by_ext"] = {
+            row["extension"]: row["cnt"]
+            for row in conn.execute(
+                "SELECT extension, COUNT(*) AS cnt FROM documents "
+                "WHERE extraction_status='ok' GROUP BY extension ORDER BY cnt DESC LIMIT 10"
+            ).fetchall()
+        }
+
+        # 9. Top-10 Fehlerdateien (Dateiname + Fehlerinfos fehlen, aber Namen nützlich)
+        r["error_files"] = [
+            {"filename": row["filename"], "ext": row["extension"]}
+            for row in conn.execute(
+                "SELECT filename, extension FROM documents "
+                "WHERE extraction_status='error' ORDER BY filename LIMIT 20"
+            ).fetchall()
+        ]
+
+        # 10. Dokumente mit pending-Status (noch nicht verarbeitet)
+        r["pending"] = conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
+        ).fetchone()[0]
+
+        return JSONResponse(r)
+    finally:
+        conn.close()
+
+
 @router.post("/fix/garbage-docs")
 async def fix_garbage_docs():
     """Findet Dokumente mit unlesbaren Font-Encoding (Mojibake/Zeichensalat) und setzt sie
