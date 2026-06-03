@@ -1282,13 +1282,22 @@ async def debug_mail_scan_test(mailbox: str = ""):
         return JSONResponse({"error": traceback.format_exc()}, status_code=500)
 
 
+_mail_chunk_state: dict = {"running": False, "done": 0, "total": 0, "error": ""}
+
+
 @router.post("/fix/mail-chunks")
 async def fix_mail_chunks():
-    """Erstellt Chunks und Embeddings für bestehende Mails die noch keine Chunks haben."""
+    """Startet Chunk+Embedding-Backfill für Mails im Hintergrund. Sofortiger Return."""
+    if _mail_chunk_state.get("running"):
+        return JSONResponse({"ok": True, "already_running": True,
+                             "done": _mail_chunk_state["done"],
+                             "total": _mail_chunk_state["total"]})
+
     def _run():
         from scanner.extractors import split_text_into_chunks
         from scanner.embedder import embed_document_chunks, is_ollama_running
         from db import queries
+        _mail_chunk_state.update({"running": True, "done": 0, "total": 0, "error": ""})
         conn = connection.get_connection()
         try:
             rows = conn.execute("""
@@ -1302,11 +1311,11 @@ async def fix_mail_chunks():
                   )
                   AND LENGTH(dc.content) > 20
             """).fetchall()
-
-            count = 0
+            _mail_chunk_state["total"] = len(rows)
             for row in rows:
                 parts = split_text_into_chunks(row["content"])
                 if not parts:
+                    _mail_chunk_state["done"] += 1
                     continue
                 chunks = [{"page_number": None, "chunk_index": i, "content": p}
                           for i, p in enumerate(parts)]
@@ -1314,15 +1323,25 @@ async def fix_mail_chunks():
                     queries.save_chunks(conn, row["id"], chunks)
                 if is_ollama_running():
                     embed_document_chunks(conn, row["id"])
-                count += 1
-            return count
+                _mail_chunk_state["done"] += 1
+        except Exception as e:
+            _mail_chunk_state["error"] = str(e)
         finally:
+            _mail_chunk_state["running"] = False
             conn.close()
 
-    import asyncio, traceback
-    try:
-        count = await asyncio.get_event_loop().run_in_executor(None, _run)
-        return JSONResponse({"ok": True, "fixed": count,
-                             "message": f"{count} Mails mit Chunks und Embeddings versehen."})
-    except Exception:
-        return JSONResponse({"ok": False, "error": traceback.format_exc()}, status_code=500)
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "started": True,
+                         "message": "Backfill gestartet. Status: GET /api/fix/mail-chunks/status"})
+
+
+@router.get("/fix/mail-chunks/status")
+async def fix_mail_chunks_status():
+    s = _mail_chunk_state
+    return JSONResponse({
+        "running": s["running"],
+        "done":    s["done"],
+        "total":   s["total"],
+        "error":   s["error"],
+        "pct":     round(s["done"] / s["total"] * 100) if s["total"] else 0,
+    })
