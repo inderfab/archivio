@@ -66,6 +66,15 @@
     nav a:hover { color: var(--text); background: var(--bg-2); }
     nav a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
     .version-badge { font-size: 11px; color: var(--text-3); margin-left: 8px; }
+    .nav-scan-pill {
+      display: inline-flex; align-items: center; gap: 5px;
+      font-size: 11px; font-weight: 500;
+      background: #fef3c7; color: #92400e;
+      border: 1px solid #fde68a;
+      border-radius: 99px; padding: 2px 8px; margin-left: 6px;
+      animation: scan-pulse 1.5s ease-in-out infinite;
+    }
+    @keyframes scan-pulse { 0%,100% { opacity:1 } 50% { opacity:.6 } }
 
     /* ── Suchfeld ── */
     .search-wrap { padding: 48px 0 16px; position: relative; }
@@ -561,6 +570,10 @@
         <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
         <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
         <span class="version-badge" id="nav-version"></span>
+        <span id="nav-scan-status"
+              hx-get="/api/scan/nav-status"
+              hx-trigger="load, every 5s"
+              hx-swap="innerHTML"></span>
       </nav>
       <script>
         fetch('/api/version').then(r=>r.json()).then(d=>{
@@ -580,5 +593,20 @@
   <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback" style="display:inline-flex;align-items:center;gap:6px;background:#111;color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;">Feedback senden</a>
 </footer>
 
+<script>
+// ── Archivio Helper (localhost:44380) ─────────────────────────────────────────
+// Öffnet Dateien lokal auf dem eigenen Mac — kein URL-Scheme, kein Dialog.
+var HELPER = 'http://localhost:44380';
+
+function helperOpen(path) {
+  fetch(HELPER + '/open?path=' + encodeURIComponent(path))
+    .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
+}
+
+function helperReveal(path) {
+  fetch(HELPER + '/reveal?path=' + encodeURIComponent(path))
+    .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
+}
+</script>
 </body>
 </html>

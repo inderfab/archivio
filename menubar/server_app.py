@@ -1,6 +1,7 @@
 """Archivio Server – macOS Menubar-App. Startet und verwaltet den FastAPI-Server."""
 from __future__ import annotations
 
+import http.server
 import logging
 import os
 import shutil
@@ -10,12 +11,14 @@ import threading
 import time
 import zipfile
 from pathlib import Path
+from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 import rumps
 
 OLLAMA_EMBED_MODEL = "nomic-embed-text"
 OLLAMA_LLM_MODEL   = "llama3.2:3b"
+HELPER_PORT        = 44380
 
 # ── Pfade ────────────────────────────────────────────────────────────────────
 
@@ -83,7 +86,6 @@ def _start_ollama():
 
 
 def _handle_archivio_url(url_str: str):
-    from urllib.parse import parse_qs, unquote, urlparse
     try:
         parsed = urlparse(url_str)
         if parsed.scheme != "archivio":
@@ -98,6 +100,47 @@ def _handle_archivio_url(url_str: str):
                 subprocess.run(["open", "-R", path], timeout=5)
     except Exception as e:
         log.error("URL handling error: %s", e)
+
+
+class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self._reply(200)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        path   = unquote(params.get("path", [""])[0])
+        if parsed.path == "/open" and path and Path(path).exists():
+            subprocess.run(["open", path], timeout=5)
+            self._reply(200)
+        elif parsed.path == "/reveal" and path and Path(path).exists():
+            subprocess.run(["open", "-R", path], timeout=5)
+            self._reply(200)
+        elif parsed.path == "/ping":
+            self._reply(200)
+        else:
+            self._reply(404)
+
+    def _reply(self, code: int):
+        self.send_response(code)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Content-Type", "text/plain")
+        self.end_headers()
+        self.wfile.write(b"ok" if code == 200 else b"error")
+
+    def log_message(self, *args):
+        pass
+
+
+def _start_local_server():
+    try:
+        srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), _LocalHTTPHandler)
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        log.info("Lokaler Helper-Server auf localhost:%d", HELPER_PORT)
+    except OSError as e:
+        log.warning("Helper-Server Port %d belegt: %s", HELPER_PORT, e)
 
 
 def _register_url_handler():
@@ -373,6 +416,7 @@ class ArchivioServer(rumps.App):
         ]
         self._autostart_item.state = _autostart_enabled()
 
+        _start_local_server()
         _register_url_handler()
         threading.Thread(target=self._boot, daemon=True).start()
 

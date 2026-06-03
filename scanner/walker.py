@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import logging
 import os
+import threading
 import unicodedata
 from pathlib import Path
 
@@ -16,6 +17,12 @@ from db import connection, queries
 from scanner import hasher, extractors
 
 log = logging.getLogger(__name__)
+
+# Dateitypen die nur gelistet, aber nicht extrahiert werden (Bilder, 3D, CAD …)
+_LIST_ONLY_EXTENSIONS = {
+    ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
+    ".xml", ".3ds", ".obj", ".stp", ".step", ".stl", ".tx",
+}
 
 
 def _supported_extensions() -> set[str]:
@@ -109,31 +116,53 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None, canc
 
 def _process_file(conn, project_id: int, path: Path) -> str:
     """Verarbeitet eine Datei. Gibt 'new', 'skipped' oder 'error' zurück."""
+    # READ-ONLY: stat() liest nur Metadaten — kein Dateiinhalt nötig
     try:
-        # READ-ONLY: NAS darf nie verändert werden — sha256 öffnet nur mit 'rb'
+        stat = path.stat()
+    except OSError as exc:
+        log.warning("Kann nicht lesen %s: %s", path, exc)
+        return "error"
+
+    ext = path.suffix.lower()
+
+    # ── Schnellpfad: Pfad + Grösse + Änderungszeit stimmen überein → unverändert ──
+    # Kein Hash-Berechnung (kein NAS-Lesen), nur Metadaten-Vergleich.
+    mtime_iso = _iso(stat.st_mtime)
+    fast = conn.execute("""
+        SELECT d.id, d.extraction_status
+        FROM   document_paths dp
+        JOIN   documents d ON d.id = dp.document_id
+        WHERE  dp.path        = ?
+          AND  d.filesize     = ?
+          AND  d.modified_at  = ?
+          AND  d.extraction_status IN ('ok', 'listed')
+    """, (str(path), stat.st_size, mtime_iso)).fetchone()
+    if fast:
+        return "skipped"
+
+    # ── Vollpfad: Hash berechnen (Datei lesen), Duplikate und Umzüge erkennen ──
+    try:
+        # READ-ONLY: sha256 öffnet nur mit 'rb'
         file_hash = hasher.sha256(path)
     except OSError as exc:
         log.warning("Kann nicht lesen %s: %s", path, exc)
         return "error"
 
-    # Bereits vollständig indexiert → nur Pfad aktualisieren, Extraktion überspringen
+    # Bereits indexiert unter anderem Pfad (Duplikat/verschoben)?
     existing = conn.execute(
         "SELECT id, extraction_status FROM documents WHERE hash=?", (file_hash,)
     ).fetchone()
-    if existing and existing["extraction_status"] == "ok":
+    if existing and existing["extraction_status"] in ("ok", "listed"):
         with conn:
             queries.upsert_path(conn, existing["id"], str(path), is_primary=True)
         return "skipped"
-
-    # READ-ONLY: NAS darf nie verändert werden — stat() liest nur Metadaten
-    stat = path.stat()
     data = {
-        "project_id": project_id,
-        "hash": file_hash,
-        "filename": path.name,
-        "extension": path.suffix.lower(),
-        "filesize": stat.st_size,
-        "modified_at": _iso(stat.st_mtime),
+        "project_id":  project_id,
+        "hash":        file_hash,
+        "filename":    path.name,
+        "extension":   ext,
+        "filesize":    stat.st_size,
+        "modified_at": mtime_iso,
         "source_type": "filesystem",
     }
 
@@ -141,24 +170,49 @@ def _process_file(conn, project_id: int, path: Path) -> str:
         doc_id = queries.upsert_document(conn, data)
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
 
+    # List-only: nur registrieren, kein Textinhalt, kein Embedding
+    if ext in _LIST_ONLY_EXTENSIONS:
+        with conn:
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "new"
+
     _extract_and_store(conn, doc_id, path)
     return "new"
 
 
+_EXTRACT_TIMEOUT = 120  # Sekunden — kein Dateityp darf den Scanner länger blockieren
+
+
 def _extract_and_store(conn, doc_id: int, path: Path):
-    try:
-        # READ-ONLY: NAS darf nie verändert werden — extract_chunks() öffnet nur lesend
-        chunks = extractors.extract_chunks(path)
+    # Extraktion in separatem Thread mit globalem Timeout
+    result_box: list = []
+    error_box:  list = []
+
+    def _do_extract():
+        try:
+            c = extractors.extract_chunks(path)
+            result_box.append(c)
+        except Exception as exc:
+            error_box.append(exc)
+
+    t = threading.Thread(target=_do_extract, daemon=True)
+    t.start()
+    t.join(timeout=_EXTRACT_TIMEOUT)
+
+    if t.is_alive():
+        log.warning("Extraktion Timeout (%ds): %s", _EXTRACT_TIMEOUT, path.name)
+        chunks, text, status = [], "", "error"
+    elif error_box:
+        exc = error_box[0]
+        if isinstance(exc, extractors.UnsupportedFormat):
+            chunks, text, status = [], "", "unsupported"
+        else:
+            log.warning("Extraktion fehlgeschlagen %s: %s", path, exc)
+            chunks, text, status = [], "", "error"
+    else:
+        chunks = result_box[0] if result_box else []
         text   = "\n".join(c["content"] for c in chunks)
         status = "ok"
-    except extractors.UnsupportedFormat:
-        chunks, text, status = [], "", "unsupported"
-    except extractors.ExtractionError as exc:
-        log.warning("Extraktion fehlgeschlagen %s: %s", path, exc)
-        chunks, text, status = [], "", "error"
-    except Exception as exc:
-        log.error("Unerwarteter Fehler %s: %s", path, exc)
-        chunks, text, status = [], "", "error"
 
     with conn:
         queries.set_extraction_status(conn, doc_id, status)

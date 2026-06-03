@@ -5,9 +5,21 @@
 </div>
 {% endif %}
 
+{# Schritt 3 oben: Antwort wird noch generiert — bleibt sichtbar bis Antwort kommt #}
+<div id="ai-answer-placeholder"
+  hx-get="/search/ai/answer?q={{ question | urlencode }}&project_id={{ project_id | urlencode }}"
+  hx-trigger="load"
+  hx-swap="outerHTML">
+  <div class="ai-thinking" style="margin-bottom: 20px;">
+    <div class="ai-thinking-step done"><span class="ai-thinking-dot"></span><span>Dokumente durchsucht</span></div>
+    <div class="ai-thinking-step done"><span class="ai-thinking-dot"></span><span>Abschnitte analysiert</span></div>
+    <div class="ai-thinking-step active"><span class="ai-thinking-dot"></span><span>Generiert Antwort…</span></div>
+  </div>
+</div>
+
 {% if sources %}
-<div class="result-count" style="margin-top:{% if error %}12{% else %}0{% endif %}px;">
-  {{ sources|length }} relevante Quellen für „{{ question }}"
+<div style="font-size:12px; font-weight:600; color:var(--text-3); text-transform:uppercase; letter-spacing:.05em; margin:0 0 10px 0;">
+  Quellen ({{ sources|length }})
 </div>
 
 {% for s in sources %}
@@ -29,11 +41,11 @@
   <div class="result-actions">
     {% if s.filepath %}
     <button class="btn-sm" data-path="{{ s.filepath }}"
-      onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path))">
+      onclick="helperOpen(this.dataset.path)">
       Öffnen
     </button>
     <button class="btn-sm" data-path="{{ s.filepath }}"
-      onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
+      onclick="helperReveal(this.dataset.path)">
       Im Finder zeigen
     </button>
     {% endif %}
@@ -41,16 +53,3 @@
 </div>
 {% endfor %}
 {% endif %}
-
-{# Antwort nachladen — lädt automatisch wenn dieser Block im DOM erscheint #}
-<div id="ai-answer-placeholder"
-  hx-get="/search/ai/answer?q={{ question | urlencode }}&project_id={{ project_id | urlencode }}"
-  hx-trigger="load"
-  hx-swap="outerHTML">
-  <div class="ai-thinking" style="margin-top:20px;">
-    <div class="ai-thinking-step active">
-      <span class="ai-thinking-dot"></span>
-      <span>Generiert Antwort…</span>
-    </div>
-  </div>
-</div>

@@ -72,57 +72,69 @@ app.include_router(api_router)
 # ── KI-Suche ──────────────────────────────────────────────────────────────────
 
 def _ai_vector_search(q: str, project_id: str):
-    """Gemeinsame Logik: Embeddings + Vektorsuche. Gibt (sources, error, ollama_missing) zurück."""
+    """Gemeinsame Logik: Embeddings + Vektorsuche. Gibt (sources, error, ollama_missing) zurück.
+    Läuft synchron — immer via run_in_executor aufrufen, nicht direkt aus async-Handler!
+    """
     from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks
 
     status = ai_status()
     if not status["ok"]:
         return None, status["reason"], status.get("ollama_missing", False)
 
-    conn  = connection.get_connection()
-    qvec  = embed_query(q)
-    if qvec is None:
-        conn.close()
-        return None, "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?", False
+    conn = connection.get_connection()
+    try:
+        qvec = embed_query(q)
+        if qvec is None:
+            return None, "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?", False
 
-    kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=6)
-    vec_sources = vector_search(conn, qvec, project_id=project_id, limit=8)
-    seen_ids = {s["id"] for s in kw_sources}
-    sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
-    sources  = sources[:8]
+        kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=10)
+        vec_sources = vector_search(conn, qvec, project_id=project_id, limit=20)
+        # Hybrid-Merge: Keyword zuerst (präziser), Vektor ergänzt
+        seen_ids = {s["id"] for s in kw_sources}
+        sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
+        # De-duplizieren auf Dokument-Ebene: pro Dokument nur besten Chunk
+        seen_docs: dict = {}
+        deduped = []
+        for s in sources:
+            doc_id = s["document_id"]
+            if doc_id not in seen_docs:
+                seen_docs[doc_id] = s
+                deduped.append(s)
+        sources = deduped[:12]
 
-    error = None
-    if not sources:
-        if project_id:
-            try:
-                has_project_emb = conn.execute(
-                    """SELECT 1 FROM document_chunks dc
-                       JOIN documents d ON d.id = dc.document_id
-                       WHERE dc.embedding IS NOT NULL AND d.project_id = ? LIMIT 1""",
-                    (int(project_id),)
-                ).fetchone()
-            except (ValueError, TypeError):
-                has_project_emb = None
-            if not has_project_emb:
-                proj_name = conn.execute(
-                    "SELECT name FROM projects WHERE id = ?", (project_id,)
-                ).fetchone()
-                name = proj_name["name"] if proj_name else f"Projekt {project_id}"
-                error = f"Keine Embeddings für «{name}». Embeddings generieren und nochmals versuchen."
+        error = None
+        if not sources:
+            if project_id:
+                try:
+                    has_project_emb = conn.execute(
+                        """SELECT 1 FROM document_chunks dc
+                           JOIN documents d ON d.id = dc.document_id
+                           WHERE dc.embedding IS NOT NULL AND d.project_id = ? LIMIT 1""",
+                        (int(project_id),)
+                    ).fetchone()
+                except (ValueError, TypeError):
+                    has_project_emb = None
+                if not has_project_emb:
+                    proj_name = conn.execute(
+                        "SELECT name FROM projects WHERE id = ?", (project_id,)
+                    ).fetchone()
+                    name = proj_name["name"] if proj_name else f"Projekt {project_id}"
+                    error = f"Keine Embeddings für «{name}». Embeddings generieren und nochmals versuchen."
+                else:
+                    error = "Keine relevanten Dokumente für diese Frage gefunden."
             else:
-                error = "Keine relevanten Dokumente für diese Frage gefunden."
-        else:
-            has_embeddings = conn.execute(
-                "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
-            ).fetchone()
-            error = (
-                "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
-                if not has_embeddings else
-                "Keine relevanten Dokumente für diese Frage gefunden."
-            )
+                has_embeddings = conn.execute(
+                    "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
+                ).fetchone()
+                error = (
+                    "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
+                    if not has_embeddings else
+                    "Keine relevanten Dokumente für diese Frage gefunden."
+                )
 
-    conn.close()
-    return sources, error, False
+        return sources, error, False
+    finally:
+        conn.close()
 
 
 @app.get("/search/ai", response_class=HTMLResponse)
@@ -135,7 +147,11 @@ async def search_ai(
     if not q.strip():
         return HTMLResponse("")
 
-    sources, error, ollama_missing = _ai_vector_search(q, project_id)
+    import asyncio
+    loop = asyncio.get_event_loop()
+    sources, error, ollama_missing = await loop.run_in_executor(
+        None, _ai_vector_search, q, project_id
+    )
 
     if error and sources is None:
         return templates.TemplateResponse("_ai_answer.html", {
@@ -162,13 +178,17 @@ async def search_ai_answer(
     if not q.strip():
         return HTMLResponse("")
 
+    import asyncio
     from scanner.embedder import llm_answer
 
-    sources, error, _ = _ai_vector_search(q, project_id)
+    loop = asyncio.get_event_loop()
+    sources, error, _ = await loop.run_in_executor(
+        None, _ai_vector_search, q, project_id
+    )
     if not sources:
         return HTMLResponse('<div class="ai-no-answer">Keine Antwort generiert — keine relevanten Quellen gefunden.</div>')
 
-    answer = llm_answer(q, sources)
+    answer = await loop.run_in_executor(None, llm_answer, q, sources)
     if answer and sources:
         sources = _rerank_by_answer(sources, answer)
 

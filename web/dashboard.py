@@ -31,13 +31,26 @@ _mail_scan: dict = {}
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
 
 _DIST = Path(__file__).parent.parent / "dist"
+# Fallback: DATA_DIR (Library/Application Support/Archivio/dist) — dort legt Postinstall den ZIP ab
+_DIST_DATA = Path.home() / "Library" / "Application Support" / "Archivio" / "dist"
 _VERSION_FILE = Path(__file__).parent.parent / "VERSION"
 
 
 def _helper_info() -> tuple[bool, str]:
     version = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "1.0.0"
-    zip_path = _DIST / f"archivio-helper-{version}.zip"
-    return zip_path.exists(), version
+    # Alle Suchpfade: Bundle-dist + DATA_DIR-dist
+    for dist_dir in (_DIST, _DIST_DATA):
+        if (dist_dir / f"archivio-helper-{version}.zip").exists():
+            return True, version
+    # Fallback: neusten verfügbaren ZIP in beiden Verzeichnissen suchen
+    candidates = sorted(
+        list(_DIST.glob("archivio-helper-*.zip")) +
+        list(_DIST_DATA.glob("archivio-helper-*.zip"))
+        if _DIST_DATA.exists() else list(_DIST.glob("archivio-helper-*.zip"))
+    )
+    if candidates:
+        return True, candidates[-1].stem.replace("archivio-helper-", "")
+    return False, version
 
 
 def _server_info() -> tuple[bool, str]:
@@ -63,15 +76,13 @@ async def dashboard(request: Request):
 @router.get("/download/helper")
 async def download_helper():
     _, version = _helper_info()
-    zip_path = _DIST / f"archivio-helper-{version}.zip"
-    if not zip_path.exists():
-        from fastapi.responses import JSONResponse
-        return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
-    return FileResponse(
-        zip_path,
-        media_type="application/zip",
-        filename=f"archivio-helper-{version}.zip",
-    )
+    fname = f"archivio-helper-{version}.zip"
+    for dist_dir in (_DIST, _DIST_DATA):
+        zip_path = dist_dir / fname
+        if zip_path.exists():
+            return FileResponse(zip_path, media_type="application/zip", filename=fname)
+    from fastapi.responses import JSONResponse
+    return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
 
 
 @router.get("/download/server")

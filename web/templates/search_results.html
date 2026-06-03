@@ -27,11 +27,11 @@
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
         <button class="btn-sm" data-path="{{ f.path }}"
-          onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path))">
+          onclick="helperOpen(this.dataset.path)">
           Öffnen
         </button>
         <button class="btn-sm" data-path="{{ f.path }}"
-          onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
+          onclick="helperReveal(this.dataset.path)">
           Im Finder zeigen
         </button>
       </div>
@@ -88,11 +88,11 @@
         </button>
       {% else %}
         <button class="btn-sm" data-path="{{ r.filepath }}"
-          onclick="fetch('/open?path='+encodeURIComponent(this.dataset.path)).then(function(res){if(!res.ok)alert('Fehler beim Öffnen')})">
+          onclick="helperOpen(this.dataset.path)">
           Öffnen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"
-          onclick="window.location='archivio://reveal?path='+encodeURIComponent(this.dataset.path)">
+          onclick="helperReveal(this.dataset.path)">
           Im Finder zeigen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"

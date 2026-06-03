@@ -7,6 +7,7 @@ SICHERHEIT: Alle Extraktoren öffnen Dateien ausschliesslich lesend.
 Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb').
 """
 
+import re
 from pathlib import Path
 
 
@@ -16,6 +17,50 @@ class UnsupportedFormat(Exception):
 
 class ExtractionError(Exception):
     pass
+
+
+# ── Typographische Normalisierung ─────────────────────────────────────────────
+# OCR-PDFs enthalten oft Unicode-Ligaturen (ﬂ ﬁ ﬀ ﬃ ﬄ) anstelle normaler
+# Buchstaben. "Geschossﬂäche" (mit U+FB02) trifft kein LIKE '%geschossfläche%'.
+
+_LIGATURE_TABLE = str.maketrans({
+    'ﬀ': 'ff',   # ﬀ LATIN SMALL LIGATURE FF
+    'ﬁ': 'fi',   # ﬁ LATIN SMALL LIGATURE FI
+    'ﬂ': 'fl',   # ﬂ LATIN SMALL LIGATURE FL
+    'ﬃ': 'ffi',  # ﬃ LATIN SMALL LIGATURE FFI
+    'ﬄ': 'ffl',  # ﬄ LATIN SMALL LIGATURE FFL
+    'ﬅ': 'st',   # ﬅ LATIN SMALL LIGATURE LONG S T
+    'ﬆ': 'st',   # ﬆ LATIN SMALL LIGATURE ST
+    'ʼ': "'",    # ʼ MODIFIER LETTER APOSTROPHE (häufig in OCR)
+    '’': "'",    # ' RIGHT SINGLE QUOTATION MARK
+})
+
+
+# OCR-Leerzeichen nach Ligatur-Zeichenfolgen:
+# "Geschossfl äche" → "Geschossfläche"  (ﬂ wurde zu fl, dann Leerzeichen)
+# "Aufl age" → "Auflage"
+# "Defi nition" → "Definition"
+# NUR nach den Ligatur-Buchstaben-Paaren (fl, fi, ff, ffi, ffl) — nicht generell,
+# sonst würden echte Wortlücken wie "ein neues" zu "einneues".
+_OCR_LIGATURE_SPACE = re.compile(r'(fl|fi|ff|ffi|ffl) (?=[a-zäöüß])')
+
+# Mehrfach-Leerzeichen die OCR manchmal erzeugt ("Defi  nition")
+_OCR_MULTI_SPACE = re.compile(r' {2,}')
+
+
+def normalize_text(text: str) -> str:
+    """Ligaturen und OCR-Leerzeichen-Artefakte normalisieren. Umlaute bleiben erhalten.
+
+    Fixes:
+    - ﬂ → fl, ﬁ → fi, ﬀ → ff, ﬃ → ffi, ﬄ → ffl  (Unicode-Ligaturen)
+    - "Geschossfl äche" → "Geschossfläche"  (Leerzeichen nach Ligatur-Zeichenpaar)
+    - "Aufl age" → "Auflage"
+    - "Defi  nition" → "Definition"
+    """
+    text = text.translate(_LIGATURE_TABLE)
+    text = _OCR_MULTI_SPACE.sub(' ', text)
+    text = _OCR_LIGATURE_SPACE.sub(r'\1', text)
+    return text
 
 
 # ── TXT / MD ──────────────────────────────────────────────────────────────────
@@ -33,12 +78,20 @@ def extract_txt(path: Path) -> tuple[str, str]:
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
 def _pdf_pages_pymupdf(path: Path) -> list[dict]:
-    """Primäre PDF-Extraktion via PyMuPDF — besser bei custom Fonts."""
+    """Primäre PDF-Extraktion via PyMuPDF — besser bei custom Fonts.
+
+    Flags: Ligaturen werden NICHT beibehalten (decomponiert zu fl/fi/ff/…),
+    Zeilenenden werden verbunden (DEHYPHENATE). So entsteht suchbarer Klartext.
+    """
     import fitz  # pymupdf
+    # TEXT_PRESERVE_LIGATURES=1 weglassen → ﬂ→fl etc. direkt beim Extrahieren
+    # TEXT_PRESERVE_WHITESPACE=2 beibehalten
+    # TEXT_DEHYPHENATE=16 → Wörter mit Silbentrennung am Zeilenende zusammenführen
+    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
     result = []
     with fitz.open(str(path)) as doc:
         for i, page in enumerate(doc, start=1):
-            text = page.get_text().strip()
+            text = page.get_text(flags=FLAGS).strip()
             if len(text) < 50:
                 continue
             result.append({"page_number": i, "content": text})
@@ -156,6 +209,7 @@ def extract_chunks(path: Path) -> list[dict]:
 
     PDF: ein Chunk pro Seite (lange Seiten werden gesplittet).
     Andere Formate: Text wird in überlappende Chunks von ~800 Zeichen aufgeteilt.
+    Alle Texte werden normalisiert (Ligaturen → reguläre Zeichen).
     """
     ext = path.suffix.lower()
     if ext == ".pdf":
@@ -167,7 +221,7 @@ def extract_chunks(path: Path) -> list[dict]:
                 chunks.append({
                     "page_number": c["page_number"],
                     "chunk_index": idx,
-                    "content":     c["content"],
+                    "content":     normalize_text(c["content"]),
                 })
                 idx += 1
         return chunks
@@ -175,7 +229,7 @@ def extract_chunks(path: Path) -> list[dict]:
         text, _ = extract(path)
         if not text:
             return []
-        parts = split_text_into_chunks(text)
+        parts = split_text_into_chunks(normalize_text(text))
         return [
             {"page_number": None, "chunk_index": i, "content": part}
             for i, part in enumerate(parts)
@@ -219,24 +273,64 @@ def extract_doc(path: Path) -> tuple[str, str]:
 
 # ── XLSX ──────────────────────────────────────────────────────────────────────
 
+_XLSX_MAX_MB      = 20       # Dateien grösser als 20 MB überspringen
+_XLSX_MAX_SHEETS  = 10       # Maximal 10 Arbeitsblätter
+_XLSX_MAX_ROWS    = 5_000    # Maximal 5000 Zeilen pro Blatt
+_XLSX_TIMEOUT_SEC = 60       # Abbruch nach 60 Sekunden
+
+
 def extract_xlsx(path: Path) -> tuple[str, str]:
     try:
         import openpyxl
     except ImportError:
         raise UnsupportedFormat("openpyxl not installed")
-    try:
-        # READ-ONLY: NAS darf nie verändert werden — read_only=True
-        wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
-        parts = []
-        for sheet in wb.worksheets:
-            for row in sheet.iter_rows(values_only=True):
-                line = "  ".join(str(c) for c in row if c is not None)
-                if line:
-                    parts.append(line)
-        wb.close()
-        return "\n".join(parts), ""
-    except Exception as exc:
-        raise ExtractionError(str(exc)) from exc
+
+    # Grössencheck — sehr grosse XLSX-Dateien hängen openpyxl auf
+    size_mb = path.stat().st_size / 1_048_576
+    if size_mb > _XLSX_MAX_MB:
+        raise ExtractionError(
+            f"XLSX zu gross ({size_mb:.1f} MB > {_XLSX_MAX_MB} MB) — übersprungen"
+        )
+
+    # Extraktion in separatem Thread mit Timeout
+    import threading
+    result_box: list = []
+    error_box:  list = []
+
+    def _extract():
+        try:
+            # READ-ONLY: NAS darf nie verändert werden — read_only=True
+            wb = openpyxl.load_workbook(str(path), read_only=True, data_only=True)
+            parts = []
+            for sheet in wb.worksheets[:_XLSX_MAX_SHEETS]:
+                row_count = 0
+                for row in sheet.iter_rows(values_only=True):
+                    line = "  ".join(
+                        str(c)[:200] for c in row   # Zellinhalt auf 200 Zeichen begrenzen
+                        if c is not None and str(c).strip()
+                    )
+                    if line:
+                        parts.append(line)
+                    row_count += 1
+                    if row_count >= _XLSX_MAX_ROWS:
+                        parts.append(f"[… gekürzt nach {_XLSX_MAX_ROWS} Zeilen]")
+                        break
+            wb.close()
+            result_box.append("\n".join(parts))
+        except Exception as exc:
+            error_box.append(exc)
+
+    t = threading.Thread(target=_extract, daemon=True)
+    t.start()
+    t.join(timeout=_XLSX_TIMEOUT_SEC)
+
+    if t.is_alive():
+        raise ExtractionError(
+            f"XLSX Timeout nach {_XLSX_TIMEOUT_SEC}s — Datei zu komplex: {path.name}"
+        )
+    if error_box:
+        raise ExtractionError(str(error_box[0]))
+    return result_box[0] if result_box else ("", "")
 
 
 # ── EML ───────────────────────────────────────────────────────────────────────

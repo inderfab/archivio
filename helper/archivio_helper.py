@@ -1,6 +1,7 @@
 """Archivio Helper – macOS Menubar-App für Mitarbeiter-Macs."""
 from __future__ import annotations
 
+import http.server
 import json
 import logging
 import subprocess
@@ -12,6 +13,8 @@ from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 import rumps
+
+HELPER_PORT = 44380  # lokaler HTTP-Port — kein URL-Scheme, kein macOS-Dialog
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 _log_dir = Path.home() / "Library" / "Logs"
@@ -85,6 +88,69 @@ def _handle_archivio_url(url_str: str):
                     rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
     except Exception as e:
         log.error("URL handling error: %s", e)
+
+
+# ── Lokaler HTTP-Helper-Server ────────────────────────────────────────────────
+# Läuft auf localhost:44380. Browser ruft direkt http://localhost:44380/open?path=...
+# auf — kein URL-Scheme, kein macOS-Sicherheitsdialog, kein "App öffnen?" Prompt.
+
+class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
+    def do_OPTIONS(self):
+        self._cors_headers(200)
+
+    def do_GET(self):
+        parsed = urlparse(self.path)
+        params = parse_qs(parsed.query)
+        path   = unquote(params.get("path", [""])[0])
+
+        if parsed.path == "/open" and path:
+            p = Path(path)
+            if p.exists():
+                subprocess.run(["open", str(p)], timeout=5)
+                self._cors_headers(200)
+            else:
+                log.warning("Datei nicht gefunden: %s", path)
+                rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+                self._cors_headers(404)
+
+        elif parsed.path == "/reveal" and path:
+            p = Path(path)
+            if p.exists():
+                subprocess.run(["open", "-R", str(p)], timeout=5)
+                self._cors_headers(200)
+            else:
+                log.warning("Datei nicht gefunden: %s", path)
+                rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+                self._cors_headers(404)
+
+        elif parsed.path == "/ping":
+            self._cors_headers(200)
+
+        else:
+            self._cors_headers(400)
+
+    def _cors_headers(self, code: int):
+        self.send_response(code)
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
+        self.send_header("Access-Control-Allow-Private-Network", "true")
+        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        self.end_headers()
+        self.wfile.write(b"ok" if code == 200 else b"error")
+
+    def log_message(self, *args):
+        pass  # kein HTTP-Log-Spam
+
+
+def _start_local_server():
+    try:
+        server = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), _LocalHTTPHandler)
+        t = threading.Thread(target=server.serve_forever, daemon=True)
+        t.start()
+        log.info("Lokaler Helper-Server gestartet auf localhost:%d", HELPER_PORT)
+    except OSError as e:
+        log.warning("Lokaler Helper-Server konnte nicht starten (Port %d belegt?): %s",
+                    HELPER_PORT, e)
 
 
 # ── URL-Scheme Handler (optional, benötigt pyobjc) ───────────────────────────
@@ -215,6 +281,7 @@ class ArchivioHelper(rumps.App):
         ]
         self._autostart_item.state = _autostart_enabled()
 
+        _start_local_server()
         _register_url_handler()
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)

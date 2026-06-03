@@ -123,8 +123,18 @@ cp -r "$APP" "$PKG_ROOT/Applications/"
 # Postinstall: Autostart + App öffnen
 cat > "$PKG_SCRIPTS/postinstall" <<'POSTINSTALL'
 #!/bin/bash
-# Login-Item hinzufügen (für den aktuell angemeldeten Benutzer)
 CURRENT_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
+
+# Helper-ZIP in DATA_DIR kopieren damit der Download-Endpoint ihn sicher findet
+if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+  DATA_DIR="/Users/$CURRENT_USER/Library/Application Support/Archivio"
+  sudo -u "$CURRENT_USER" mkdir -p "$DATA_DIR/dist"
+  sudo -u "$CURRENT_USER" cp \
+    /Applications/Archivio\ Server.app/Contents/Resources/dist/archivio-helper-*.zip \
+    "$DATA_DIR/dist/" 2>/dev/null || true
+fi
+
+# Login-Item hinzufügen und App starten
 if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   sudo -u "$CURRENT_USER" osascript -e \
     'tell application "System Events" to make new login item at end with properties {path:"/Applications/Archivio Server.app", hidden:true}' || true

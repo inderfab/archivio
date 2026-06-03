@@ -92,7 +92,7 @@ def embed_query(text: str) -> np.ndarray | None:
 # ── Chunks einbetten und speichern ────────────────────────────────────────────
 
 EMBED_BATCH_SIZE = 20   # Chunks pro Ollama-Request
-EMBED_MAX_CHARS  = 5500  # nomic-embed-text Kontextlimit (~8192 Token)
+EMBED_MAX_CHARS  = 2000  # nomic-embed-text: sicher unter 512 Token (dt. Text ~4 Zeichen/Token)
 
 
 def embed_document_chunks(conn: sqlite3.Connection, document_id: int) -> int:
@@ -201,13 +201,36 @@ _STOPWORDS = {
 }
 
 
+def _de_umlaut(s: str) -> str:
+    """Umlaute für robuste Suche entfernen: ä→a, ö→o, ü→u, ß→ss."""
+    return (s.replace("ä", "a").replace("ö", "o").replace("ü", "u")
+             .replace("Ä", "A").replace("Ö", "O").replace("Ü", "U")
+             .replace("ß", "ss"))
+
+
+_CHUNK_SELECT = """
+    SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
+           d.filename, d.extension, d.project_id,
+           dp.path AS filepath, p.name AS project_name,
+           {score} AS score
+    FROM {from_clause}
+    JOIN documents d ON d.id = dc.document_id
+    JOIN projects  p ON p.id = d.project_id
+    LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+"""
+
+
 def keyword_search_chunks(
     conn: sqlite3.Connection,
     query: str,
     project_id: str = "",
     limit: int = 4,
 ) -> list[dict]:
-    """Hybrid-Keyword-Suche: LIKE-AND (morphologisch) + FTS-OR (Recall)."""
+    """Keyword-Suche in Chunks. Drei Strategien, nach Relevanz gemergt:
+    1. FTS5 BM25 (primär, umlaut-sicher, gerankt)
+    2. LIKE mit Umlaut-Normalisierung (fallback, umlaut-sicher)
+    3. Heading-Suche (UPPERCASE-Term = SIA-Norm-Definitions-Überschrift, boost)
+    """
     import re
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in query.lower().split() if w]
     words = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
@@ -223,52 +246,84 @@ def keyword_search_chunks(
         except (ValueError, TypeError):
             pass
 
-    # ── Strategie 1: LIKE AND mit 3-Zeichen-Präfix (deckt dt. Morphologie ab) ──
-    prefixes = [w[:3] for w in words]
-    like_clauses = " AND ".join(f"LOWER(dc.content) LIKE ?" for _ in prefixes)
-    like_params   = [f"%{p}%" for p in prefixes] + proj_params + [limit * 2]
-    like_rows: list = []
-    try:
-        like_rows = conn.execute(f"""
-            SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
-                   d.filename, d.extension, d.project_id,
-                   dp.path AS filepath, p.name AS project_name,
-                   0.95 AS score
-            FROM document_chunks dc
-            JOIN documents d ON d.id = dc.document_id
-            JOIN projects  p ON p.id = d.project_id
-            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-            WHERE {like_clauses} {proj_clause}
-            LIMIT ?
-        """, like_params).fetchall()
-    except Exception as e:
-        log.warning("LIKE-Chunk-Suche fehlgeschlagen: %s", e)
-
-    # ── Strategie 2: FTS OR (breiter Recall für nicht-morphologische Fälle) ──
-    fts_q    = " OR ".join(f"{w}*" for w in words)
+    # ── Strategie 1: FTS5 mit BM25-Ranking ───────────────────────────────────
+    # chunks_fts verwendet tokenize='unicode61 remove_diacritics 2':
+    # Umlaute werden beim Indexieren UND beim Suchen entfernt → robust.
+    # Wir senden sowohl "geschossfläche*" als auch "geschossflache*" (ASCII-Fallback).
+    fts_terms = []
+    for w in words:
+        fts_terms.append(f"{w}*")
+        w_a = _de_umlaut(w)
+        if w_a != w:
+            fts_terms.append(f"{w_a}*")
+    fts_q = " OR ".join(fts_terms)
     fts_rows: list = []
     try:
-        fts_rows = conn.execute(f"""
-            SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
-                   d.filename, d.extension, d.project_id,
-                   dp.path AS filepath, p.name AS project_name,
-                   0.90 AS score
-            FROM chunks_fts
-            JOIN document_chunks dc ON chunks_fts.rowid = dc.id
-            JOIN documents d        ON d.id = dc.document_id
-            JOIN projects  p        ON p.id = d.project_id
-            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-            WHERE chunks_fts MATCH ? {proj_clause}
-            ORDER BY rank
-            LIMIT ?
-        """, [fts_q] + proj_params + [limit * 2]).fetchall()
+        fts_rows = conn.execute(
+            _CHUNK_SELECT.format(score="0.95", from_clause="chunks_fts JOIN document_chunks dc ON chunks_fts.rowid = dc.id") +
+            f" WHERE chunks_fts MATCH ? {proj_clause} ORDER BY rank LIMIT ?",
+            [fts_q] + proj_params + [limit * 3]
+        ).fetchall()
     except Exception as e:
         log.warning("FTS-Chunk-Suche fehlgeschlagen: %s", e)
 
-    # ── Merge: LIKE zuerst (präziser), dann FTS-Ergänzungen ──
+    # ── Strategie 2: LIKE mit Umlaut-Normalisierung (SQLite LOWER + replace) ─
+    # SQLite LOWER() normalisiert keine Umlaute (Ä bleibt Ä).
+    # Lösung: replace() für Umlaute auf beiden Seiten.
+    def _norm_sql_expr(col: str) -> str:
+        return (f"replace(replace(replace(replace(replace(replace("
+                f"lower({col}),"
+                f"'ä','a'),'ö','o'),'ü','u'),'ß','ss'),'Ä','a'),'Ö','o')")
+
+    norm_words = [_de_umlaut(w) for w in words]
+
+    # AND-Suche: alle Wörter müssen vorkommen (präzise, aber eng)
+    like_clauses_and = " AND ".join(f"{_norm_sql_expr('dc.content')} LIKE ?" for _ in norm_words)
+    like_rows: list = []
+    try:
+        like_rows = conn.execute(
+            _CHUNK_SELECT.format(score="0.90", from_clause="document_chunks dc") +
+            f" WHERE {like_clauses_and} {proj_clause} ORDER BY length(dc.content) LIMIT ?",
+            [f"%{w}%" for w in norm_words] + proj_params + [limit * 2]
+        ).fetchall()
+    except Exception as e:
+        log.warning("LIKE-AND-Suche fehlgeschlagen: %s", e)
+
+    # OR-Suche: mindestens ein Wort (breiter Recall, für generische/kurze Queries)
+    # Nur die längsten Wörter nehmen (> 6 Zeichen) um False-Positives zu reduzieren
+    long_words = [w for w in norm_words if len(w) > 6]
+    like_or_rows: list = []
+    if long_words and len(like_rows) < limit:
+        like_clauses_or = " OR ".join(f"{_norm_sql_expr('dc.content')} LIKE ?" for _ in long_words)
+        try:
+            like_or_rows = conn.execute(
+                _CHUNK_SELECT.format(score="0.80", from_clause="document_chunks dc") +
+                f" WHERE ({like_clauses_or}) {proj_clause} ORDER BY length(dc.content) LIMIT ?",
+                [f"%{w}%" for w in long_words] + proj_params + [limit]
+            ).fetchall()
+        except Exception as e:
+            log.warning("LIKE-OR-Suche fehlgeschlagen: %s", e)
+
+    # ── Strategie 3: Heading-Boost ────────────────────────────────────────────
+    # SIA-Normen kennzeichnen Definitionen mit GROSSBUCHSTABEN: "2 GESCHOSSFLÄCHE GF"
+    # Treffer hier bekommen höchsten Score → kommen als erste ins Ergebnis.
+    heading_rows: list = []
+    try:
+        for w in words:
+            for variant in {w.upper(), _de_umlaut(w).upper()}:
+                heading_rows += conn.execute(
+                    _CHUNK_SELECT.format(score="0.99", from_clause="document_chunks dc") +
+                    f" WHERE INSTR(dc.content, ?) > 0 {proj_clause}"
+                    f" ORDER BY length(dc.content) LIMIT ?",
+                    [variant] + proj_params + [limit]
+                ).fetchall()
+    except Exception as e:
+        log.warning("Heading-Suche fehlgeschlagen: %s", e)
+
+    # ── Merge: Heading → FTS → LIKE-AND → LIKE-OR ────────────────────────────
     seen   = set()
     merged = []
-    for row in list(like_rows) + list(fts_rows):
+    for row in list(heading_rows) + list(fts_rows) + list(like_rows) + list(like_or_rows):
         if row["id"] not in seen:
             seen.add(row["id"])
             merged.append(row)
