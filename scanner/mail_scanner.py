@@ -262,7 +262,11 @@ def mail_exists(conn, message_id: str) -> bool:
 
 
 def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
-    """Schreibt Mail in DB. True = neu gespeichert, False = bereits vorhanden."""
+    """Schreibt Mail in DB inkl. Chunks + Embeddings.
+    Jede Stufe hat eigenes try/except — Fehler werden geloggt, Mail wird nicht übersprungen.
+    True = neu gespeichert, False = bereits vorhanden.
+    """
+    import threading as _threading
     message_id = record["message_id"]
     if not message_id or mail_exists(conn, message_id):
         return False
@@ -271,50 +275,70 @@ def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
     attachments_json = json.dumps(record["attachments"], ensure_ascii=False)
     cleaned_text     = record["cleaned_text"] or ""
 
-    with conn:
-        cursor = conn.execute(
-            """INSERT INTO documents
-               (project_id, hash, filename, extension, filesize, modified_at,
-                extraction_status, source_type, metadata)
-               VALUES (?, ?, ?, '.eml', 0, ?, 'ok', 'email', ?)""",
-            (project_id, message_id, subject,
-             record["mail_date"], attachments_json),
-        )
-        doc_id = cursor.lastrowid
-
-        conn.execute(
-            """INSERT INTO mails (document_id, sender, recipients, cc, subject, date, thread_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?)""",
-            (doc_id, record["sender"], record["recipients"], record["cc"],
-             record["subject"], record["mail_date"], record["thread_id"]),
-        )
-
-        if cleaned_text:
-            conn.execute(
-                """INSERT INTO document_content (document_id, content, language)
-                   VALUES (?, ?, 'de')""",
-                (doc_id, cleaned_text),
+    # Stufe 1: Dokument + Mail-Metadaten + Content speichern
+    try:
+        with conn:
+            cursor = conn.execute(
+                """INSERT INTO documents
+                   (project_id, hash, filename, extension, filesize, modified_at,
+                    extraction_status, source_type, metadata)
+                   VALUES (?, ?, ?, '.eml', 0, ?, 'ok', 'email', ?)""",
+                (project_id, message_id, subject,
+                 record["mail_date"], attachments_json),
             )
+            doc_id = cursor.lastrowid
+            conn.execute(
+                """INSERT INTO mails (document_id, sender, recipients, cc, subject, date, thread_id)
+                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                (doc_id, record["sender"], record["recipients"], record["cc"],
+                 record["subject"], record["mail_date"], record["thread_id"]),
+            )
+            if cleaned_text:
+                conn.execute(
+                    "INSERT INTO document_content (document_id, content, language) VALUES (?, ?, 'de')",
+                    (doc_id, cleaned_text),
+                )
+    except Exception as e:
+        log.warning("Mail speichern fehlgeschlagen (%s): %s", subject[:60], e)
+        return False
 
-    # Chunks erstellen damit die Mail in der Suche erscheint
-    if cleaned_text:
+    if not cleaned_text:
+        return True
+
+    # Stufe 2: Chunks erstellen
+    try:
         from scanner.extractors import split_text_into_chunks
         from db import queries
         parts = split_text_into_chunks(cleaned_text)
         if parts:
-            chunks = [
-                {"page_number": None, "chunk_index": i, "content": part}
-                for i, part in enumerate(parts)
-            ]
+            chunks = [{"page_number": None, "chunk_index": i, "content": p}
+                      for i, p in enumerate(parts)]
             with conn:
                 queries.save_chunks(conn, doc_id, chunks)
-            # Embedding generieren
-            try:
-                from scanner.embedder import embed_document_chunks, is_ollama_running
-                if is_ollama_running():
-                    embed_document_chunks(conn, doc_id)
-            except Exception as e:
-                log.debug("Embedding übersprungen für Mail %s: %s", subject, e)
+    except Exception as e:
+        log.warning("Chunking fehlgeschlagen doc %d (%s): %s", doc_id, subject[:60], e)
+        return True  # Mail gespeichert, nur ohne Chunks
+
+    # Stufe 3: Embeddings — eigene Connection, 30s Timeout
+    try:
+        from scanner.embedder import embed_document_chunks, is_ollama_running
+        if is_ollama_running():
+            done_flag = []
+            def _do_embed():
+                try:
+                    ec = connection.get_connection()
+                    embed_document_chunks(ec, doc_id)
+                    ec.close()
+                    done_flag.append(True)
+                except Exception as ee:
+                    log.warning("Embedding fehlgeschlagen doc %d: %s", doc_id, ee)
+            t = _threading.Thread(target=_do_embed, daemon=True)
+            t.start()
+            t.join(timeout=30)
+            if not done_flag:
+                log.warning("Embedding Timeout doc %d (%s) — übersprungen", doc_id, subject[:60])
+    except Exception as e:
+        log.warning("Embedding-Start fehlgeschlagen doc %d: %s", doc_id, e)
 
     return True
 

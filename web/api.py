@@ -1282,73 +1282,30 @@ async def debug_mail_scan_test(mailbox: str = ""):
         return JSONResponse({"error": traceback.format_exc()}, status_code=500)
 
 
-_mail_chunk_state: dict = {"running": False, "done": 0, "total": 0, "error": ""}
+@router.post("/mail/reset-and-rescan")
+async def mail_reset_and_rescan():
+    """Löscht alle E-Mail-Dokumente und startet Mail-Scan neu.
+    Der neue Scan speichert Mails inkl. Chunks + Embeddings (mit Fehlertoleranz).
+    """
+    # Mails aus DB löschen
+    conn = connection.get_connection()
+    try:
+        with conn:
+            conn.execute("DELETE FROM documents WHERE source_type = 'email'")
+        deleted = conn.execute(
+            "SELECT changes()"
+        ).fetchone()[0]
+    finally:
+        conn.close()
 
+    # Mail-Scan starten
+    if _mail_scan.get("status") == "running":
+        return JSONResponse({"ok": True, "deleted": deleted,
+                             "message": "Mails gelöscht. Scan läuft bereits."})
+    _mail_scan.clear()
+    _mail_scan["status"]     = "running"
+    _mail_scan["started_at"] = _now()
+    threading.Thread(target=_run_mail_scan, daemon=True).start()
 
-@router.post("/fix/mail-chunks")
-async def fix_mail_chunks():
-    """Startet Chunk+Embedding-Backfill für Mails im Hintergrund. Sofortiger Return."""
-    if _mail_chunk_state.get("running"):
-        return JSONResponse({"ok": True, "already_running": True,
-                             "done": _mail_chunk_state["done"],
-                             "total": _mail_chunk_state["total"]})
-
-    def _run():
-        from scanner.extractors import split_text_into_chunks
-        from db import queries
-        _mail_chunk_state.update({"running": True, "done": 0, "total": 0, "error": ""})
-        # Eigene kurze Verbindung — nur Lesen + Chunks schreiben, kein Embedding
-        conn = connection.get_connection()
-        try:
-            rows = conn.execute("""
-                SELECT d.id, dc.content
-                FROM documents d
-                JOIN document_content dc ON dc.document_id = d.id
-                WHERE d.source_type = 'email'
-                  AND d.extraction_status = 'ok'
-                  AND NOT EXISTS (
-                    SELECT 1 FROM document_chunks c WHERE c.document_id = d.id
-                  )
-                  AND LENGTH(dc.content) > 20
-            """).fetchall()
-            _mail_chunk_state["total"] = len(rows)
-            for row in rows:
-                try:
-                    parts = split_text_into_chunks(row["content"])
-                    if parts:
-                        chunks = [{"page_number": None, "chunk_index": i, "content": p}
-                                  for i, p in enumerate(parts)]
-                        conn.execute("BEGIN")
-                        queries.save_chunks(conn, row["id"], chunks)
-                        conn.commit()
-                except Exception as e:
-                    try:
-                        conn.rollback()
-                    except Exception:
-                        pass
-                    log.warning("Mail-Chunk fehlgeschlagen doc %s: %s", row["id"], e)
-                    _mail_chunk_state["error"] = str(e)
-                finally:
-                    _mail_chunk_state["done"] += 1
-        except Exception as e:
-            _mail_chunk_state["error"] = str(e)
-        finally:
-            _mail_chunk_state["running"] = False
-            conn.close()
-        # Embeddings werden danach via /api/ai/backfill generiert
-
-    threading.Thread(target=_run, daemon=True).start()
-    return JSONResponse({"ok": True, "started": True,
-                         "message": "Backfill gestartet. Status: GET /api/fix/mail-chunks/status"})
-
-
-@router.get("/fix/mail-chunks/status")
-async def fix_mail_chunks_status():
-    s = _mail_chunk_state
-    return JSONResponse({
-        "running": s["running"],
-        "done":    s["done"],
-        "total":   s["total"],
-        "error":   s["error"],
-        "pct":     round(s["done"] / s["total"] * 100) if s["total"] else 0,
-    })
+    return JSONResponse({"ok": True, "deleted": deleted,
+                         "message": f"{deleted} Mails gelöscht. Scan gestartet — inkl. Chunking + Embedding."})
