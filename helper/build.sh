@@ -56,6 +56,7 @@ cp helper/archivio_helper.py  "$APP/Contents/Resources/"
 cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
 cp helper/icon.png            "$APP/Contents/Resources/"
+cp archivio.icns              "$APP/Contents/Resources/"
 cp VERSION                    "$APP/Contents/Resources/"
 
 # Info.plist
@@ -94,6 +95,8 @@ cat > "$APP/Contents/Info.plist" <<PLIST
   </array>
   <key>NSHighResolutionCapable</key>
   <true/>
+  <key>CFBundleIconFile</key>
+  <string>archivio</string>
   <key>NSAppleEventsUsageDescription</key>
   <string>Archivio Helper muss Dateien öffnen können.</string>
 </dict>
