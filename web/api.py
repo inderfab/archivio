@@ -1313,17 +1313,23 @@ async def fix_mail_chunks():
             """).fetchall()
             _mail_chunk_state["total"] = len(rows)
             for row in rows:
-                parts = split_text_into_chunks(row["content"])
-                if not parts:
+                try:
+                    parts = split_text_into_chunks(row["content"])
+                    if parts:
+                        chunks = [{"page_number": None, "chunk_index": i, "content": p}
+                                  for i, p in enumerate(parts)]
+                        with conn:
+                            queries.save_chunks(conn, row["id"], chunks)
+                        try:
+                            if is_ollama_running():
+                                embed_document_chunks(conn, row["id"])
+                        except Exception as emb_e:
+                            log.warning("Embedding übersprungen doc %s: %s", row["id"], emb_e)
+                except Exception as e:
+                    log.warning("Mail-Chunk fehlgeschlagen doc %s: %s", row["id"], e)
+                    _mail_chunk_state["error"] = str(e)
+                finally:
                     _mail_chunk_state["done"] += 1
-                    continue
-                chunks = [{"page_number": None, "chunk_index": i, "content": p}
-                          for i, p in enumerate(parts)]
-                with conn:
-                    queries.save_chunks(conn, row["id"], chunks)
-                if is_ollama_running():
-                    embed_document_chunks(conn, row["id"])
-                _mail_chunk_state["done"] += 1
         except Exception as e:
             _mail_chunk_state["error"] = str(e)
         finally:
