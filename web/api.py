@@ -1295,9 +1295,9 @@ async def fix_mail_chunks():
 
     def _run():
         from scanner.extractors import split_text_into_chunks
-        from scanner.embedder import embed_document_chunks, is_ollama_running
         from db import queries
         _mail_chunk_state.update({"running": True, "done": 0, "total": 0, "error": ""})
+        # Eigene kurze Verbindung — nur Lesen + Chunks schreiben, kein Embedding
         conn = connection.get_connection()
         try:
             rows = conn.execute("""
@@ -1318,26 +1318,14 @@ async def fix_mail_chunks():
                     if parts:
                         chunks = [{"page_number": None, "chunk_index": i, "content": p}
                                   for i, p in enumerate(parts)]
-                        with conn:
-                            queries.save_chunks(conn, row["id"], chunks)
-                        # Embedding mit eigenem Connection + 30s Timeout
-                        if is_ollama_running():
-                            doc_id = row["id"]
-                            emb_done = []
-                            def _embed(did=doc_id):
-                                try:
-                                    c = connection.get_connection()
-                                    embed_document_chunks(c, did)
-                                    c.close()
-                                    emb_done.append(True)
-                                except Exception:
-                                    pass
-                            t = threading.Thread(target=_embed, daemon=True)
-                            t.start()
-                            t.join(timeout=30)
-                            if not emb_done:
-                                log.warning("Embedding Timeout doc %s — übersprungen", doc_id)
+                        conn.execute("BEGIN")
+                        queries.save_chunks(conn, row["id"], chunks)
+                        conn.commit()
                 except Exception as e:
+                    try:
+                        conn.rollback()
+                    except Exception:
+                        pass
                     log.warning("Mail-Chunk fehlgeschlagen doc %s: %s", row["id"], e)
                     _mail_chunk_state["error"] = str(e)
                 finally:
@@ -1347,6 +1335,7 @@ async def fix_mail_chunks():
         finally:
             _mail_chunk_state["running"] = False
             conn.close()
+        # Embeddings werden danach via /api/ai/backfill generiert
 
     threading.Thread(target=_run, daemon=True).start()
     return JSONResponse({"ok": True, "started": True,
