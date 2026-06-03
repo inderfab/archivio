@@ -1280,3 +1280,49 @@ async def debug_mail_scan_test(mailbox: str = ""):
 
     except Exception:
         return JSONResponse({"error": traceback.format_exc()}, status_code=500)
+
+
+@router.post("/fix/mail-chunks")
+async def fix_mail_chunks():
+    """Erstellt Chunks und Embeddings für bestehende Mails die noch keine Chunks haben."""
+    def _run():
+        from scanner.extractors import split_text_into_chunks
+        from scanner.embedder import embed_document_chunks, is_ollama_running
+        from db import queries
+        conn = connection.get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT d.id, dc.content
+                FROM documents d
+                JOIN document_content dc ON dc.document_id = d.id
+                WHERE d.source_type = 'email'
+                  AND d.extraction_status = 'ok'
+                  AND NOT EXISTS (
+                    SELECT 1 FROM document_chunks c WHERE c.document_id = d.id
+                  )
+                  AND LENGTH(dc.content) > 20
+            """).fetchall()
+
+            count = 0
+            for row in rows:
+                parts = split_text_into_chunks(row["content"])
+                if not parts:
+                    continue
+                chunks = [{"page_number": None, "chunk_index": i, "content": p}
+                          for i, p in enumerate(parts)]
+                with conn:
+                    queries.save_chunks(conn, row["id"], chunks)
+                if is_ollama_running():
+                    embed_document_chunks(conn, row["id"])
+                count += 1
+            return count
+        finally:
+            conn.close()
+
+    import asyncio, traceback
+    try:
+        count = await asyncio.get_event_loop().run_in_executor(None, _run)
+        return JSONResponse({"ok": True, "fixed": count,
+                             "message": f"{count} Mails mit Chunks und Embeddings versehen."})
+    except Exception:
+        return JSONResponse({"ok": False, "error": traceback.format_exc()}, status_code=500)

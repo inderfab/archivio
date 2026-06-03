@@ -269,6 +269,7 @@ def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
 
     subject          = record["subject"] or "(kein Betreff)"
     attachments_json = json.dumps(record["attachments"], ensure_ascii=False)
+    cleaned_text     = record["cleaned_text"] or ""
 
     with conn:
         cursor = conn.execute(
@@ -288,12 +289,32 @@ def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
              record["subject"], record["mail_date"], record["thread_id"]),
         )
 
-        if record["cleaned_text"]:
+        if cleaned_text:
             conn.execute(
                 """INSERT INTO document_content (document_id, content, language)
                    VALUES (?, ?, 'de')""",
-                (doc_id, record["cleaned_text"]),
+                (doc_id, cleaned_text),
             )
+
+    # Chunks erstellen damit die Mail in der Suche erscheint
+    if cleaned_text:
+        from scanner.extractors import split_text_into_chunks
+        from db import queries
+        parts = split_text_into_chunks(cleaned_text)
+        if parts:
+            chunks = [
+                {"page_number": None, "chunk_index": i, "content": part}
+                for i, part in enumerate(parts)
+            ]
+            with conn:
+                queries.save_chunks(conn, doc_id, chunks)
+            # Embedding generieren
+            try:
+                from scanner.embedder import embed_document_chunks, is_ollama_running
+                if is_ollama_running():
+                    embed_document_chunks(conn, doc_id)
+            except Exception as e:
+                log.debug("Embedding übersprungen für Mail %s: %s", subject, e)
 
     return True
 
