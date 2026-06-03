@@ -271,7 +271,7 @@ async def scan_progress_banner(request: Request):
             break
         if status in ("done", "error"):
             elapsed = _elapsed_seconds(s.get("finished_at", ""))
-            if elapsed < 10:
+            if elapsed < 30:
                 active = (pid, s)
 
     if active is None:
@@ -293,6 +293,7 @@ async def scan_progress_banner(request: Request):
         "skipped":      s.get("skipped", 0),
         "errors":       s.get("errors", 0),
         "current_file": s.get("current_file", ""),
+        "error":        s.get("error", ""),
     })
 
 

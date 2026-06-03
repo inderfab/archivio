@@ -100,6 +100,21 @@ async def scan_nav_status():
     return _HTML("")
 
 
+@router.get("/scan/state")
+async def scan_state():
+    """Gibt den aktuellen Scan-State zurück (für Diagnose)."""
+    conn = connection.get_connection()
+    projects = {r["id"]: r["name"] for r in conn.execute("SELECT id, name FROM projects").fetchall()}
+    conn.close()
+    return {
+        "scans": {
+            projects.get(pid, str(pid)): {k: v for k, v in s.items() if k != "request"}
+            for pid, s in _scans.items()
+        },
+        "mail_scan": {k: v for k, v in _mail_scan.items()},
+    }
+
+
 @router.post("/reset-and-rescan")
 async def reset_and_rescan():
     """Löscht alle Chunks/Embeddings, setzt alle Dokumente auf 'pending' und startet Scan.

@@ -6,6 +6,9 @@
       — {{ project_name }}
     </span>
   </div>
+  {% if status == "error" and error %}
+    <div class="spb-phase" style="color:#b91c1c; font-size:12px; margin-top:4px;">{{ error }}</div>
+  {% endif %}
 
   {% if phase == "collecting" and status == "running" %}
     <div class="spb-phase">Dateien werden gesammelt…</div>
