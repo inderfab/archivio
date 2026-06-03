@@ -179,10 +179,19 @@ def extract_pdf_pages(path: Path) -> list[dict]:
         log.info("Mojibake erkannt, versuche OCR-Fallback: %s", path.name)
     except ImportError:
         pass  # pymupdf nicht installiert → direkt zu pypdf
-    except Exception as exc:
-        raise ExtractionError(str(exc)) from exc
+    except Exception as pymupdf_exc:
+        # PyMuPDF-Exception (z.B. korruptes PDF, unbekanntes Format) → OCR versuchen
+        log.info("PyMuPDF-Fehler, versuche OCR-Fallback (%s): %s", path.name, pymupdf_exc)
+        try:
+            ocr_pages = _pdf_pages_ocr(path)
+            if ocr_pages and not _has_mojibake(ocr_pages):
+                log.info("OCR-Fallback nach PyMuPDF-Fehler erfolgreich: %s", path.name)
+                return ocr_pages
+        except Exception as ocr_exc:
+            log.warning("OCR-Fallback fehlgeschlagen (%s): %s", path.name, ocr_exc)
+        raise ExtractionError(str(pymupdf_exc)) from pymupdf_exc
     else:
-        # Schritt 2: OCR via Tesseract
+        # Schritt 2: OCR via Tesseract (nach Mojibake)
         try:
             ocr_pages = _pdf_pages_ocr(path)
             if ocr_pages and not _has_mojibake(ocr_pages):
