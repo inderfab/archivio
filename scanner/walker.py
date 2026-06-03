@@ -43,17 +43,18 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None, canc
         progress["phase"] = "collecting"
 
     if not root.exists():
-        log.error("Scan abgebrochen: Pfad existiert nicht: %s", root)
+        msg = f"Pfad existiert nicht: {root}"
+        log.error("Scan abgebrochen: %s", msg)
         if progress is not None:
             progress["phase"] = "error"
+            progress["error"] = msg
         return
     if not os.access(root, os.R_OK):
-        log.error(
-            "Scan abgebrochen: Kein Lesezugriff auf %s — "
-            "macOS Full Disk Access in Systemeinstellungen → Datenschutz prüfen.", root
-        )
+        msg = f"Kein Lesezugriff auf {root} — macOS Full Disk Access prüfen (Systemeinstellungen → Datenschutz)"
+        log.error("Scan abgebrochen: %s", msg)
         if progress is not None:
             progress["phase"] = "error"
+            progress["error"] = msg
         return
 
     batch: list[Path] = []
@@ -91,8 +92,12 @@ def scan_project(project_id: int, root: Path, progress: dict | None = None, canc
         )
 
     if progress is not None:
-        progress["phase"] = "processing"
-        progress["total"] = len(batch)
+        progress["phase"]     = "processing"
+        progress["total"]     = len(batch)
+        progress["processed"] = 0
+        progress["new"]       = 0
+        progress["skipped"]   = 0
+        progress["errors"]    = 0
 
     conn = connection.get_connection()
     for path in batch:

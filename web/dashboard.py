@@ -884,7 +884,8 @@ def _run_scan(project_id: int, path: str):
     try:
         scan_project(project_id, Path(path), progress=progress, cancel_flag=cancel_flag)
         if progress.get("phase") == "error":
-            progress.update({"status": "error", "finished_at": _now()})
+            progress.update({"status": "error", "finished_at": _now(),
+                             "error": progress.get("error", "Pfad nicht zugänglich")})
             return
         if cancel_flag.get("cancel"):
             progress.update({"status": "cancelled", "finished_at": _now()})
