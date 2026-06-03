@@ -100,6 +100,62 @@ async def scan_nav_status():
     return _HTML("")
 
 
+@router.get("/debug/fts-state")
+async def fts_state():
+    """Prüft ob chunks_fts befüllt ist und Trigger existieren."""
+    conn = connection.get_connection()
+    try:
+        chunks_total = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        fts_total    = conn.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0]
+        triggers     = [r[0] for r in conn.execute(
+            "SELECT name FROM sqlite_master WHERE type='trigger' AND name LIKE 'chunks_fts%'"
+        ).fetchall()]
+        return {
+            "document_chunks": chunks_total,
+            "chunks_fts":      fts_total,
+            "fts_in_sync":     chunks_total == fts_total,
+            "triggers":        triggers,
+        }
+    finally:
+        conn.close()
+
+
+@router.post("/fix/rebuild-fts")
+async def rebuild_fts():
+    """Baut chunks_fts komplett neu aus document_chunks auf."""
+    def _rebuild():
+        conn = connection.get_connection()
+        try:
+            # Trigger temporär deaktivieren
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_insert")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_delete")
+            conn.execute("DROP TRIGGER IF EXISTS chunks_fts_update")
+            # FTS leeren und neu befüllen
+            conn.execute("DELETE FROM chunks_fts")
+            conn.execute("INSERT INTO chunks_fts(rowid, content) SELECT id, content FROM document_chunks WHERE content IS NOT NULL")
+            conn.commit()
+            # Trigger neu anlegen
+            conn.executescript("""
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_insert AFTER INSERT ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_delete AFTER DELETE ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                END;
+                CREATE TRIGGER IF NOT EXISTS chunks_fts_update AFTER UPDATE ON document_chunks BEGIN
+                    INSERT INTO chunks_fts(chunks_fts, rowid, content) VALUES ('delete', old.id, old.content);
+                    INSERT INTO chunks_fts(rowid, content) VALUES (new.id, new.content);
+                END;
+            """)
+            count = conn.execute("SELECT COUNT(*) FROM chunks_fts").fetchone()[0]
+            return count
+        finally:
+            conn.close()
+    import asyncio
+    count = await asyncio.get_event_loop().run_in_executor(None, _rebuild)
+    return {"ok": True, "chunks_fts_rebuilt": count}
+
+
 @router.get("/scan/state")
 async def scan_state():
     """Gibt den aktuellen Scan-State zurück (für Diagnose)."""
