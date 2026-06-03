@@ -181,12 +181,32 @@ async def db_quality():
         total_chunks = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
         r["chunks"] = {"total": total_chunks, "missing_embedding": no_emb}
 
-        # 4. Dokumente ok aber keine Chunks
+        # 4. Dokumente ok aber keine Chunks — nach Extension aufschlüsseln
         r["ok_without_chunks"] = conn.execute("""
             SELECT COUNT(*) FROM documents d
             WHERE d.extraction_status = 'ok'
               AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
         """).fetchone()[0]
+
+        r["ok_without_chunks_by_ext"] = {
+            row["extension"]: row["cnt"]
+            for row in conn.execute("""
+                SELECT d.extension, COUNT(*) AS cnt FROM documents d
+                WHERE d.extraction_status = 'ok'
+                  AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+                GROUP BY d.extension ORDER BY cnt DESC
+            """).fetchall()
+        }
+
+        r["ok_without_chunks_sample"] = [
+            {"filename": row["filename"], "ext": row["extension"], "size_kb": round(row["filesize"] / 1024)}
+            for row in conn.execute("""
+                SELECT d.filename, d.extension, d.filesize FROM documents d
+                WHERE d.extraction_status = 'ok'
+                  AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+                ORDER BY d.filesize DESC LIMIT 20
+            """).fetchall()
+        ]
 
         # 5. Verbleibende Mojibake-Dokumente (nach dem Fix)
         r["remaining_mojibake"] = conn.execute("""
