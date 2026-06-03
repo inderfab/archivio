@@ -100,6 +100,38 @@ async def scan_nav_status():
     return _HTML("")
 
 
+@router.get("/debug/page-number-stats")
+async def page_number_stats():
+    """Zeigt Verteilung von page_number in document_chunks und was FTS-Suche zurückgibt."""
+    conn = connection.get_connection()
+    try:
+        with_page = conn.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE page_number IS NOT NULL AND page_number > 0"
+        ).fetchone()[0]
+        without_page = conn.execute(
+            "SELECT COUNT(*) FROM document_chunks WHERE page_number IS NULL OR page_number = 0"
+        ).fetchone()[0]
+        # Beispiel-FTS-Suche: erste 5 Treffer mit page_number
+        sample = conn.execute("""
+            SELECT d.filename, dc.page_number, dc.content
+            FROM chunks_fts cf
+            JOIN document_chunks dc ON cf.rowid = dc.id
+            JOIN documents d ON d.id = dc.document_id
+            WHERE chunks_fts MATCH 'Brandschutz'
+            LIMIT 5
+        """).fetchall()
+        return {
+            "chunks_with_page_number": with_page,
+            "chunks_without_page_number": without_page,
+            "fts_sample_brandschutz": [
+                {"filename": r[0], "page_number": r[1], "content_preview": (r[2] or "")[:80]}
+                for r in sample
+            ]
+        }
+    finally:
+        conn.close()
+
+
 @router.get("/debug/fts-state")
 async def fts_state():
     """Prüft ob chunks_fts befüllt ist und Trigger existieren."""
