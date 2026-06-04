@@ -278,7 +278,7 @@ async def reveal_file(path: str = Query(...)):
 
 @app.get("/open/mail/{document_id}")
 async def open_mail(document_id: int):
-    """Öffnet Mail in Apple Mail via message:// URL-Schema."""
+    """Gibt message://-URL zurück — der Helper öffnet sie lokal auf dem Client-Mac."""
     conn = connection.get_connection()
     row  = conn.execute(
         "SELECT hash FROM documents WHERE id=? AND source_type='email'",
@@ -289,11 +289,7 @@ async def open_mail(document_id: int):
         return JSONResponse({"ok": False, "error": "Mail nicht gefunden"}, status_code=404)
     mid = row["hash"].strip("<>").strip()
     url = f"message://%3C{quote(mid, safe='')}%3E"
-    try:
-        subprocess.run(["open", url], check=True, timeout=5)
-        return JSONResponse({"ok": True})
-    except Exception as exc:
-        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+    return JSONResponse({"ok": True, "url": url})
 
 
 @app.get("/preview/{document_id}", response_class=HTMLResponse)

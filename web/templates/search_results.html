@@ -79,7 +79,7 @@
     <div class="result-actions">
       {% if is_mail %}
         <button class="btn-sm" data-id="{{ r.id }}"
-          onclick="fetch('/open/mail/'+this.dataset.id).then(function(res){if(!res.ok)alert('Fehler beim Öffnen in Apple Mail')})">
+          onclick="fetch('/open/mail/'+this.dataset.id).then(function(r){return r.json()}).then(function(d){if(d.ok)helperOpen(d.url);else alert('Fehler: '+d.error)}).catch(function(){alert('Archivio Helper läuft nicht. Bitte starten.')})">
           In Apple Mail öffnen ↗
         </button>
         <button class="btn-sm" data-text="{{ r.filename }}"

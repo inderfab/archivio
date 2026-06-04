@@ -104,14 +104,19 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         path   = unquote(params.get("path", [""])[0])
 
         if parsed.path == "/open" and path:
-            p = Path(path)
-            if p.exists():
-                subprocess.run(["open", str(p)], timeout=5)
+            # URL-Schemas (z.B. message://, mailto:) direkt öffnen ohne Datei-Check
+            if "://" in path and not path.startswith("/"):
+                subprocess.run(["open", path], timeout=5)
                 self._cors_headers(200)
             else:
-                log.warning("Datei nicht gefunden: %s", path)
-                rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-                self._cors_headers(404)
+                p = Path(path)
+                if p.exists():
+                    subprocess.run(["open", str(p)], timeout=5)
+                    self._cors_headers(200)
+                else:
+                    log.warning("Datei nicht gefunden: %s", path)
+                    rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+                    self._cors_headers(404)
 
         elif parsed.path == "/reveal" and path:
             p = Path(path)
