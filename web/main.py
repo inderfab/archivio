@@ -354,30 +354,19 @@ def _filename_score(filename: str, q: str) -> int:
 def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
         return _search_filtered(conn, filters, filter_params)
-
-    # Stufe 1: FTS AND — beide/alle Wörter im gleichen Chunk
     results, error = _search_fts(conn, q, filters, filter_params)
     if error:
         return results, error
-
-    # Stufe 2: FTS OR — wenn AND nichts findet, jeden Chunk einzeln suchen
-    # (Wörter auf verschiedenen Seiten → AND schlägt fehl, OR findet die Seiten)
-    if not results:
-        results, _ = _search_fts_or(conn, q, filters, filter_params)
-
     # Dateinamen-Treffer immer zusätzlich prüfen — chunks_fts enthält keine Dateinamen
     fname_results = _search_filename(conn, q, filters, filter_params)
     seen = {r["id"] for r in results}
     for r in fname_results:
         if r["id"] not in seen:
             results.append(r)
-
     # Filename-Treffer nach oben schieben
     results.sort(key=lambda r: _filename_score(r.get("filename", ""), q), reverse=True)
     if results:
         return results, None
-
-    # Stufe 3: LIKE-Fallback (keine Seitennummern, aber breit)
     results, error = _search_like(conn, q, filters, filter_params)
     for r in results:
         r["fallback"] = True
@@ -505,57 +494,6 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
         return results, None
     except Exception as exc:
         return [], str(exc)
-
-
-def _search_fts_or(conn, q: str, filters: str, filter_params: list):
-    """FTS OR-Suche: jedes Wort einzeln — findet Chunks mit mind. einem Suchwort.
-    Fallback wenn AND-Suche (Wörter auf verschiedenen Seiten) nichts findet.
-    """
-    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split()]
-    words = [w for w in words if w and w.lower() not in _STOPWORDS]
-    if not words:
-        return [], None
-    fts_q = " OR ".join(f"{w}*" for w in words)
-    sql = f"""
-        SELECT
-            d.id, d.filename, d.extension, d.filesize, d.modified_at,
-            d.extraction_status, d.source_type,
-            p.name      AS project_name,
-            dp.path     AS filepath,
-            dc_chunk.content AS raw_content,
-            dc_chunk.page_number,
-            chunks_fts.rank,
-            m.sender    AS mail_sender,
-            m.date      AS mail_date
-        FROM chunks_fts
-        JOIN  document_chunks dc_chunk ON chunks_fts.rowid = dc_chunk.id
-        JOIN  documents       d        ON d.id = dc_chunk.document_id
-        JOIN  projects        p        ON p.id = d.project_id
-        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-        LEFT JOIN mails       m  ON m.document_id = d.id
-        WHERE chunks_fts MATCH ?
-        {filters}
-        ORDER BY rank
-        LIMIT 200
-    """
-    try:
-        rows    = conn.execute(sql, [fts_q] + filter_params).fetchall()
-        seen    = set()
-        results = []
-        for r in rows:
-            d = dict(r)
-            if d["id"] in seen:
-                continue
-            seen.add(d["id"])
-            d["fallback"] = False
-            d["excerpt"]  = _excerpt(d.pop("raw_content") or "", q)
-            d.pop("rank", None)
-            results.append(d)
-            if len(results) >= 50:
-                break
-        return results, None
-    except Exception:
-        return [], None
 
 
 def _search_like(conn, q: str, filters: str, filter_params: list):
