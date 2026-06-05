@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+import logging.handlers
 import re
 import subprocess
 import sys
@@ -11,6 +13,26 @@ from pathlib import Path
 from urllib.parse import quote
 
 sys.path.insert(0, str(Path(__file__).parent.parent))
+
+# ── Logging ───────────────────────────────────────────────────────────────────
+# Konfiguriert den Root-Logger so dass Scanner/Extractor-Logs in server.log
+# erscheinen (dasselbe File das uvicorn via stdout/stderr beschreibt).
+
+def _setup_logging() -> None:
+    root = logging.getLogger()
+    if root.handlers:
+        return  # bereits konfiguriert (z.B. im Dev-Modus via --reload)
+    handler = logging.StreamHandler(sys.stderr)
+    handler.setFormatter(logging.Formatter(
+        "%(asctime)s %(levelname)-8s %(name)s: %(message)s",
+        datefmt="%Y-%m-%d %H:%M:%S",
+    ))
+    root.addHandler(handler)
+    root.setLevel(logging.INFO)
+    # uvicorn-Logger nicht doppelt ausgeben
+    logging.getLogger("uvicorn.access").propagate = False
+
+_setup_logging()
 
 from fastapi import FastAPI, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse

@@ -86,6 +86,7 @@
             hx-swap="innerHTML"
             style="display:contents;">
         <input type="hidden" name="mailbox_name" value="{{ mb.mailbox_name }}">
+        <input type="hidden" name="context" value="project">
         <button type="submit"
                 class="project-toggle {{ 'on' if mb.active else '' }}"
                 style="width:28px; height:16px;"

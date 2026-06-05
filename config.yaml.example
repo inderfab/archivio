@@ -11,6 +11,7 @@ office:
 
 scanner:
   base_folders: []
+  workers: 2  # Parallele Extraktions-Threads (1 = sequenziell, 2–4 empfohlen)
   supported_extensions:
     # Textextraktion
     - .pdf

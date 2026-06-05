@@ -358,7 +358,11 @@ async def mail_refresh(request: Request):
 
 
 @router.post("/mail/toggle", response_class=HTMLResponse)
-async def mail_toggle(request: Request, mailbox_name: str = Form(...)):
+async def mail_toggle(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
     conn = connection.get_connection()
     row  = conn.execute(
         "SELECT active FROM mail_scan_config WHERE mailbox_name=?", (mailbox_name,)
@@ -369,6 +373,13 @@ async def mail_toggle(request: Request, mailbox_name: str = Form(...)):
                 "UPDATE mail_scan_config SET active=? WHERE mailbox_name=?",
                 (0 if row["active"] else 1, mailbox_name),
             )
+    if context == "project":
+        groups = _project_groups(conn)
+        stats  = _global_stats(conn)
+        conn.close()
+        return templates.TemplateResponse("_dashboard_projects.html", {
+            "request": request, "groups": groups, "stats": stats,
+        })
     conn.close()
     return await mail_dashboard(request)
 

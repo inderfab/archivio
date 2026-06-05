@@ -8,10 +8,44 @@ Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb').
 """
 
 import logging
+import multiprocessing
 import re
+import threading
 from pathlib import Path
 
 log = logging.getLogger(__name__)
+
+_PDF_TIMEOUT = 120   # Sekunden für PyMuPDF / pypdf (Daemon-Thread)
+_OCR_TIMEOUT = 90    # Sekunden für OCR (Subprocess mit SIGKILL)
+
+
+# ── OCR-Worker (Subprocess — Tesseract kann GIL halten) ──────────────────────
+
+def _worker_ocr(path_str: str, result_q: multiprocessing.Queue) -> None:
+    """Läuft im eigenen Prozess damit Tesseract den Server-GIL nicht blockiert."""
+    try:
+        import fitz
+        FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+        result = []
+        with fitz.open(path_str) as doc:
+            for i, page in enumerate(doc, start=1):
+                text = ""
+                for lang in ("deu+eng", "deu", "eng"):
+                    try:
+                        tp = page.get_textpage_ocr(
+                            flags=FLAGS, language=lang, dpi=150, full=True,
+                        )
+                        text = page.get_text(textpage=tp, flags=FLAGS).strip()
+                        if text:
+                            break
+                    except Exception:
+                        continue
+                if len(text) < 50:
+                    continue
+                result.append({"page_number": i, "content": text})
+        result_q.put(("ok", result))
+    except Exception as e:
+        result_q.put(("err", str(e)))
 
 
 class UnsupportedFormat(Exception):
@@ -80,81 +114,69 @@ def extract_txt(path: Path) -> tuple[str, str]:
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
-def _pdf_pages_pymupdf(path: Path) -> list[dict]:
-    """Primäre PDF-Extraktion via PyMuPDF — besser bei custom Fonts.
-
-    Flags: Ligaturen werden NICHT beibehalten (decomponiert zu fl/fi/ff/…),
-    Zeilenenden werden verbunden (DEHYPHENATE). So entsteht suchbarer Klartext.
-    """
-    import fitz  # pymupdf
-    # TEXT_PRESERVE_LIGATURES=1 weglassen → ﬂ→fl etc. direkt beim Extrahieren
-    # TEXT_PRESERVE_WHITESPACE=2 beibehalten
-    # TEXT_DEHYPHENATE=16 → Wörter mit Silbentrennung am Zeilenende zusammenführen
-    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
-    result = []
-    with fitz.open(str(path)) as doc:
-        for i, page in enumerate(doc, start=1):
-            text = page.get_text(flags=FLAGS).strip()
-            if len(text) < 50:
-                continue
-            result.append({"page_number": i, "content": text})
-    return result
-
-
-def _pdf_pages_pypdf(path: Path) -> list[dict]:
-    """Fallback-Extraktion via pypdf."""
-    import pypdf
-    reader = pypdf.PdfReader(str(path))
-    result = []
-    for i, page in enumerate(reader.pages, start=1):
-        text = (page.extract_text() or "").strip()
-        if len(text) < 50:
-            continue
-        result.append({"page_number": i, "content": text})
-    return result
-
-
-def _pdf_pages_ocr(path: Path) -> list[dict]:
-    """OCR-Fallback via PyMuPDF + Tesseract.
-
-    Wird verwendet wenn das PDF eine unleserliche Font-Kodierung hat (Mojibake).
-    full=True → komplette Seite OCR, ignoriert den unleserlichen Text-Layer.
-    Versucht Deutsch, fällt auf Englisch zurück falls Sprachpaket fehlt.
-    """
-    import fitz
-    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
-    result = []
-    with fitz.open(str(path)) as doc:
-        for i, page in enumerate(doc, start=1):
-            text = ""
-            for lang in ("deu+eng", "deu", "eng"):
-                try:
-                    tp = page.get_textpage_ocr(
-                        flags=FLAGS,
-                        language=lang,
-                        dpi=150,
-                        full=True,   # Gesamte Seite neu OCR — ignoriert unlesbaren Text-Layer
-                    )
-                    text = page.get_text(textpage=tp, flags=FLAGS).strip()
-                    if text:
-                        break
-                except Exception:
-                    continue
-            if len(text) < 50:
-                continue
-            result.append({"page_number": i, "content": text})
-    return result
+def _shrink_fitz_store() -> None:
+    """Leert den MuPDF-internen Speicher-Cache nach jeder PDF-Verarbeitung."""
+    try:
+        import fitz
+        fitz.TOOLS.store_shrink(100)
+    except Exception:
+        pass
 
 
 def _has_mojibake(pages: list[dict]) -> bool:
-    """True wenn >30 % der Zeichen Replacement-Characters sind (Encoding-Fehler)."""
     if not pages:
         return False
     sample = "".join(p["content"] for p in pages[:5])
     if not sample:
         return False
-    ratio = sample.count("�") / len(sample)
-    return ratio > 0.30
+    return sample.count("�") / len(sample) > 0.30
+
+
+def _run_pdf_in_thread(fn, path: Path, timeout: int = _PDF_TIMEOUT) -> list[dict]:
+    """Führt PDF-Extraktion in Daemon-Thread aus.
+    Bei Timeout: Thread läuft als Daemon weiter (kein Blockieren), Datei wird übersprungen.
+    PyMuPDF/pypdf geben den GIL für I/O frei → Server bleibt responsiv.
+    """
+    result: list = []
+    error:  list = []
+
+    def _run():
+        try:
+            result.append(fn(path))
+        except Exception as e:
+            error.append(e)
+
+    t = threading.Thread(target=_run, daemon=True)
+    t.start()
+    t.join(timeout=timeout)
+    if t.is_alive():
+        log.warning("PDF Timeout (%ds), übersprungen: %s", timeout, path.name)
+        raise ExtractionError(f"Timeout {timeout}s: {path.name}")
+    if error:
+        raise error[0]
+    return result[0] if result else []
+
+
+def _run_ocr_in_process(path: Path) -> list[dict]:
+    """OCR in eigenem Prozess mit hartem SIGKILL nach _OCR_TIMEOUT Sekunden.
+    Nur OCR braucht Subprocess: Tesseract kann den GIL blockieren.
+    """
+    ctx = multiprocessing.get_context("spawn")
+    q: multiprocessing.Queue = ctx.Queue()
+    p = ctx.Process(target=_worker_ocr, args=(str(path), q), daemon=True)
+    p.start()
+    p.join(timeout=_OCR_TIMEOUT)
+    if p.is_alive():
+        p.kill()
+        p.join(timeout=10)
+        log.warning("OCR Timeout (%ds), übersprungen: %s", _OCR_TIMEOUT, path.name)
+        raise ExtractionError(f"OCR Timeout {_OCR_TIMEOUT}s: {path.name}")
+    if q.empty():
+        raise ExtractionError(f"OCR kein Ergebnis: {path.name}")
+    status, payload = q.get_nowait()
+    if status == "err":
+        raise ExtractionError(payload)
+    return payload
 
 
 def extract_pdf(path: Path) -> tuple[str, str]:
@@ -166,50 +188,81 @@ def extract_pdf_pages(path: Path) -> list[dict]:
     """Gibt [{page_number, content}] zurück.
 
     Reihenfolge:
-    1. PyMuPDF (schnell, gute Font-Unterstützung)
-    2. PyMuPDF + OCR via Tesseract (Fallback bei unlesbaren Fonts / Mojibake)
-    3. pypdf (letzter Ausweg)
-    """
-    # Schritt 1: PyMuPDF Text-Extraktion
-    try:
-        pages = _pdf_pages_pymupdf(path)
-        if not _has_mojibake(pages):
-            return pages
-        # Font-Encoding unleserlich → OCR versuchen
-        log.info("Mojibake erkannt, versuche OCR-Fallback: %s", path.name)
-    except ImportError:
-        pass  # pymupdf nicht installiert → direkt zu pypdf
-    except Exception as pymupdf_exc:
-        # PyMuPDF-Exception (z.B. korruptes PDF, unbekanntes Format) → OCR versuchen
-        log.info("PyMuPDF-Fehler, versuche OCR-Fallback (%s): %s", path.name, pymupdf_exc)
-        try:
-            ocr_pages = _pdf_pages_ocr(path)
-            if ocr_pages and not _has_mojibake(ocr_pages):
-                log.info("OCR-Fallback nach PyMuPDF-Fehler erfolgreich: %s", path.name)
-                return ocr_pages
-        except Exception as ocr_exc:
-            log.warning("OCR-Fallback fehlgeschlagen (%s): %s", path.name, ocr_exc)
-        raise ExtractionError(str(pymupdf_exc)) from pymupdf_exc
-    else:
-        # Schritt 2: OCR via Tesseract (nach Mojibake)
-        try:
-            ocr_pages = _pdf_pages_ocr(path)
-            if ocr_pages and not _has_mojibake(ocr_pages):
-                log.info("OCR-Fallback erfolgreich: %s (%d Seiten)", path.name, len(ocr_pages))
-                return ocr_pages
-            log.warning("OCR liefert weiterhin Mojibake: %s", path.name)
-        except Exception as ocr_exc:
-            log.warning("OCR-Fallback fehlgeschlagen (%s): %s", path.name, ocr_exc)
+    1. PyMuPDF   — schnell, beste Qualität (Daemon-Thread, 120s Timeout)
+    2. pypdf     — Fallback wenn PyMuPDF fehlt/scheitert (Daemon-Thread, 120s Timeout)
+    3. OCR       — nur wenn 1+2 keinen lesbaren Text liefern (Subprocess, 90s SIGKILL)
 
-    # Schritt 3: pypdf
+    Jeder Schritt wird übersprungen wenn der vorherige lesbare Seiten liefert.
+    Dateien die alle drei Schritte nicht lesen können: status='error', beim nächsten
+    Scan übersprungen (solange Datei unverändert bleibt).
+    """
+    # ── 1. PyMuPDF ───────────────────────────────────────────────────────────
     try:
-        import pypdf  # noqa: F401
+        def _pymupdf(p):
+            import fitz
+            FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+            pages = []
+            with fitz.open(str(p)) as doc:
+                for i, page in enumerate(doc, start=1):
+                    text = page.get_text(flags=FLAGS).strip()
+                    if len(text) >= 50:
+                        pages.append({"page_number": i, "content": text})
+            return pages
+
+        pages = _run_pdf_in_thread(_pymupdf, path)
+        if pages and not _has_mojibake(pages):
+            _shrink_fitz_store()
+            return pages
+        if pages:
+            log.info("PyMuPDF Mojibake erkannt: %s", path.name)
     except ImportError:
-        raise UnsupportedFormat("Weder pymupdf noch pypdf installiert")
+        log.debug("fitz nicht installiert: %s", path.name)
+        pages = []
+    except ExtractionError:
+        log.info("PyMuPDF Timeout/Fehler: %s — versuche pypdf", path.name)
+        pages = []
+    except Exception as e:
+        log.info("PyMuPDF Fehler (%s): %s — versuche pypdf", path.name, e)
+        pages = []
+
+    # ── 2. pypdf ─────────────────────────────────────────────────────────────
     try:
-        return _pdf_pages_pypdf(path)
-    except Exception as exc:
-        raise ExtractionError(str(exc)) from exc
+        def _pypdf(p):
+            import pypdf
+            result = []
+            for i, page in enumerate(pypdf.PdfReader(str(p)).pages, start=1):
+                text = (page.extract_text() or "").strip()
+                if len(text) >= 50:
+                    result.append({"page_number": i, "content": text})
+            return result
+
+        pypdf_pages = _run_pdf_in_thread(_pypdf, path)
+        if pypdf_pages and not _has_mojibake(pypdf_pages):
+            return pypdf_pages
+        if pypdf_pages:
+            log.info("pypdf Mojibake erkannt: %s", path.name)
+    except ImportError:
+        if not pages:
+            raise UnsupportedFormat("Weder pymupdf noch pypdf installiert")
+    except ExtractionError:
+        log.info("pypdf Timeout/Fehler: %s — versuche OCR", path.name)
+        pypdf_pages = []
+    except Exception as e:
+        log.info("pypdf Fehler (%s): %s — versuche OCR", path.name, e)
+        pypdf_pages = []
+
+    # ── 3. OCR (letzter Ausweg) ───────────────────────────────────────────────
+    try:
+        ocr_pages = _run_ocr_in_process(path)
+        if ocr_pages and not _has_mojibake(ocr_pages):
+            log.info("OCR erfolgreich: %s (%d Seiten)", path.name, len(ocr_pages))
+            return ocr_pages
+    except ExtractionError as e:
+        log.warning("OCR fehlgeschlagen (%s): %s", path.name, e)
+    except Exception as e:
+        log.warning("OCR Fehler (%s): %s", path.name, e)
+
+    raise ExtractionError(f"PDF konnte nicht gelesen werden: {path.name}")
 
 
 CHUNK_SIZE    = 800   # Zeichen pro Chunk
@@ -378,7 +431,7 @@ def extract_xlsx(path: Path) -> tuple[str, str]:
                         parts.append(f"[… gekürzt nach {_XLSX_MAX_ROWS} Zeilen]")
                         break
             wb.close()
-            result_box.append("\n".join(parts))
+            result_box.append(("\n".join(parts), ""))
         except Exception as exc:
             error_box.append(exc)
 
