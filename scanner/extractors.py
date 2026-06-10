@@ -209,7 +209,7 @@ def extract_pdf_pages(path: Path) -> list[dict]:
     # ── 1. PyMuPDF ───────────────────────────────────────────────────────────
     try:
         def _pymupdf(p):
-            import fitz
+            import fitz, resource
             FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
             pages = []
             with fitz.open(str(p)) as doc:
@@ -217,6 +217,17 @@ def extract_pdf_pages(path: Path) -> list[dict]:
                     text = page.get_text(flags=FLAGS).strip()
                     if len(text) >= 50:
                         pages.append({"page_number": i, "content": text})
+                    # RAM-Check alle 20 Seiten — Abbruch bei > 2.5 GB
+                    if i % 20 == 0:
+                        try:
+                            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
+                            rss_gb = rss / (1024 ** 3)  # macOS liefert Bytes
+                            if rss_gb > 2.5:
+                                log.warning("RAM-Limit (%.1f GB) bei Seite %d: %s — abgebrochen",
+                                            rss_gb, i, Path(p).name)
+                                break
+                        except Exception:
+                            pass
             return pages
 
         pages = _run_pdf(_pymupdf, path, _PDF_TIMEOUT)

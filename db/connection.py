@@ -27,6 +27,8 @@ def get_connection() -> sqlite3.Connection:
     conn.row_factory = sqlite3.Row
     conn.execute("PRAGMA journal_mode = WAL")
     conn.execute("PRAGMA foreign_keys = ON")
+    conn.execute("PRAGMA cache_size = -8192")   # max 8 MB Seitencache
+    conn.execute("PRAGMA mmap_size = 0")        # kein Memory-Mapping
     return conn
 
 

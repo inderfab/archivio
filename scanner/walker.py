@@ -53,6 +53,13 @@ def _scan_file_worker(args: tuple) -> str:
     Im Worker werden keine Threads verwendet — der Prozess selbst ist die Isolation.
     """
     extractors._IN_WORKER_PROCESS = True
+    # Hartes Speicherlimit: Worker stirbt mit MemoryError bevor er das System lahmlegt
+    try:
+        import resource
+        _MAX_WORKER_VIRT = 4 * 1024 * 1024 * 1024  # 4 GB virtuelle Adresse
+        resource.setrlimit(resource.RLIMIT_AS, (_MAX_WORKER_VIRT, _MAX_WORKER_VIRT))
+    except Exception:
+        pass
     project_id, path_str = args
     conn = connection.get_connection()
     try:
@@ -162,7 +169,8 @@ def scan_project(project_id: int, root: Path,
                 log.warning("Datei-Timeout (%ds): %s — Worker neu starten",
                             _TASK_TIMEOUT, path.name)
                 pool.terminate()
-                pool.join()
+                # Kein pool.join() — bei 80+ GB RAM kann das ewig hängen.
+                # Der Prozess wird vom OS bereinigt.
                 pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
                 result = "error"
             except Exception as exc:
@@ -174,6 +182,17 @@ def scan_project(project_id: int, root: Path,
                 if result == "new":       progress["new"] += 1
                 elif result == "skipped": progress["skipped"] += 1
                 else:                     progress["errors"] += 1
+
+            # WAL-Checkpoint alle 100 Dateien — verhindert dass die WAL-Datei
+            # wächst und im Hauptprozess als grosser Speicherblock erscheint.
+            if progress is not None and progress["processed"] % 100 == 0:
+                try:
+                    _wal_conn = connection.get_connection()
+                    _wal_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                    _wal_conn.close()
+                except Exception:
+                    pass
+
     finally:
         pool.close()
         pool.join()
