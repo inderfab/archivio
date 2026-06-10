@@ -8,7 +8,7 @@ import zipfile
 from pathlib import Path
 
 from fastapi import APIRouter
-from fastapi.responses import JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 
 from config import settings
 from db import connection
@@ -1425,3 +1425,112 @@ async def mail_reset_and_rescan():
 
     return JSONResponse({"ok": True, "deleted": deleted,
                          "message": f"{deleted} Mails gelöscht. Scan gestartet — inkl. Chunking + Embedding."})
+
+
+# ── Diagnose ──────────────────────────────────────────────────────────────────
+
+@router.get("/debug/diagnostics", response_class=HTMLResponse)
+async def diagnostics():
+    import sys
+    checks: list[dict] = []
+
+    def _chk(label: str, value: str, ok: bool | None = True, detail: str = ""):
+        checks.append({"label": label, "value": value, "ok": ok, "detail": detail})
+
+    # Umgebung
+    _chk("Python", f"{sys.version.split()[0]}  —  {sys.executable}")
+    data_dir = os.environ.get("ARCHIVIO_DATA_DIR", "")
+    _chk("ARCHIVIO_DATA_DIR", data_dir or "(nicht gesetzt)", ok=bool(data_dir),
+         detail="" if data_dir else "Variable fehlt — Pfade evtl. falsch")
+    _chk("HOME", os.environ.get("HOME", "(nicht gesetzt)"))
+
+    # Config
+    from config import settings as _s
+    cfg_path   = _s._CONFIG_PATH
+    cfg_exists = cfg_path.exists()
+    _chk("Config-Datei", str(cfg_path), ok=cfg_exists,
+         detail="" if cfg_exists else "Datei fehlt!")
+    if cfg_exists:
+        base_folders = _s.get("scanner.base_folders", [])
+        _chk("Base-Folders (Config)", f"{len(base_folders)} konfiguriert",
+             ok=bool(base_folders),
+             detail="; ".join(f.get("path","?") for f in base_folders) if base_folders else "Keine Ordner eingetragen")
+
+    # Datenbank
+    db_rel  = settings.get("database.path", "archivio.db")
+    db_path = (Path(data_dir) / db_rel) if data_dir else Path(db_rel)
+    db_ok   = db_path.exists()
+    _chk("Datenbank", str(db_path), ok=db_ok,
+         detail=f"{db_path.stat().st_size // 1024} KB" if db_ok else "Datei fehlt!")
+
+    # /Volumes
+    try:
+        vols = [e.name for e in os.scandir("/Volumes") if not e.name.startswith(".")]
+        _chk("/Volumes (gemountete Laufwerke)",
+             ", ".join(vols) if vols else "(keine)",
+             detail=f"{len(vols)} Laufwerk(e)")
+    except Exception as exc:
+        _chk("/Volumes", str(exc), ok=False)
+
+    # Desktop-Zugriff (Festplattenvollzugriff-Test)
+    home    = Path(os.environ.get("HOME", str(Path.home())))
+    desktop = home / "Desktop"
+    try:
+        list(os.scandir(str(desktop)))
+        _chk("Desktop-Zugriff", str(desktop))
+    except PermissionError:
+        _chk("Desktop-Zugriff", str(desktop), ok=False,
+             detail="Kein Zugriff — Festplattenvollzugriff erteilen")
+    except FileNotFoundError:
+        _chk("Desktop-Zugriff", str(desktop), ok=None, detail="Ordner nicht gefunden")
+
+    # Base-Folders Prüfung
+    for f in settings.get("scanner.base_folders", []):
+        lbl  = f.get("label", "?")
+        path = f.get("path", "")
+        if not path:
+            _chk(f"Ordner [{lbl}]", "(leer)", ok=False, detail="Pfad fehlt")
+            continue
+        p = Path(path)
+        if not p.exists():
+            _chk(f"Ordner [{lbl}]", path, ok=False,
+                 detail="Existiert nicht / NAS nicht gemountet")
+            continue
+        try:
+            dirs = [e.name for e in os.scandir(path)
+                    if e.is_dir() and not e.name.startswith(".")]
+            _chk(f"Ordner [{lbl}]", path,
+                 detail=f"{len(dirs)} Unterordner: {', '.join(dirs[:6])}")
+        except PermissionError:
+            _chk(f"Ordner [{lbl}]", path, ok=False,
+                 detail="Kein Lesezugriff — Festplattenvollzugriff prüfen")
+
+    # HTML rendern
+    rows = []
+    for c in checks:
+        ok = c["ok"]
+        icon  = "✓" if ok is True  else ("⚠" if ok is None else "✗")
+        color = "#166534" if ok is True else ("#92400e" if ok is None else "#991b1b")
+        bg    = "#f0fdf4" if ok is True else ("#fffbeb" if ok is None else "#fef2f2")
+        det   = (f'<div style="font-size:11px;color:#6b7280;margin-top:2px;">{c["detail"]}</div>'
+                 if c["detail"] else "")
+        rows.append(
+            f'<div style="display:grid;grid-template-columns:22px 1fr;gap:8px;align-items:start;'
+            f'padding:8px 12px;border-bottom:1px solid var(--border);background:{bg};">'
+            f'<span style="color:{color};font-weight:700;font-size:14px;">{icon}</span>'
+            f'<div>'
+            f'<div style="font-size:11px;font-weight:600;color:var(--text-2);text-transform:uppercase;'
+            f'letter-spacing:.05em;">{c["label"]}</div>'
+            f'<div style="font-size:12px;font-family:monospace;color:var(--text);word-break:break-all;">'
+            f'{c["value"]}</div>{det}'
+            f'</div></div>'
+        )
+    ts = __import__("datetime").datetime.now().strftime("%H:%M:%S")
+    html = (
+        f'<div style="margin-top:12px;border:1px solid var(--border);'
+        f'border-radius:var(--radius);overflow:hidden;">'
+        + "".join(rows) +
+        f'<div style="padding:6px 12px;font-size:11px;color:var(--text-3);">'
+        f'Ausgeführt um {ts}</div></div>'
+    )
+    return HTMLResponse(html)

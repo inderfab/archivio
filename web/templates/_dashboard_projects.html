@@ -39,10 +39,14 @@
       {% if p.active and p.in_db %}
 
         {% if p.scan_status == 'running' %}
-          <span class="scan-badge running"
+          <span class="scan-running-wrap"
                 hx-get="/dashboard/projects/{{ p.id }}/scan-status"
-                hx-trigger="every 3s"
-                hx-swap="outerHTML">Scannt…</span>
+                hx-trigger="every 3s" hx-swap="outerHTML">
+            <span class="scan-badge running">Scannt…</span>
+            <button class="btn btn-cancel" style="margin-left:6px;"
+                    hx-post="/dashboard/projects/{{ p.id }}/scan/cancel"
+                    hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>
+          </span>
         {% elif p.scan_status == 'done' %}
           <span class="scan-badge done">✓ fertig</span>
         {% elif p.scan_status == 'error' %}

@@ -282,6 +282,33 @@
   </form>
 
 
+  {# ── Diagnose ── #}
+  <details class="settings-section settings-advanced" style="margin-top:8px;">
+    <summary class="settings-section-title">
+      <span class="adv-arrow">▶</span> Diagnose
+    </summary>
+    <div class="settings-body">
+      <p style="font-size:13px; color:var(--text-2); margin:0 0 4px; line-height:1.5;">
+        Prüft Pfade, Dateizugriffe und Systemkonfiguration des laufenden Servers.
+        Hilfreich wenn Scans nicht funktionieren oder Ordner nicht gefunden werden.
+      </p>
+      <div>
+        <button type="button"
+          style="padding:6px 16px; font-size:13px; font-family:inherit;
+                 border:1px solid var(--border); border-radius:var(--radius);
+                 background:var(--bg-2); color:var(--text); cursor:pointer;"
+          hx-get="/api/debug/diagnostics"
+          hx-target="#diag-results"
+          hx-indicator="#diag-spinner">
+          Diagnose ausführen
+        </button>
+        <span id="diag-spinner" class="htmx-indicator"
+              style="font-size:12px; color:var(--text-3); margin-left:8px;">Läuft…</span>
+      </div>
+      <div id="diag-results"></div>
+    </div>
+  </details>
+
   {# ── Mitarbeiter-Setup ── #}
   <div class="settings-section" style="margin-top: 8px;">
     <div class="settings-section-title">Mitarbeiter-Setup</div>
