@@ -15,7 +15,9 @@ from pathlib import Path
 
 log = logging.getLogger(__name__)
 
-_PDF_TIMEOUT = 120   # Sekunden für PyMuPDF / pypdf (Daemon-Thread)
+_IN_WORKER_PROCESS = False  # wird von _scan_file_worker auf True gesetzt
+
+_PDF_TIMEOUT = 120   # Sekunden für PyMuPDF / pypdf (Daemon-Thread, nur ausserhalb Worker)
 _OCR_TIMEOUT = 90    # Sekunden für OCR (Subprocess mit SIGKILL)
 
 
@@ -157,6 +159,14 @@ def _run_pdf_in_thread(fn, path: Path, timeout: int = _PDF_TIMEOUT) -> list[dict
     return result[0] if result else []
 
 
+def _run_pdf(fn, path: Path, timeout: int) -> list[dict]:
+    """Im Worker-Prozess: direkt ausführen (Prozess = Isolation).
+    Sonst: Daemon-Thread mit Timeout (Server-Kontext)."""
+    if _IN_WORKER_PROCESS:
+        return fn(path)
+    return _run_pdf_in_thread(fn, path, timeout)
+
+
 def _run_ocr_in_process(path: Path) -> list[dict]:
     """OCR in eigenem Prozess mit hartem SIGKILL nach _OCR_TIMEOUT Sekunden.
     Nur OCR braucht Subprocess: Tesseract kann den GIL blockieren.
@@ -209,7 +219,7 @@ def extract_pdf_pages(path: Path) -> list[dict]:
                         pages.append({"page_number": i, "content": text})
             return pages
 
-        pages = _run_pdf_in_thread(_pymupdf, path)
+        pages = _run_pdf(_pymupdf, path, _PDF_TIMEOUT)
         if pages and not _has_mojibake(pages):
             _shrink_fitz_store()
             return pages
@@ -236,7 +246,7 @@ def extract_pdf_pages(path: Path) -> list[dict]:
                     result.append({"page_number": i, "content": text})
             return result
 
-        pypdf_pages = _run_pdf_in_thread(_pypdf, path)
+        pypdf_pages = _run_pdf(_pypdf, path, _PDF_TIMEOUT)
         if pypdf_pages and not _has_mojibake(pypdf_pages):
             return pypdf_pages
         if pypdf_pages:

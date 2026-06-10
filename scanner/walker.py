@@ -11,6 +11,7 @@ import logging
 import multiprocessing
 import os
 import threading
+import time
 import unicodedata
 from pathlib import Path
 
@@ -19,6 +20,9 @@ from db import connection, queries
 from scanner import hasher, extractors
 
 log = logging.getLogger(__name__)
+
+_TASK_TIMEOUT = 300          # Sekunden pro Datei — danach Worker hart neu starten
+_MAX_PDF_EXTRACT_MB = 150   # PDFs grösser als 150 MB werden nur registriert
 
 _LIST_ONLY_EXTENSIONS = {
     ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
@@ -46,7 +50,9 @@ def _scan_file_worker(args: tuple) -> str:
     """Verarbeitet eine einzelne Datei im Pool-Prozess.
     Der Prozess wird nach maxtasksperchild Dateien ersetzt → vollständige
     Speicherfreigabe durch OS, kein Python-Allocator-Wachstum.
+    Im Worker werden keine Threads verwendet — der Prozess selbst ist die Isolation.
     """
+    extractors._IN_WORKER_PROCESS = True
     project_id, path_str = args
     conn = connection.get_connection()
     try:
@@ -76,7 +82,7 @@ def scan_project(project_id: int, root: Path,
     """
     supported = _supported_extensions()
     excluded  = _excluded_folders()
-    tasks_per_worker = max(5, int(settings.get("scanner.tasks_per_worker", 20)))
+    tasks_per_worker = max(3, int(settings.get("scanner.tasks_per_worker", 5)))
 
     if progress is not None:
         progress["phase"] = "collecting"
@@ -138,8 +144,27 @@ def scan_project(project_id: int, root: Path,
             if progress is not None:
                 progress["current_file"] = path.name
 
+            # RAM-Check: bei hoher Auslastung kurz pausieren
             try:
-                result = pool.apply(_scan_file_worker, ((project_id, str(path)),))
+                import psutil
+                mem = psutil.virtual_memory()
+                if mem.percent > 80:
+                    log.warning("RAM %d%% — 15s Pause", mem.percent)
+                    time.sleep(15)
+                    gc.collect()
+            except ImportError:
+                pass
+
+            try:
+                ar = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
+                result = ar.get(timeout=_TASK_TIMEOUT)
+            except multiprocessing.TimeoutError:
+                log.warning("Datei-Timeout (%ds): %s — Worker neu starten",
+                            _TASK_TIMEOUT, path.name)
+                pool.terminate()
+                pool.join()
+                pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+                result = "error"
             except Exception as exc:
                 log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                 result = "error"
@@ -208,8 +233,17 @@ def _process_file(conn, project_id: int, path: Path) -> str:
             queries.set_extraction_status(conn, doc_id, "listed")
         return "new"
 
-    # Grössencheck: Formate die alles in RAM laden
     size_mb = stat.st_size / (1024 * 1024)
+
+    # Grosse PDFs (Pläne, Scan-Archive) nur registrieren
+    if ext == ".pdf" and size_mb > _MAX_PDF_EXTRACT_MB:
+        log.warning("PDF zu gross (%.0f MB > %d MB): %s",
+                    size_mb, _MAX_PDF_EXTRACT_MB, path.name)
+        with conn:
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "new"
+
+    # Grössencheck: Formate die alles in RAM laden
     if ext in _SIZE_LIMITED_EXTENSIONS and size_mb > _MAX_EXTRACT_MB:
         log.warning("Datei zu gross für Extraktion (%.1f MB > %d MB): %s",
                     size_mb, _MAX_EXTRACT_MB, path.name)
@@ -225,33 +259,46 @@ _EXTRACT_TIMEOUT = 180
 
 
 def _extract_and_store(conn, doc_id: int, path: Path):
-    result_box: list = []
-    error_box:  list = []
-
-    def _do_extract():
+    if extractors._IN_WORKER_PROCESS:
+        # Im Worker-Prozess: direkt aufrufen — der Pool-Timeout (_TASK_TIMEOUT) ist
+        # die Sicherheitsgrenze, kein Thread nötig.
         try:
-            result_box.append(extractors.extract_chunks(path))
-        except Exception as exc:
-            error_box.append(exc)
-
-    t = threading.Thread(target=_do_extract, daemon=True)
-    t.start()
-    t.join(timeout=_EXTRACT_TIMEOUT)
-
-    if t.is_alive():
-        log.warning("Extraktion Timeout (%ds): %s", _EXTRACT_TIMEOUT, path.name)
-        chunks, text, status = [], "", "error"
-    elif error_box:
-        exc = error_box[0]
-        if isinstance(exc, extractors.UnsupportedFormat):
+            chunks = extractors.extract_chunks(path)
+            text   = "\n".join(c["content"] for c in chunks)
+            status = "ok"
+        except extractors.UnsupportedFormat:
             chunks, text, status = [], "", "unsupported"
-        else:
+        except Exception as exc:
             log.warning("Extraktion fehlgeschlagen %s: %s", path.name, exc)
             chunks, text, status = [], "", "error"
     else:
-        chunks = result_box[0] if result_box else []
-        text   = "\n".join(c["content"] for c in chunks)
-        status = "ok"
+        result_box: list = []
+        error_box:  list = []
+
+        def _do_extract():
+            try:
+                result_box.append(extractors.extract_chunks(path))
+            except Exception as exc:
+                error_box.append(exc)
+
+        t = threading.Thread(target=_do_extract, daemon=True)
+        t.start()
+        t.join(timeout=_EXTRACT_TIMEOUT)
+
+        if t.is_alive():
+            log.warning("Extraktion Timeout (%ds): %s", _EXTRACT_TIMEOUT, path.name)
+            chunks, text, status = [], "", "error"
+        elif error_box:
+            exc = error_box[0]
+            if isinstance(exc, extractors.UnsupportedFormat):
+                chunks, text, status = [], "", "unsupported"
+            else:
+                log.warning("Extraktion fehlgeschlagen %s: %s", path.name, exc)
+                chunks, text, status = [], "", "error"
+        else:
+            chunks = result_box[0] if result_box else []
+            text   = "\n".join(c["content"] for c in chunks)
+            status = "ok"
 
     with conn:
         queries.set_extraction_status(conn, doc_id, status)

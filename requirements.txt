@@ -17,3 +17,6 @@ striprtf>=0.0.26
 
 # KI-Suche
 numpy>=1.26
+
+# System
+psutil>=5.9
