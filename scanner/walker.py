@@ -10,6 +10,7 @@ import gc
 import logging
 import multiprocessing
 import os
+import signal
 import threading
 import time
 import unicodedata
@@ -21,8 +22,10 @@ from scanner import hasher, extractors
 
 log = logging.getLogger(__name__)
 
-_TASK_TIMEOUT = 300          # Sekunden pro Datei — danach Worker hart neu starten
-_MAX_PDF_EXTRACT_MB = 150   # PDFs grösser als 150 MB werden nur registriert
+_TASK_TIMEOUT     = 300   # Sekunden pro Datei — dann SIGKILL
+_MAX_WORKER_RSS   = 3.0   # GB — Worker wird per SIGKILL beendet wenn überschritten
+_POLL_INTERVAL    = 5     # Sekunden zwischen RSS-Checks
+_MAX_PDF_EXTRACT_MB = 100 # PDFs grösser als 100 MB werden nur registriert
 
 _LIST_ONLY_EXTENSIONS = {
     ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
@@ -47,19 +50,8 @@ def _excluded_folders() -> set[str]:
 # Muss auf Modul-Ebene stehen damit multiprocessing sie pickeln kann.
 
 def _scan_file_worker(args: tuple) -> str:
-    """Verarbeitet eine einzelne Datei im Pool-Prozess.
-    Der Prozess wird nach maxtasksperchild Dateien ersetzt → vollständige
-    Speicherfreigabe durch OS, kein Python-Allocator-Wachstum.
-    Im Worker werden keine Threads verwendet — der Prozess selbst ist die Isolation.
-    """
+    """Verarbeitet eine einzelne Datei im Pool-Prozess."""
     extractors._IN_WORKER_PROCESS = True
-    # Hartes Speicherlimit: Worker stirbt mit MemoryError bevor er das System lahmlegt
-    try:
-        import resource
-        _MAX_WORKER_VIRT = 4 * 1024 * 1024 * 1024  # 4 GB virtuelle Adresse
-        resource.setrlimit(resource.RLIMIT_AS, (_MAX_WORKER_VIRT, _MAX_WORKER_VIRT))
-    except Exception:
-        pass
     project_id, path_str = args
     conn = connection.get_connection()
     try:
@@ -77,15 +69,43 @@ def _scan_file_worker(args: tuple) -> str:
             pass
 
 
+def _kill_workers(pool) -> None:
+    """Sendet SIGKILL an alle Worker-Prozesse des Pools und wartet auf deren Ende."""
+    for w in getattr(pool, "_pool", []):
+        try:
+            if w.is_alive():
+                os.kill(w.pid, signal.SIGKILL)
+                log.info("SIGKILL → Worker PID %d", w.pid)
+        except Exception:
+            pass
+    try:
+        pool.terminate()
+        pool.join()
+    except Exception:
+        pass
+
+
+def _worker_rss_gb(pool) -> float:
+    """RSS des laufenden Workers in GB, oder 0 wenn nicht ermittelbar."""
+    try:
+        import psutil
+        for w in getattr(pool, "_pool", []):
+            if w.is_alive():
+                return psutil.Process(w.pid).memory_info().rss / (1024 ** 3)
+    except Exception:
+        pass
+    return 0.0
+
+
 def scan_project(project_id: int, root: Path,
                  progress: dict | None = None,
                  cancel_flag: dict | None = None):
     """Walk root, extract text, embed, persist to DB.
 
-    Jede Datei wird in einem eigenen Pool-Workerprozess verarbeitet.
-    Nach maxtasksperchild Dateien wird der Worker-Prozess ersetzt —
-    das OS gibt dabei ALLEN Speicher frei (PyMuPDF-Cache, Python-Allocator,
-    eingeladene Bibliotheken). So akkumuliert kein RAM über Hunderte von Dateien.
+    Jede Datei läuft in einem Pool-Worker (processes=1).
+    Der Hauptprozess überwacht alle _POLL_INTERVAL Sekunden den RSS des Workers.
+    Bei Überschreitung von _MAX_WORKER_RSS GB oder _TASK_TIMEOUT Sekunden:
+    SIGKILL → sofortige Speicherfreigabe → neuer Pool.
     """
     supported = _supported_extensions()
     excluded  = _excluded_folders()
@@ -129,8 +149,7 @@ def scan_project(project_id: int, root: Path,
         log.warning("Scan: 0 Dateien gefunden in %s", root)
         return
 
-    log.info("Scan: %d Dateien in %s (Worker-Reset alle %d Dateien)",
-             len(batch), root, tasks_per_worker)
+    log.info("Scan: %d Dateien in %s", len(batch), root)
 
     if progress is not None:
         progress["phase"]     = "processing"
@@ -151,31 +170,33 @@ def scan_project(project_id: int, root: Path,
             if progress is not None:
                 progress["current_file"] = path.name
 
-            # RAM-Check: bei hoher Auslastung kurz pausieren
-            try:
-                import psutil
-                mem = psutil.virtual_memory()
-                if mem.percent > 80:
-                    log.warning("RAM %d%% — 15s Pause", mem.percent)
-                    time.sleep(15)
-                    gc.collect()
-            except ImportError:
-                pass
+            ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
+            start  = time.monotonic()
+            result = None
 
-            try:
-                ar = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
-                result = ar.get(timeout=_TASK_TIMEOUT)
-            except multiprocessing.TimeoutError:
-                log.warning("Datei-Timeout (%ds): %s — Worker neu starten",
-                            _TASK_TIMEOUT, path.name)
-                pool.terminate()
-                # Kein pool.join() — bei 80+ GB RAM kann das ewig hängen.
-                # Der Prozess wird vom OS bereinigt.
-                pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
-                result = "error"
-            except Exception as exc:
-                log.warning("Pool-Fehler bei %s: %s", path.name, exc)
-                result = "error"
+            # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS prüfen
+            while result is None:
+                try:
+                    result = ar.get(timeout=_POLL_INTERVAL)
+                except multiprocessing.TimeoutError:
+                    elapsed = time.monotonic() - start
+                    rss     = _worker_rss_gb(pool)
+
+                    if rss > _MAX_WORKER_RSS:
+                        log.warning("Worker RAM %.1f GB > %.1f GB — SIGKILL: %s",
+                                    rss, _MAX_WORKER_RSS, path.name)
+                        _kill_workers(pool)
+                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+                        result = "error"
+                    elif elapsed > _TASK_TIMEOUT:
+                        log.warning("Datei-Timeout (%ds): %s — SIGKILL",
+                                    _TASK_TIMEOUT, path.name)
+                        _kill_workers(pool)
+                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+                        result = "error"
+                except Exception as exc:
+                    log.warning("Pool-Fehler bei %s: %s", path.name, exc)
+                    result = "error"
 
             if progress is not None:
                 progress["processed"] += 1
@@ -183,8 +204,7 @@ def scan_project(project_id: int, root: Path,
                 elif result == "skipped": progress["skipped"] += 1
                 else:                     progress["errors"] += 1
 
-            # WAL-Checkpoint alle 100 Dateien — verhindert dass die WAL-Datei
-            # wächst und im Hauptprozess als grosser Speicherblock erscheint.
+            # WAL-Checkpoint alle 100 Dateien
             if progress is not None and progress["processed"] % 100 == 0:
                 try:
                     _wal_conn = connection.get_connection()
@@ -194,8 +214,7 @@ def scan_project(project_id: int, root: Path,
                     pass
 
     finally:
-        pool.close()
-        pool.join()
+        _kill_workers(pool)
 
 
 def _process_file(conn, project_id: int, path: Path) -> str:
