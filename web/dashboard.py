@@ -305,6 +305,7 @@ async def scan_progress_banner(request: Request):
         "errors":       s.get("errors", 0),
         "current_file": s.get("current_file", ""),
         "error":        s.get("error", ""),
+        "project_id":   pid,
     })
 
 

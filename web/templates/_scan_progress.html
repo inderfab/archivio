@@ -5,6 +5,11 @@
       {% if status == "running" %}Scan läuft{% elif status == "done" %}Scan abgeschlossen{% else %}Scan-Fehler{% endif %}
       — {{ project_name }}
     </span>
+    {% if status == "running" and project_id %}
+    <button class="btn btn-cancel" style="margin-left: auto;"
+            hx-post="/dashboard/projects/{{ project_id }}/scan/cancel"
+            hx-swap="none">Abbrechen</button>
+    {% endif %}
   </div>
   {% if status == "error" and error %}
     <div class="spb-phase" style="color:#b91c1c; font-size:12px; margin-top:4px;">{{ error }}</div>
