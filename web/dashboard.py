@@ -63,15 +63,26 @@ def _server_info() -> tuple[bool, str]:
 async def dashboard(request: Request):
     conn = connection.get_connection()
     connection.init_schema()
-    groups       = _project_groups(conn)
-    stats        = _global_stats(conn)
-    problem_docs = _problem_documents(conn)
+    groups = _project_groups(conn)
+    stats  = _global_stats(conn)
     conn.close()
     return templates.TemplateResponse("dashboard.html", {
+        "request": request,
+        "groups":  groups,
+        "stats":   stats,
+    })
+
+
+@router.get("/problem-docs", response_class=HTMLResponse)
+async def problem_docs(request: Request):
+    conn = connection.get_connection()
+    docs = _problem_documents(conn)
+    conn.close()
+    if not docs:
+        return HTMLResponse("")
+    return templates.TemplateResponse("_problem_docs.html", {
         "request":      request,
-        "groups":       groups,
-        "stats":        stats,
-        "problem_docs": problem_docs,
+        "problem_docs": docs,
     })
 
 
@@ -808,26 +819,10 @@ def _problem_documents(conn) -> list[dict]:
 
 
 def _error_reason(extension: str, path: str | None) -> str:
-    """Ermittelt den wahrscheinlichen Fehlergrund eines Dokuments."""
     if extension == ".xlsx":
         return "Timeout – Datei zu komplex für Extraktion"
-    if extension == ".pdf" and path:
-        try:
-            import fitz
-            doc = fitz.open(path)
-            needs_pass = doc.needs_pass
-            is_enc     = doc.is_encrypted
-            doc.close()
-            if needs_pass:
-                return "Passwortgeschützt – Öffnen nicht möglich"
-            if is_enc:
-                return "Verschlüsselt – Kopieren/Lesen eingeschränkt"
-            return "PDF fehlerhaft oder unlesbar"
-        except Exception as exc:
-            msg = str(exc).lower()
-            if "password" in msg or "encrypted" in msg:
-                return "Passwortgeschützt"
-            return "PDF kann nicht geöffnet werden"
+    if extension == ".pdf":
+        return "PDF fehlerhaft, passwortgeschützt oder unlesbar"
     return "Datei fehlerhaft oder Format nicht unterstützt"
 
 
