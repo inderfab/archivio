@@ -57,6 +57,9 @@ echo "$(date): Python: $PYTHON"
 DATA_DIR="$HOME/Library/Application Support/Archivio"
 mkdir -p "$DATA_DIR/logs"
 VENV="$DATA_DIR/.venv"
+CURRENT_VERSION=$(cat "$DIR/VERSION" 2>/dev/null || echo "unknown")
+VERSION_STAMP="$DATA_DIR/.venv_version"
+
 if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Server"'
   echo "$(date): Erstinstallation – venv wird erstellt"
@@ -64,7 +67,14 @@ if [ ! -d "$VENV" ]; then
   "$VENV/bin/pip" install --upgrade pip -q
   "$VENV/bin/pip" install -r "$DIR/requirements.txt" -q
   "$VENV/bin/pip" install rumps requests -q
+  echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Installation abgeschlossen"
+elif [ "$(cat $VERSION_STAMP 2>/dev/null)" != "$CURRENT_VERSION" ]; then
+  echo "$(date): Neue Version $CURRENT_VERSION – Abhängigkeiten aktualisieren"
+  "$VENV/bin/pip" install -q -r "$DIR/requirements.txt" >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q rumps requests >/dev/null 2>&1 || true
+  echo "$CURRENT_VERSION" > "$VERSION_STAMP"
+  echo "$(date): Abhängigkeiten aktualisiert"
 fi
 
 exec "$VENV/bin/python3" "$DIR/archivio_server.py"

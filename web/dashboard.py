@@ -26,6 +26,8 @@ _scans: dict[int, dict] = {}
 _cancel_flags: dict[int, dict] = {}
 # Mail-Scan-Status
 _mail_scan: dict = {}
+# Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
+_scan_lock = threading.Semaphore(1)
 
 
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
@@ -888,6 +890,16 @@ def _run_mail_scan():
 def _run_scan(project_id: int, path: str):
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
+
+    # Warten bis kein anderer Scan läuft (1 Worker-Prozess gleichzeitig)
+    if not _scan_lock.acquire(blocking=False):
+        progress["phase"] = "queued"
+        _scan_lock.acquire()  # blockiert bis vorheriger Scan fertig
+    if cancel_flag.get("cancel"):
+        progress.update({"status": "cancelled", "finished_at": _now()})
+        _scan_lock.release()
+        return
+
     try:
         scan_project(project_id, Path(path), progress=progress, cancel_flag=cancel_flag)
         if progress.get("phase") == "error":
@@ -905,6 +917,8 @@ def _run_scan(project_id: int, path: str):
         progress.update({"status": "done", "count": count, "finished_at": _now()})
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
+    finally:
+        _scan_lock.release()
 
 
 def _fmt_iso_date(iso: str | None) -> str | None:
