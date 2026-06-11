@@ -25,7 +25,7 @@ log = logging.getLogger(__name__)
 _TASK_TIMEOUT     = 300   # Sekunden pro Datei — dann SIGKILL
 _MAX_WORKER_RSS   = 3.0   # GB — Worker wird per SIGKILL beendet wenn überschritten
 _POLL_INTERVAL    = 5     # Sekunden zwischen RSS-Checks
-_MAX_PDF_EXTRACT_MB = 100 # PDFs grösser als 100 MB werden nur registriert
+_MAX_PDF_EXTRACT_MB = 500 # PDFs grösser als 500 MB werden nur registriert
 
 _LIST_ONLY_EXTENSIONS = {
     ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
