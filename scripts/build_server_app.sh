@@ -53,14 +53,20 @@ for p in \
   /usr/local/bin/python3 \
   /opt/homebrew/bin/python3 \
   /usr/bin/python3; do
-  if [ -x "$p" ]; then PYTHON="$p"; break; fi
+  if [ -x "$p" ]; then
+    PYMINOR=$("$p" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+    if [ "$PYMINOR" -ge 12 ]; then
+      PYTHON="$p"
+      break
+    fi
+  fi
 done
 
 if [ -z "$PYTHON" ]; then
-  osascript -e 'display alert "Archivio Server" message "Python 3.13 nicht gefunden. Bitte Python von python.org installieren: python.org/downloads" as critical'
+  osascript -e 'display alert "Archivio Server" message "Python 3.13 (oder neuer) wird benötigt.\n\nBitte installieren:\npython.org/downloads" as critical'
   exit 1
 fi
-echo "$(date): Python: $PYTHON"
+echo "$(date): Python: $PYTHON ($("$PYTHON" --version 2>&1))"
 
 DATA_DIR="$HOME/Library/Application Support/Archivio"
 mkdir -p "$DATA_DIR/logs"
