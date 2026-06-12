@@ -1,8 +1,23 @@
-<details class="problem-docs">
+<details id="problem-docs-section" class="problem-docs">
   <summary class="problem-docs-summary">
     Nicht verarbeitbare Dokumente
     <span class="problem-docs-badge">{{ problem_docs|length }}</span>
+    {% set error_count = problem_docs | selectattr("category", "equalto", "error") | list | length %}
+    {% if error_count > 0 %}
+    <button class="btn btn-sm"
+            hx-post="/dashboard/retry-errors"
+            hx-target="#problem-docs-section"
+            hx-swap="outerHTML"
+            style="margin-left: 12px; font-size: 12px; padding: 2px 10px; font-weight: normal;">
+      ↺ {{ error_count }} Fehler nochmals versuchen
+    </button>
+    {% endif %}
   </summary>
+  {% if retry_done %}
+  <div style="padding: 8px 12px; background: var(--surface-2, #f0fdf4); color: #166534; border-radius: 6px; margin: 8px 0; font-size: 13px;">
+    ✓ {{ retry_done }} Dokument{{ "e" if retry_done != 1 else "" }} auf «ausstehend» gesetzt — beim nächsten Scan neu verarbeitet.
+  </div>
+  {% endif %}
   <div class="problem-docs-list">
     {% for doc in problem_docs %}
     <div class="problem-doc-row problem-doc-{{ doc.category }}">

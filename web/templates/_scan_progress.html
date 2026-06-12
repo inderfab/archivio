@@ -22,8 +22,12 @@
       <div class="spb-bar-fill" style="width: {{ percent }}%"></div>
     </div>
     <div class="spb-counts">{{ processed }} / {{ total }} Dateien &nbsp;&nbsp; {{ percent }}%</div>
-    {% if status == "running" and current_file %}
-      <div class="spb-current">{{ current_file }}</div>
+    {% if status == "running" %}
+      {% if processed >= total and total > 0 %}
+        <div class="spb-current" style="color: var(--text-3);">Abschluss läuft… (Datenbank, Embedding)</div>
+      {% elif current_file %}
+        <div class="spb-current">{{ current_file }}</div>
+      {% endif %}
     {% endif %}
     <div class="spb-stats">
       ✓ {{ new }} neu &nbsp;&nbsp; ↷ {{ skipped }} unverändert &nbsp;&nbsp; ⚠ {{ errors }} Fehler

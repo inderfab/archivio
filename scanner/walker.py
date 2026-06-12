@@ -22,10 +22,22 @@ from scanner import hasher, extractors
 
 log = logging.getLogger(__name__)
 
-_TASK_TIMEOUT     = 300   # Sekunden pro Datei — dann SIGKILL
-_MAX_WORKER_RSS   = 3.0   # GB — Worker wird per SIGKILL beendet wenn überschritten
-_POLL_INTERVAL    = 5     # Sekunden zwischen RSS-Checks
-_MAX_PDF_EXTRACT_MB = 500 # PDFs grösser als 500 MB werden nur registriert
+_POLL_INTERVAL      = 5    # Sekunden zwischen RSS-Checks
+_MAX_PDF_EXTRACT_MB = 500  # PDFs grösser als 500 MB werden nur registriert
+
+# RAM-Limits dynamisch je nach verfügbarem Systemspeicher
+def _auto_limits() -> tuple[float, int]:
+    """Gibt (_MAX_WORKER_RSS in GB, _TASK_TIMEOUT in Sekunden) zurück."""
+    try:
+        import psutil
+        total_gb = psutil.virtual_memory().total / (1024 ** 3)
+    except Exception:
+        total_gb = 16.0
+    rss_limit  = max(4.0, total_gb * 0.35)   # 35% des RAM (64 GB → ~22 GB)
+    timeout    = max(300, int(total_gb * 15)) # 15s pro GB RAM (64 GB → 960s)
+    return rss_limit, timeout
+
+_MAX_WORKER_RSS, _TASK_TIMEOUT = _auto_limits()
 
 _LIST_ONLY_EXTENSIONS = {
     ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
@@ -70,19 +82,35 @@ def _scan_file_worker(args: tuple) -> str:
 
 
 def _kill_workers(pool) -> None:
-    """Sendet SIGKILL an alle Worker-Prozesse des Pools und wartet auf deren Ende."""
-    for w in getattr(pool, "_pool", []):
+    """SIGKILL alle Worker-Prozesse und wartet mit Timeout.
+
+    pool.terminate() ruft intern _worker_handler.join() OHNE Timeout auf —
+    das kann hängen wenn der Pool gerade einen neuen Worker startet
+    (nach maxtasksperchild-Ersatz). Daher: terminate() in Daemon-Thread
+    mit 5s Timeout, danach Worker direkt joinen."""
+    workers = list(getattr(pool, "_pool", []))
+    for w in workers:
         try:
             if w.is_alive():
                 os.kill(w.pid, signal.SIGKILL)
                 log.info("SIGKILL → Worker PID %d", w.pid)
         except Exception:
             pass
-    try:
-        pool.terminate()
-        pool.join()
-    except Exception:
-        pass
+    def _do_terminate():
+        try:
+            pool.terminate()
+        except Exception:
+            pass
+    t = threading.Thread(target=_do_terminate, daemon=True)
+    t.start()
+    t.join(timeout=5)
+    if t.is_alive():
+        log.warning("pool.terminate() nach 5s nicht fertig — Cleanup im Hintergrund")
+    for w in workers:
+        try:
+            w.join(timeout=10)
+        except Exception:
+            pass
 
 
 def _worker_rss_gb(pool) -> float:
@@ -293,7 +321,7 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     return "new"
 
 
-_EXTRACT_TIMEOUT = 180
+_EXTRACT_TIMEOUT = 30
 
 
 def _extract_and_store(conn, doc_id: int, path: Path):
@@ -344,14 +372,8 @@ def _extract_and_store(conn, doc_id: int, path: Path):
             queries.upsert_content(conn, doc_id, text, "")
         if chunks:
             queries.save_chunks(conn, doc_id, chunks)
-
-    if chunks:
-        try:
-            from scanner.embedder import embed_document_chunks, is_ollama_running
-            if is_ollama_running():
-                embed_document_chunks(conn, doc_id)
-        except Exception as e:
-            log.debug("Embedding übersprungen für %s: %s", path.name, e)
+    # Kein Embedding im Worker — läuft nach dem Scan als separater Schritt
+    # (verhindert dass ein langsamer Ollama-Call den ganzen Scan blockiert)
 
 
 def _iso(ts: float) -> str:

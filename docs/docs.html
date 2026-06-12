@@ -265,19 +265,83 @@
       <div class="doc-section" id="setup">
         <h2>Installation</h2>
         <p>Archivio besteht aus zwei Teilen: dem <strong>Server</strong>, der auf einem fixen Mac (z.&nbsp;B. iMac) läuft, und dem optionalen <strong>Helper</strong> auf jedem Mitarbeiter-Mac.</p>
-        <h3>Server installieren</h3>
+
+        <h3>Schritt 1 — Python 3.13 installieren</h3>
+        <p>Archivio benötigt Python 3.13 von <strong>python.org</strong> (nicht die System-Version, nicht Homebrew).</p>
         <ol class="step-list">
-          <li>Das neuste <code>.pkg</code> von der <a href="https://github.com/inderfab/archivio/releases/latest">Releases-Seite</a> herunterladen.</li>
-          <li>Doppelklick auf die <code>.pkg</code>-Datei, Installer durchlaufen.</li>
-          <li>„Archivio Server" in den Programme-Ordner öffnen und starten.</li>
-          <li>Das Archivio-Logo erscheint in der Menüleiste — der Server läuft auf Port <code>8000</code>.</li>
+          <li>Python 3.13 herunterladen: <a href="https://www.python.org/downloads/release/python-3139/" target="_blank">python.org/downloads/release/python-3139</a></li>
+          <li>Den Installer starten und durchlaufen — alle Standardoptionen beibehalten.</li>
+          <li>Nach der Installation erscheint <strong>Python 3.13</strong> im Programme-Ordner.</li>
         </ol>
         <div class="callout">
-          <strong>Autostart aktivieren:</strong> Im Menü des Server-Icons → „Autostart beim Login" aktivieren. Der Server startet dann automatisch beim Hochfahren.
+          <strong>Warum python.org?</strong> Nur dieser Installer legt <code>Python Launcher.app</code> in <code>/Programme/Python 3.13/</code> an. Dieser Eintrag wird später für den Festplattenvollzugriff benötigt.
         </div>
 
-        <h3>Sicherheitswarnung auf neueren Macs</h3>
-        <p>Auf macOS Ventura und neuer blockiert macOS die App beim ersten Öffnen. So gehst du vor:</p>
+        <h3>Schritt 2 — Archivio Server installieren</h3>
+        <ol class="step-list">
+          <li>Das neuste <code>.pkg</code> von der <a href="https://github.com/inderfab/archivio/releases/latest">Releases-Seite</a> herunterladen.</li>
+          <li>Doppelklick auf die <code>.pkg</code>-Datei — der Installer öffnet sich.</li>
+          <li>Auf <strong>Fortfahren</strong> und dann <strong>Installieren</strong> klicken.</li>
+          <li>Mac-Passwort eingeben und auf <strong>Software installieren</strong> klicken.</li>
+          <li>Zwei Berechtigungsdialoge erscheinen — jeweils <strong>Erlauben</strong> klicken.</li>
+          <li>„Die Installation war erfolgreich" — auf <strong>Schließen</strong> klicken.</li>
+        </ol>
+        <div class="install-screenshots">
+          <figure>
+            <img src="img/pkg-01-willkommen.png" alt="PKG-Installer – Willkommen">
+            <figcaption>Installer öffnen und Fortfahren klicken.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/pkg-02-installieren.png" alt="PKG-Installer – Installationstyp">
+            <figcaption>Installieren klicken.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/pkg-03-passwort.png" alt="PKG-Installer – Passwort eingeben">
+            <figcaption>Mac-Passwort eingeben.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/pkg-04-system-events.png" alt="Berechtigungsdialog – System Events erlauben">
+            <figcaption>Erlauben klicken.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/pkg-05-aenderungen.png" alt="Berechtigungsdialog – Änderungen erlauben">
+            <figcaption>Erlauben klicken.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/pkg-06-fertig.png" alt="PKG-Installer – Installation erfolgreich">
+            <figcaption>Installation abgeschlossen.</figcaption>
+          </figure>
+        </div>
+
+        <h3>Schritt 3 — Festplattenvollzugriff gewähren</h3>
+        <p>Damit Archivio auf NAS-Volumes und Dokumente zugreifen kann, müssen <strong>drei Einträge</strong> den Festplattenvollzugriff erhalten.</p>
+        <ol class="step-list">
+          <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</li>
+          <li>Klicke auf <strong>+</strong> und wähle <strong>Terminal</strong> aus dem Ordner <em>Programme/Dienstprogramme</em>.</li>
+          <li>Klicke erneut auf <strong>+</strong> und wähle <strong>Python Launcher</strong> aus dem Ordner <em>Programme/Python 3.13</em>.</li>
+          <li>Klicke erneut auf <strong>+</strong> und wähle <strong>Archivio Server</strong> aus dem Ordner <em>Programme</em>.</li>
+          <li>Starte Archivio Server neu — Menüleisten-Icon → Beenden → App wieder öffnen.</li>
+        </ol>
+        <div class="install-screenshots">
+          <figure>
+            <img src="img/fda-01-datenschutz-festplattenvollzugriff.png" alt="Systemeinstellungen Datenschutz & Sicherheit – Festplattenvollzugriff auswählen">
+            <figcaption>Festplattenvollzugriff öffnen.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/fda-02-app-hinzufuegen.png" alt="Festplattenvollzugriff – + klicken um App hinzuzufügen">
+            <figcaption>+ klicken und App auswählen.</figcaption>
+          </figure>
+          <figure>
+            <img src="img/Festplattenzugriff.png" alt="Festplattenvollzugriff – Terminal, Python Launcher und Archivio Server sind aktiv">
+            <figcaption>So sieht es aus wenn alle drei Einträge aktiv sind.</figcaption>
+          </figure>
+        </div>
+        <div class="callout">
+          <strong>Wichtig:</strong> Alle drei Einträge (Terminal, Python Launcher, Archivio Server) sind notwendig. Fehlt einer davon, schlägt der Scan mit „Fehler" fehl.
+        </div>
+
+        <h3>Sicherheitswarnung beim ersten Öffnen</h3>
+        <p>Auf macOS Ventura und neuer kann macOS die App beim ersten Öffnen blockieren. So gehst du vor:</p>
         <ol class="step-list">
           <li>Beim ersten Start erscheint der Hinweis, dass „Archivio Server.app" nicht geöffnet werden konnte. Klicke auf <strong>Fertig</strong>.</li>
           <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong>. Im Abschnitt „Sicherheit" erscheint die Meldung, dass die App blockiert wurde.</li>
@@ -286,46 +350,16 @@
         <div class="install-screenshots">
           <figure>
             <img src="img/install-blocked-dialog.png" alt="macOS meldet: Archivio Server.app nicht geöffnet">
-            <figcaption>Schritt 1 – „Fertig" klicken.</figcaption>
+            <figcaption>„Fertig" klicken.</figcaption>
           </figure>
           <figure>
             <img src="img/install-security-settings.png" alt="Systemeinstellungen Datenschutz & Sicherheit – blockierte App">
-            <figcaption>Schritt 2 – Systemeinstellungen → Datenschutz &amp; Sicherheit.</figcaption>
+            <figcaption>Systemeinstellungen → Datenschutz &amp; Sicherheit.</figcaption>
           </figure>
           <figure>
             <img src="img/install-warning-dialog.png" alt="Bestätigungsdialog – Dennoch öffnen">
-            <figcaption>Schritt 3 – „Dennoch öffnen" bestätigen.</figcaption>
+            <figcaption>„Dennoch öffnen" bestätigen.</figcaption>
           </figure>
-        </div>
-
-        <h3>Festplattenvollzugriff gewähren</h3>
-        <p>Damit Archivio auf NAS-Volumes, Dokumente und andere geschützte Ordner zugreifen kann, muss der App <strong>Festplattenvollzugriff</strong> erteilt werden.</p>
-        <ol class="step-list">
-          <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</li>
-          <li>Klicke auf <strong>+</strong> und navigiere zu <code>/Programme/Archivio Server.app</code>.</li>
-          <li>Wähle die App aus und klicke <strong>Öffnen</strong>.</li>
-          <li>Starte Archivio Server neu (Menüleisten-Icon → Beenden → App wieder öffnen).</li>
-        </ol>
-        <div class="install-screenshots">
-          <figure>
-            <img src="img/fda-01-datenschutz-festplattenvollzugriff.png" alt="Systemeinstellungen Datenschutz & Sicherheit – Festplattenvollzugriff auswählen">
-            <figcaption>Schritt 1 – Festplattenvollzugriff öffnen.</figcaption>
-          </figure>
-          <figure>
-            <img src="img/fda-02-app-hinzufuegen.png" alt="Festplattenvollzugriff – + klicken um App hinzuzufügen">
-            <figcaption>Schritt 2 – + klicken.</figcaption>
-          </figure>
-          <figure>
-            <img src="img/fda-03-archivio-auswaehlen.png" alt="Finder – Archivio Server.app im Programme-Ordner auswählen">
-            <figcaption>Schritt 3 – Archivio Server.app auswählen und Öffnen klicken.</figcaption>
-          </figure>
-          <figure>
-            <img src="img/Festplattenzugriff.png" alt="Festplattenvollzugriff – Archivio Server und Terminal sind aktiv">
-            <figcaption>Schritt 4 – So sieht es aus wenn alles korrekt aktiviert ist.</figcaption>
-          </figure>
-        </div>
-        <div class="callout">
-          <strong>Wichtig:</strong> Ohne Festplattenvollzugriff schlägt der Scan mit „Fehler" fehl, sobald der Pfad auf ein NAS-Volume oder einen geschützten Ordner zeigt.
         </div>
       </div>
 

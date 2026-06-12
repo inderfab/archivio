@@ -71,6 +71,31 @@ def _scheduler_loop():
         time.sleep(60)
 
 
+def _resume_embeddings_on_startup():
+    """Beim Start: fehlende Embeddings nachholen falls Ollama läuft.
+    Sicherheitsnetz falls der Server während eines Embedding-Laufs abgestürzt ist."""
+    time.sleep(8)  # Server erst vollständig hochfahren lassen
+    try:
+        from scanner.embedder import is_ollama_running
+        if not is_ollama_running():
+            return
+        conn = connection.get_connection()
+        try:
+            pending = conn.execute(
+                "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
+            ).fetchone()[0]
+        finally:
+            conn.close()
+        if pending > 0:
+            logging.getLogger(__name__).info(
+                "Startup: %d Chunks ohne Embedding — Backfill startet", pending
+            )
+            from web.dashboard import _run_post_scan_embedding
+            _run_post_scan_embedding()
+    except Exception as exc:
+        logging.getLogger(__name__).debug("Startup-Embedding-Check: %s", exc)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     # Migrations beim Start ausführen — auch bei bestehenden DBs
@@ -83,6 +108,7 @@ async def lifespan(app: FastAPI):
         import logging
         logging.getLogger(__name__).warning("Migration fehlgeschlagen: %s", _e)
     threading.Thread(target=_scheduler_loop, daemon=True).start()
+    threading.Thread(target=_resume_embeddings_on_startup, daemon=True).start()
     yield
 
 

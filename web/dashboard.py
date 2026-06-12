@@ -1,10 +1,12 @@
 """Dashboard: Projektverwaltung und Ordner-Browser."""
 from __future__ import annotations
 
+import gc
 import json
 import logging
 import os
 import threading
+import time
 import unicodedata
 from datetime import datetime, timezone
 from pathlib import Path
@@ -27,7 +29,20 @@ _cancel_flags: dict[int, dict] = {}
 # Mail-Scan-Status
 _mail_scan: dict = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
-_scan_lock = threading.Semaphore(1)
+_scan_lock        = threading.Semaphore(1)
+_embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
+
+_EMBED_BATCH_DOCS  = 5    # Dokumente pro Batch, dann GC + Pause
+_EMBED_BATCH_PAUSE = 3.0  # Sekunden Pause zwischen Batches (normal)
+_EMBED_RAM_PAUSE   = 90   # Sekunden Pause wenn RAM > 80%
+
+
+def _embedding_ram_ok() -> bool:
+    try:
+        import psutil
+        return psutil.virtual_memory().percent < 80
+    except Exception:
+        return True
 
 
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
@@ -85,6 +100,26 @@ async def problem_docs(request: Request):
     return templates.TemplateResponse("_problem_docs.html", {
         "request":      request,
         "problem_docs": docs,
+        "retry_done":   0,
+    })
+
+
+@router.post("/retry-errors", response_class=HTMLResponse)
+async def retry_errors(request: Request):
+    """Setzt alle error-Dokumente auf 'pending' — beim nächsten Scan neu verarbeitet."""
+    conn = connection.get_connection()
+    with conn:
+        count = conn.execute(
+            "UPDATE documents SET extraction_status = 'pending' WHERE extraction_status = 'error'"
+        ).rowcount
+    docs = _problem_documents(conn)
+    conn.close()
+    if not docs:
+        return HTMLResponse('<details id="problem-docs-section"></details>')
+    return templates.TemplateResponse("_problem_docs.html", {
+        "request":      request,
+        "problem_docs": docs,
+        "retry_done":   count,
     })
 
 
@@ -284,7 +319,7 @@ async def scan_progress_banner(request: Request):
             break
         if status in ("done", "error"):
             elapsed = _elapsed_seconds(s.get("finished_at", ""))
-            if elapsed < 30:
+            if elapsed < 8:
                 active = (pid, s)
 
     if active is None:
@@ -909,16 +944,87 @@ def _run_scan(project_id: int, path: str):
         if cancel_flag.get("cancel"):
             progress.update({"status": "cancelled", "finished_at": _now()})
             return
-        conn  = connection.get_connection()
-        count = conn.execute(
-            "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
-        ).fetchone()[0]
-        conn.close()
-        progress.update({"status": "done", "count": count, "finished_at": _now()})
+        # Status sofort setzen — Banner verschwindet ohne auf den DB-Count zu warten
+        progress.update({"status": "done", "finished_at": _now()})
+        try:
+            conn  = connection.get_connection()
+            count = conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
+            ).fetchone()[0]
+            conn.close()
+            progress["count"] = count
+        except Exception:
+            pass
+        # Embedding nach dem Scan automatisch starten (falls Ollama läuft)
+        threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
     finally:
         _scan_lock.release()
+
+
+def _run_post_scan_embedding():
+    """Embeddings in kleinen Batches berechnen.
+    Nur ein Thread gleichzeitig — bei scan_all startet jedes Projekt einen Thread,
+    aber alle ausser dem ersten kehren sofort zurück. Der laufende Thread holt
+    automatisch alle offenen Chunks, egal von welchem Projekt."""
+    if not _embed_thread_lock.acquire(blocking=False):
+        return  # bereits aktiv — laufende Instanz verarbeitet alle Chunks
+    try:
+        from scanner.embedder import is_ollama_running, embed_document_chunks
+
+        while True:
+            # Nicht mit aktivem Scan konkurrieren
+            _free = _scan_lock.acquire(blocking=False)
+            if not _free:
+                log.debug("Embedding wartet — Scan aktiv")
+                time.sleep(30)
+                continue
+            _scan_lock.release()  # sofort wieder freigeben, nur Prüfung
+
+            if not is_ollama_running():
+                break
+
+            # Nächste N Dokumente ohne Embedding holen (frisch jedes Mal)
+            conn = connection.get_connection()
+            try:
+                doc_ids = [r[0] for r in conn.execute(
+                    "SELECT DISTINCT document_id FROM document_chunks "
+                    "WHERE embedding IS NULL LIMIT ?",
+                    (_EMBED_BATCH_DOCS,)
+                ).fetchall()]
+            finally:
+                conn.close()
+
+            if not doc_ids:
+                log.debug("Embedding abgeschlossen — keine offenen Chunks mehr")
+                break
+
+            # Batch einbetten
+            conn = connection.get_connection()
+            try:
+                for doc_id in doc_ids:
+                    try:
+                        embed_document_chunks(conn, doc_id)
+                    except Exception as e:
+                        log.debug("Embedding doc %s: %s", doc_id, e)
+            finally:
+                conn.close()
+
+            # Speicher explizit freigeben
+            gc.collect()
+
+            # RAM-Check: bei > 80% Auslastung Pause einlegen
+            if not _embedding_ram_ok():
+                log.info("Embedding-Pause: RAM > 80%% — warte %ds", _EMBED_RAM_PAUSE)
+                time.sleep(_EMBED_RAM_PAUSE)
+            else:
+                time.sleep(_EMBED_BATCH_PAUSE)
+
+    except Exception as e:
+        log.debug("Post-scan Embedding fehlgeschlagen: %s", e)
+    finally:
+        _embed_thread_lock.release()
 
 
 def _fmt_iso_date(iso: str | None) -> str | None:

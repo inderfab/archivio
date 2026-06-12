@@ -10,6 +10,7 @@ Verboten: os.remove, os.rename, shutil.delete, open(..., 'w'), open(..., 'wb').
 import logging
 import multiprocessing
 import re
+import signal as _signal
 import threading
 from pathlib import Path
 
@@ -18,33 +19,76 @@ log = logging.getLogger(__name__)
 _IN_WORKER_PROCESS = False  # wird von _scan_file_worker auf True gesetzt
 
 _PDF_TIMEOUT = 120   # Sekunden für PyMuPDF / pypdf (Daemon-Thread, nur ausserhalb Worker)
-_OCR_TIMEOUT = 90    # Sekunden für OCR (Subprocess mit SIGKILL)
+_OCR_TIMEOUT = 7200  # Sicherheitsnetz für OCR-Prozess — per-Seiten-Timeout greift früher
+_PAGE_TEXT_TIMEOUT = 15   # Sekunden pro Seite für Text-Extraktion (nur im Worker via SIGALRM)
+_PAGE_OCR_TIMEOUT  = 60   # Sekunden pro Seite für OCR (nur im _worker_ocr-Prozess)
+_NON_PDF_TIMEOUT   = 30   # Sekunden für alle Nicht-PDF-Formate (DOCX, EML, RTF, …)
+
+
+class _NonPdfTimeout(Exception):
+    pass
+
+
+def _non_pdf_alarm(signum, frame):
+    raise _NonPdfTimeout()
+
+
+class _PageTimeout(Exception):
+    pass
+
+
+def _alarm_raise(signum, frame):
+    raise _PageTimeout()
 
 
 # ── OCR-Worker (Subprocess — Tesseract kann GIL halten) ──────────────────────
 
 def _worker_ocr(path_str: str, result_q: multiprocessing.Queue) -> None:
-    """Läuft im eigenen Prozess damit Tesseract den Server-GIL nicht blockiert."""
+    """Läuft im eigenen Prozess damit Tesseract den Server-GIL nicht blockiert.
+    Pro Seite 60s Timeout via SIGALRM — hängende Seiten (z.B. riesige Pläne) werden
+    übersprungen, der Rest des Dokuments wird weiterverarbeitet."""
+    import signal
+
+    class _OCRPageTimeout(Exception):
+        pass
+
+    def _ocr_alarm(signum, frame):
+        raise _OCRPageTimeout()
+
     try:
         import fitz
         FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
         result = []
-        with fitz.open(path_str) as doc:
-            for i, page in enumerate(doc, start=1):
-                text = ""
-                for lang in ("deu+eng", "deu", "eng"):
+        old_handler = signal.signal(signal.SIGALRM, _ocr_alarm)
+        try:
+            with fitz.open(path_str) as doc:
+                for i, page in enumerate(doc, start=1):
+                    text = ""
+                    signal.alarm(_PAGE_OCR_TIMEOUT)
                     try:
-                        tp = page.get_textpage_ocr(
-                            flags=FLAGS, language=lang, dpi=150, full=True,
-                        )
-                        text = page.get_text(textpage=tp, flags=FLAGS).strip()
-                        if text:
-                            break
-                    except Exception:
-                        continue
-                if len(text) < 50:
-                    continue
-                result.append({"page_number": i, "content": text})
+                        for lang in ("deu+eng", "deu", "eng"):
+                            try:
+                                tp = page.get_textpage_ocr(
+                                    flags=FLAGS, language=lang, dpi=150, full=True,
+                                )
+                                text = page.get_text(textpage=tp, flags=FLAGS).strip()
+                                if text:
+                                    break
+                            except _OCRPageTimeout:
+                                raise
+                            except Exception:
+                                continue
+                    except _OCRPageTimeout:
+                        log.warning("OCR Seite %d Timeout (%ds) übersprungen: %s",
+                                    i, _PAGE_OCR_TIMEOUT, Path(path_str).name)
+                        text = ""
+                    finally:
+                        signal.alarm(0)
+                    if len(text) >= 50:
+                        result.append({"page_number": i, "content": text})
+        finally:
+            signal.alarm(0)
+            signal.signal(signal.SIGALRM, old_handler)
         result_q.put(("ok", result))
     except Exception as e:
         result_q.put(("err", str(e)))
@@ -209,25 +253,37 @@ def extract_pdf_pages(path: Path) -> list[dict]:
     # ── 1. PyMuPDF ───────────────────────────────────────────────────────────
     try:
         def _pymupdf(p):
-            import fitz, resource
+            import fitz
             FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
             pages = []
-            with fitz.open(str(p)) as doc:
-                for i, page in enumerate(doc, start=1):
-                    text = page.get_text(flags=FLAGS).strip()
-                    if len(text) >= 50:
-                        pages.append({"page_number": i, "content": text})
-                    # RAM-Check alle 20 Seiten — Abbruch bei > 2.5 GB
-                    if i % 20 == 0:
+            # Per-Seiten-Timeout nur im Worker (Hauptthread → SIGALRM verfügbar).
+            # Im Server-Thread würde signal.signal ValueError werfen.
+            use_alarm = _IN_WORKER_PROCESS
+            if use_alarm:
+                old_handler = _signal.signal(_signal.SIGALRM, _alarm_raise)
+            try:
+                with fitz.open(str(p)) as doc:
+                    for i, page in enumerate(doc, start=1):
+                        if use_alarm:
+                            _signal.alarm(_PAGE_TEXT_TIMEOUT)
                         try:
-                            rss = resource.getrusage(resource.RUSAGE_SELF).ru_maxrss
-                            rss_gb = rss / (1024 ** 3)  # macOS liefert Bytes
-                            if rss_gb > 2.5:
-                                log.warning("RAM-Limit (%.1f GB) bei Seite %d: %s — abgebrochen",
-                                            rss_gb, i, Path(p).name)
-                                break
-                        except Exception:
-                            pass
+                            text = page.get_text(flags=FLAGS).strip()
+                        except _PageTimeout:
+                            log.warning("Seite %d Text-Timeout (%ds) übersprungen: %s",
+                                        i, _PAGE_TEXT_TIMEOUT, Path(p).name)
+                            text = ""
+                        except Exception as exc:
+                            log.debug("Seite %d Fehler: %s – %s", i, Path(p).name, exc)
+                            text = ""
+                        finally:
+                            if use_alarm:
+                                _signal.alarm(0)
+                        if len(text) >= 50:
+                            pages.append({"page_number": i, "content": text})
+            finally:
+                if use_alarm:
+                    _signal.alarm(0)
+                    _signal.signal(_signal.SIGALRM, old_handler)
             return pages
 
         pages = _run_pdf(_pymupdf, path, _PDF_TIMEOUT)
@@ -362,7 +418,20 @@ def extract_chunks(path: Path) -> list[dict]:
                 idx += 1
         return chunks
     else:
-        text, _ = extract(path)
+        # 30s Timeout für alle Nicht-PDF-Formate (DOCX, EML, RTF, TXT, …)
+        use_alarm = _IN_WORKER_PROCESS
+        if use_alarm:
+            old_handler = _signal.signal(_signal.SIGALRM, _non_pdf_alarm)
+            _signal.alarm(_NON_PDF_TIMEOUT)
+        try:
+            text, _ = extract(path)
+        except _NonPdfTimeout:
+            log.warning("Extraktion Timeout (%ds): %s", _NON_PDF_TIMEOUT, path.name)
+            raise ExtractionError(f"Timeout ({_NON_PDF_TIMEOUT}s): {path.name}")
+        finally:
+            if use_alarm:
+                _signal.alarm(0)
+                _signal.signal(_signal.SIGALRM, old_handler)
         if not text:
             return []
         parts = split_text_into_chunks(normalize_text(text))
