@@ -1438,7 +1438,28 @@ async def diagnostics():
         checks.append({"label": label, "value": value, "ok": ok, "detail": detail})
 
     # Umgebung
-    _chk("Python", f"{sys.version.split()[0]}  —  {sys.executable}")
+    py_version = sys.version.split()[0]
+    py_path    = sys.executable
+    py_minor   = sys.version_info.minor
+    # Herkunft und FDA-Fähigkeit bestimmen
+    if "/Library/Frameworks/Python.framework/" in py_path:
+        py_source = "python.org (FDA-fähig)"
+        py_ok     = py_minor >= 12
+        py_detail = "" if py_minor >= 12 else "Version zu alt — bitte Python 3.13 von python.org installieren"
+    elif "/opt/homebrew/" in py_path or "/usr/local/Cellar/" in py_path:
+        py_source = "Homebrew (kein FDA)"
+        py_ok     = False
+        py_detail = "Homebrew-Python hat keinen Festplattenvollzugriff — bitte Python 3.13 von python.org installieren"
+    elif py_path.startswith("/usr/bin/"):
+        py_source = "macOS System-Python"
+        py_ok     = False
+        py_detail = "System-Python hat keinen Festplattenvollzugriff — bitte Python 3.13 von python.org installieren"
+    else:
+        py_source = "unbekannte Herkunft"
+        py_ok     = py_minor >= 12
+        py_detail = "" if py_minor >= 12 else "Version zu alt"
+    _chk("Python", f"{py_version}  —  {py_source}", ok=py_ok, detail=py_detail)
+    _chk("Python-Pfad", py_path)
     data_dir = os.environ.get("ARCHIVIO_DATA_DIR", "")
     _chk("ARCHIVIO_DATA_DIR", data_dir or "(nicht gesetzt)", ok=bool(data_dir),
          detail="" if data_dir else "Variable fehlt — Pfade evtl. falsch")
