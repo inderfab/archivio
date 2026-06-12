@@ -43,13 +43,21 @@ LOG="$HOME/Library/Logs/ArchivioServer.log"
 exec >> "$LOG" 2>&1
 echo "$(date): Archivio Server starting"
 
+# python.org-Framework zuerst prüfen (hat FDA via Python Launcher.app)
+# Homebrew-Python absichtlich nachrangig — es hat kein FDA
 PYTHON=""
-for p in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
+for p in \
+  /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.12/bin/python3 \
+  /Library/Frameworks/Python.framework/Versions/3.11/bin/python3 \
+  /usr/local/bin/python3 \
+  /opt/homebrew/bin/python3 \
+  /usr/bin/python3; do
   if [ -x "$p" ]; then PYTHON="$p"; break; fi
 done
 
 if [ -z "$PYTHON" ]; then
-  osascript -e 'display alert "Archivio Server" message "Python 3 nicht gefunden. Bitte Python 3 installieren (z.\,B. via Homebrew: brew install python)." as critical'
+  osascript -e 'display alert "Archivio Server" message "Python 3.13 nicht gefunden. Bitte Python von python.org installieren: python.org/downloads" as critical'
   exit 1
 fi
 echo "$(date): Python: $PYTHON"
