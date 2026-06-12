@@ -918,7 +918,7 @@ def _run_mail_scan():
         client = connect_imap()
         conn   = connection.get_connection()
         active = conn.execute(
-            "SELECT * FROM mail_scan_config WHERE active=1 AND project_id IS NOT NULL"
+            "SELECT * FROM mail_scan_config WHERE active=1"
         ).fetchall()
         conn.close()
 

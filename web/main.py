@@ -249,16 +249,29 @@ async def search_ai_answer(
 
 # ── Routen ────────────────────────────────────────────────────────────────────
 
+def _mailbox_display_name(mailbox_name: str) -> str:
+    last = mailbox_name.split("/")[-1].strip()
+    return "Inbox" if last.upper() == "INBOX" else last
+
+
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     conn = connection.get_connection()
     projects = conn.execute(
         "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
     ).fetchall()
+    raw_mailboxes = conn.execute(
+        "SELECT mailbox_name FROM mail_scan_config WHERE active=1 AND project_id IS NULL ORDER BY mailbox_name"
+    ).fetchall()
     conn.close()
+    mail_mailboxes = [
+        {"mailbox_name": r["mailbox_name"], "display_name": _mailbox_display_name(r["mailbox_name"])}
+        for r in raw_mailboxes
+    ]
     return templates.TemplateResponse("index.html", {
-        "request":  request,
-        "projects": projects,
+        "request":        request,
+        "projects":       projects,
+        "mail_mailboxes": mail_mailboxes,
     })
 
 
@@ -425,11 +438,15 @@ def _build_filters(
 ) -> tuple[str, list]:
     filters, params = "", []
     if project_id:
-        try:
-            filters += " AND d.project_id = ?"
-            params.append(int(project_id))
-        except ValueError:
-            pass
+        if project_id.startswith("mailbox:"):
+            filters += " AND m.mailbox_name = ? AND d.project_id IS NULL"
+            params.append(project_id[8:])
+        else:
+            try:
+                filters += " AND d.project_id = ?"
+                params.append(int(project_id))
+            except ValueError:
+                pass
     if ext == "mail":
         filters += " AND d.source_type = 'email'"
     elif ext:
@@ -468,13 +485,13 @@ def _search_filtered(conn, filters: str, filter_params: list):
     sql = f"""
         SELECT d.id, d.filename, d.extension, d.filesize, d.modified_at,
                d.extraction_status, d.source_type,
-               p.name      AS project_name,
+               COALESCE(p.name, m.mailbox_name) AS project_name,
                dp.path     AS filepath,
                dc.content  AS raw_content,
                m.sender    AS mail_sender,
                m.date      AS mail_date
         FROM documents d
-        JOIN  projects        p  ON p.id  = d.project_id
+        LEFT JOIN projects        p  ON p.id  = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN document_content dc ON dc.document_id = d.id
         LEFT JOIN mails       m  ON m.document_id = d.id
@@ -502,7 +519,7 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
             d.extraction_status, d.source_type,
-            p.name      AS project_name,
+            COALESCE(p.name, m.mailbox_name) AS project_name,
             dp.path     AS filepath,
             dc_chunk.content AS raw_content,
             dc_chunk.page_number,
@@ -512,7 +529,7 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
         FROM chunks_fts
         JOIN  document_chunks dc_chunk ON chunks_fts.rowid = dc_chunk.id
         JOIN  documents       d        ON d.id = dc_chunk.document_id
-        JOIN  projects        p        ON p.id = d.project_id
+        LEFT JOIN projects        p        ON p.id = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN mails       m  ON m.document_id = d.id
         WHERE chunks_fts MATCH ?
@@ -555,13 +572,13 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
             d.extraction_status, d.source_type,
-            p.name      AS project_name,
+            COALESCE(p.name, m.mailbox_name) AS project_name,
             dp.path     AS filepath,
             dc.content  AS raw_content,
             m.sender    AS mail_sender,
             m.date      AS mail_date
         FROM documents d
-        JOIN  projects        p  ON p.id  = d.project_id
+        LEFT JOIN projects        p  ON p.id  = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN document_content dc ON dc.document_id = d.id
         LEFT JOIN mails       m  ON m.document_id = d.id
@@ -618,7 +635,7 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
             d.extraction_status, d.source_type,
-            p.name      AS project_name,
+            COALESCE(p.name, m.mailbox_name) AS project_name,
             dp.path     AS filepath,
             NULL        AS raw_content,
             NULL        AS page_number,
@@ -626,7 +643,7 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
             m.date      AS mail_date
         FROM documents_fts
         JOIN  documents       d  ON documents_fts.rowid = d.id
-        JOIN  projects        p  ON p.id = d.project_id
+        LEFT JOIN projects        p  ON p.id = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN mails       m  ON m.document_id = d.id
         WHERE documents_fts MATCH ?

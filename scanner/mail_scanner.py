@@ -263,7 +263,7 @@ def mail_exists(conn, message_id: str) -> bool:
     ).fetchone() is not None
 
 
-def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
+def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: str = "") -> bool:
     """Schreibt Mail in DB inkl. Chunks + Embeddings.
     Jede Stufe hat eigenes try/except — Fehler werden geloggt, Mail wird nicht übersprungen.
     True = neu gespeichert, False = bereits vorhanden.
@@ -290,10 +290,10 @@ def save_mail_to_db(conn, record: dict, project_id: int) -> bool:
             )
             doc_id = cursor.lastrowid
             conn.execute(
-                """INSERT INTO mails (document_id, sender, recipients, cc, subject, date, thread_id)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO mails (document_id, sender, recipients, cc, subject, date, thread_id, mailbox_name)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
                 (doc_id, record["sender"], record["recipients"], record["cc"],
-                 record["subject"], record["mail_date"], record["thread_id"]),
+                 record["subject"], record["mail_date"], record["thread_id"], mailbox_name),
             )
             if cleaned_text:
                 conn.execute(
@@ -406,9 +406,9 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int,
 
                 # save_mail_to_db inkl. Chunking + Embedding in eigenem Thread (60s Timeout)
                 result_box: list = []
-                def _save(rec=record):
+                def _save(rec=record, mb=mailbox):
                     try:
-                        result_box.append(save_mail_to_db(conn, rec, project_id))
+                        result_box.append(save_mail_to_db(conn, rec, project_id, mb))
                     except Exception as exc:
                         log.warning("save_mail_to_db Fehler UID %s: %s", uid, exc)
                         result_box.append(False)

@@ -19,6 +19,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "003_mail_integration", _m003)
     _apply(conn, "004_add_chunks", _m004)
     _apply(conn, "005_chunk_doc_index", _m005)
+    _apply(conn, "006_mails_mailbox_name", _m006)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -148,6 +149,16 @@ def _m004(conn: sqlite3.Connection):
         END;
     """)
     log.info("Chunks-Tabelle und chunks_fts angelegt")
+
+
+def _m006(conn: sqlite3.Connection):
+    """mails.mailbox_name — Herkunfts-Postfach für nicht zugewiesene Mails."""
+    try:
+        conn.execute("ALTER TABLE mails ADD COLUMN mailbox_name TEXT NOT NULL DEFAULT ''")
+        conn.commit()
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
 
 
 def _m003(conn: sqlite3.Connection):
