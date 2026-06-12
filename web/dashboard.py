@@ -367,10 +367,14 @@ async def mail_dashboard(request: Request):
         LEFT JOIN projects p ON p.id = msc.project_id
         ORDER BY msc.mailbox_name
     """).fetchall()
+    projects = conn.execute(
+        "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
+    ).fetchall()
     conn.close()
     return templates.TemplateResponse("_dashboard_mail.html", {
         "request":     request,
         "configs":     [dict(r) for r in configs],
+        "projects":    [dict(r) for r in projects],
         "scan_status": _mail_scan.get("status"),
         "scan_new":    _mail_scan.get("total_new"),
         "scan_error":  _mail_scan.get("error"),
@@ -394,7 +398,8 @@ async def mail_refresh(request: Request):
             conn.execute(
                 """INSERT INTO mail_scan_config (mailbox_name, project_id, active)
                    VALUES (?, ?, 0)
-                   ON CONFLICT(mailbox_name) DO UPDATE SET project_id=excluded.project_id""",
+                   ON CONFLICT(mailbox_name) DO UPDATE
+                     SET project_id = COALESCE(mail_scan_config.project_id, excluded.project_id)""",
                 (mb, pid),
             )
         conn.commit()
@@ -429,6 +434,23 @@ async def mail_toggle(
         return templates.TemplateResponse("_dashboard_projects.html", {
             "request": request, "groups": groups, "stats": stats,
         })
+    conn.close()
+    return await mail_dashboard(request)
+
+
+@router.post("/mail/assign-project", response_class=HTMLResponse)
+async def mail_assign_project(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    project_id:   str = Form(""),
+):
+    conn = connection.get_connection()
+    pid  = int(project_id) if project_id else None
+    with conn:
+        conn.execute(
+            "UPDATE mail_scan_config SET project_id=? WHERE mailbox_name=?",
+            (pid, mailbox_name),
+        )
     conn.close()
     return await mail_dashboard(request)
 

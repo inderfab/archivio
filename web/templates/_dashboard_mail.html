@@ -66,18 +66,30 @@
         </button>
       </form>
 
-      {# Name + Projekt-Badge #}
-      <div style="flex:1; min-width:0;">
+      {# Name + Projekt-Zuweisung #}
+      <div style="flex:1; min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
         <span style="font-size:13px; color:var(--text-1);">✉ {{ c.mailbox_name }}</span>
-        {% if c.project_name %}
-          <span style="font-size:11px; color:var(--text-3);
-                       background:var(--bg-2); border:1px solid var(--border);
-                       border-radius:4px; padding:1px 6px; margin-left:6px;">
-            {{ c.project_name }}
-          </span>
-        {% else %}
-          <span style="font-size:11px; color:var(--text-3); margin-left:6px;">kein Projekt-Match</span>
-        {% endif %}
+        <form hx-post="/dashboard/mail/assign-project"
+              hx-target="#mail-section"
+              hx-swap="outerHTML"
+              style="display:contents;">
+          <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+          <select name="project_id"
+                  hx-post="/dashboard/mail/assign-project"
+                  hx-target="#mail-section"
+                  hx-swap="outerHTML"
+                  hx-trigger="change"
+                  hx-include="closest form"
+                  style="font-size:11px; padding:2px 6px; border-radius:4px;
+                         border:1px solid var(--border); background:var(--bg);
+                         color:{% if c.project_id %}var(--text-1){% else %}var(--text-3){% endif %};
+                         max-width:200px;">
+            <option value="">— Projekt wählen —</option>
+            {% for p in projects %}
+              <option value="{{ p.id }}" {% if p.id == c.project_id %}selected{% endif %}>{{ p.name }}</option>
+            {% endfor %}
+          </select>
+        </form>
       </div>
 
       {# Statistik #}
