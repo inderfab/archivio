@@ -68,6 +68,15 @@ VENV="$DATA_DIR/.venv"
 CURRENT_VERSION=$(cat "$DIR/VERSION" 2>/dev/null || echo "unknown")
 VERSION_STAMP="$DATA_DIR/.venv_version"
 
+# Venv-Python-Version prüfen — falls < 3.12, neu aufbauen (z.B. altes 3.9-Venv)
+if [ -d "$VENV" ]; then
+  VENV_MINOR=$("$VENV/bin/python3" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
+  if [ "$VENV_MINOR" -lt 12 ]; then
+    echo "$(date): Venv Python 3.$VENV_MINOR zu alt (< 3.12) — wird neu aufgebaut mit $PYTHON"
+    rm -rf "$VENV"
+  fi
+fi
+
 if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Server"'
   echo "$(date): Erstinstallation – venv wird erstellt"
