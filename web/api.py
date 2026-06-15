@@ -1551,15 +1551,22 @@ async def diagnostics():
             "AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)"
         ).fetchone()[0]
         emb_ok = missing_emb == 0
+        if not emb_ok:
+            emb_detail = (
+                f"{missing_emb} Chunks ohne Embedding — "
+                f'<a href="#" onclick="fetch(\'/api/ai/backfill\',{{method:\'POST\'}})'
+                f'.then(function(){{alert(\'Backfill gestartet — kann einige Minuten dauern.\')}})'
+                f';return false">Backfill jetzt starten</a>'
+            )
+        elif docs_no_chunk:
+            emb_detail = f"{docs_no_chunk} Dokumente ohne Chunks"
+        else:
+            emb_detail = ""
         _chk(
             "Embeddings",
             f"{total_chunks - missing_emb} / {total_chunks} Chunks",
             ok=emb_ok if total_chunks > 0 else None,
-            detail=(
-                f"{missing_emb} Chunks ohne Embedding — Scan oder Backfill starten"
-                if not emb_ok else
-                (f"{docs_no_chunk} Dokumente ohne Chunks" if docs_no_chunk else "")
-            )
+            detail=emb_detail
         )
         _conn.close()
     except Exception as _exc:
