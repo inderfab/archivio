@@ -82,6 +82,50 @@ def _track_pool(pool) -> None:
             with _worker_pids_lock:
                 _worker_pids.add(w.pid)
 
+
+_memory_watchdog_started = False
+_memory_watchdog_lock    = threading.Lock()
+
+
+def _start_memory_watchdog() -> None:
+    """Startet (einmalig) einen Hintergrund-Thread der jede Sekunde alle
+    bekannten Worker-PIDs überwacht — unabhängig vom Scan-Polling-Loop.
+
+    Fängt verwaiste Prozesse (maxtasksperchild-Rotation, D-State) ab,
+    die der Polling-Loop nicht sieht weil er nur pool._pool prüft.
+    """
+    global _memory_watchdog_started
+    with _memory_watchdog_lock:
+        if _memory_watchdog_started:
+            return
+        _memory_watchdog_started = True
+
+    def _watch():
+        while True:
+            time.sleep(1)
+            try:
+                rss      = _total_workers_rss_gb()
+                pressure = _system_under_pressure()
+                if rss > _MAX_WORKER_RSS or pressure:
+                    with _worker_pids_lock:
+                        pids = list(_worker_pids)
+                    if pids:
+                        log.warning(
+                            "Memory-Watchdog: RSS=%.1f GB, Druck=%s → SIGKILL %s",
+                            rss, pressure, pids,
+                        )
+                    for pid in pids:
+                        try:
+                            os.kill(pid, signal.SIGKILL)
+                        except ProcessLookupError:
+                            pass
+                        except Exception as exc:
+                            log.warning("Watchdog SIGKILL PID %d: %s", pid, exc)
+            except Exception:
+                pass
+
+    threading.Thread(target=_watch, daemon=True, name="memory-watchdog").start()
+
 _POLL_INTERVAL      = 2    # Sekunden zwischen Speicher-Checks (vorher 5)
 _MAX_PDF_EXTRACT_MB = 500  # PDFs grösser als 500 MB werden nur registriert
 
@@ -187,16 +231,32 @@ def _kill_workers(pool) -> None:
     threading.Thread(target=_do_terminate, daemon=True).start()
 
 
-def _worker_rss_gb(pool) -> float:
-    """RSS des laufenden Workers in GB, oder 0 wenn nicht ermittelbar."""
+def _total_workers_rss_gb() -> float:
+    """Summe des RSS ALLER bekannten Worker-PIDs — inkl. verwaister Prozesse.
+
+    Tote PIDs werden automatisch aus dem Register entfernt.
+    Ohne diese Funktion blieb ein 56GB-Zombie aus maxtasksperchild-Rotation
+    unbemerkt, weil pool._pool nur den aktuellen Worker enthält.
+    """
     try:
         import psutil
-        for w in getattr(pool, "_pool", []):
-            if w.is_alive():
-                return psutil.Process(w.pid).memory_info().rss / (1024 ** 3)
+        total = 0.0
+        dead: set[int] = set()
+        with _worker_pids_lock:
+            pids = list(_worker_pids)
+        for pid in pids:
+            try:
+                total += psutil.Process(pid).memory_info().rss / (1024 ** 3)
+            except (psutil.NoSuchProcess, ProcessLookupError):
+                dead.add(pid)
+            except Exception:
+                pass
+        if dead:
+            with _worker_pids_lock:
+                _worker_pids.difference_update(dead)
+        return total
     except Exception:
-        pass
-    return 0.0
+        return 0.0
 
 
 def scan_project(project_id: int, root: Path,
@@ -261,6 +321,8 @@ def scan_project(project_id: int, root: Path,
         progress["skipped"]   = 0
         progress["errors"]    = 0
 
+    _start_memory_watchdog()  # einmalig starten (noop wenn bereits läuft)
+
     ctx = multiprocessing.get_context("spawn")
     pool = ctx.Pool(
         processes=1,
@@ -302,8 +364,8 @@ def scan_project(project_id: int, root: Path,
                 try:
                     result = ar.get(timeout=_POLL_INTERVAL)
                 except multiprocessing.TimeoutError:
-                    elapsed = time.monotonic() - start
-                    rss     = _worker_rss_gb(pool)
+                    elapsed  = time.monotonic() - start
+                    rss      = _total_workers_rss_gb()   # ALLE PIDs, nicht nur pool._pool
                     pressure = _system_under_pressure()
 
                     if rss > _MAX_WORKER_RSS:
