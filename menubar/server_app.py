@@ -324,10 +324,34 @@ def _notify(message: str):
 _SERVER_RAM_LIMIT_GB = 20.0  # uvicorn-Prozess-RAM-Limit (ohne Worker-Prozesse)
 
 
+def _scan_was_running() -> bool:
+    """True wenn gerade ein Projekt- oder Mail-Scan läuft."""
+    try:
+        state = requests.get("http://127.0.0.1:8000/api/scan/state", timeout=3).json()
+        if any(s.get("status") == "running" for s in state.get("scans", {}).values()):
+            return True
+        if state.get("mail_scan", {}).get("status") == "running":
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def _wait_for_server(timeout: int = 40) -> bool:
+    """Wartet bis der neue Server-Prozess antwortet."""
+    for _ in range(timeout):
+        try:
+            requests.get("http://127.0.0.1:8000/api/status", timeout=2)
+            return True
+        except Exception:
+            time.sleep(1)
+    return False
+
+
 def _server_memory_watchdog():
     """Überwacht den uvicorn-Prozess alle 15s.
-    Wenn RSS > 20 GB: Server automatisch neu starten.
-    Danach ist der Speicher frei und der User kann den Scan fortsetzen.
+    Wenn RSS > 20 GB: prüft ob Scan läuft, stoppt Server, startet neu,
+    und setzt den Scan automatisch fort.
     """
     try:
         import psutil
@@ -341,15 +365,30 @@ def _server_memory_watchdog():
             if not (_server_proc and _server_proc.poll() is None):
                 continue
             rss_gb = psutil.Process(_server_proc.pid).memory_info().rss / (1024 ** 3)
-            if rss_gb > _SERVER_RAM_LIMIT_GB:
-                log.warning(
-                    "Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
-                    rss_gb, _SERVER_RAM_LIMIT_GB,
-                )
-                _notify(f"Server-Neustart (RAM: {rss_gb:.0f} GB) — bitte Scan fortsetzen")
-                _stop_server()
-                time.sleep(5)
-                _start_server()
+            if rss_gb <= _SERVER_RAM_LIMIT_GB:
+                continue
+
+            log.warning(
+                "Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
+                rss_gb, _SERVER_RAM_LIMIT_GB,
+            )
+            resume_scan = _scan_was_running()
+            _notify(f"Neustart (RAM: {rss_gb:.0f} GB) — Scan wird{'  fortgesetzt' if resume_scan else ' gestoppt'}")
+
+            _stop_server()
+            time.sleep(5)
+            _start_server()
+
+            if resume_scan:
+                if _wait_for_server():
+                    try:
+                        requests.post("http://127.0.0.1:8000/api/scan", timeout=5)
+                        log.info("Scan nach Neustart automatisch fortgesetzt")
+                        _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
+                    except Exception as exc:
+                        log.warning("Scan-Resume fehlgeschlagen: %s", exc)
+                else:
+                    log.warning("Server nach Neustart nicht erreichbar — Scan nicht fortgesetzt")
         except Exception as exc:
             log.warning("Server-Watchdog: %s", exc)
 
