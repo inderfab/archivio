@@ -309,6 +309,51 @@ def _stop_server():
             log.info("uvicorn gestoppt")
 
 
+def _notify(message: str):
+    """macOS-Benachrichtigung aus beliebigem Thread."""
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             f'display notification "{message}" with title "Archivio Server"'],
+            timeout=5,
+        )
+    except Exception:
+        pass
+
+
+_SERVER_RAM_LIMIT_GB = 20.0  # uvicorn-Prozess-RAM-Limit (ohne Worker-Prozesse)
+
+
+def _server_memory_watchdog():
+    """Überwacht den uvicorn-Prozess alle 15s.
+    Wenn RSS > 20 GB: Server automatisch neu starten.
+    Danach ist der Speicher frei und der User kann den Scan fortsetzen.
+    """
+    try:
+        import psutil
+    except ImportError:
+        log.warning("psutil nicht verfügbar — Server-RAM-Watchdog deaktiviert")
+        return
+
+    while True:
+        time.sleep(15)
+        try:
+            if not (_server_proc and _server_proc.poll() is None):
+                continue
+            rss_gb = psutil.Process(_server_proc.pid).memory_info().rss / (1024 ** 3)
+            if rss_gb > _SERVER_RAM_LIMIT_GB:
+                log.warning(
+                    "Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
+                    rss_gb, _SERVER_RAM_LIMIT_GB,
+                )
+                _notify(f"Server-Neustart (RAM: {rss_gb:.0f} GB) — bitte Scan fortsetzen")
+                _stop_server()
+                time.sleep(5)
+                _start_server()
+        except Exception as exc:
+            log.warning("Server-Watchdog: %s", exc)
+
+
 # ── Version ───────────────────────────────────────────────────────────────────
 
 def _local_version() -> str:
@@ -423,6 +468,7 @@ class ArchivioServer(rumps.App):
     def _boot(self):
         _start_server()
         threading.Thread(target=_ensure_ollama_models, daemon=True).start()
+        threading.Thread(target=_server_memory_watchdog, daemon=True).start()
         time.sleep(3)
         self._status_loop()
 
