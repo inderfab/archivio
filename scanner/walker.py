@@ -54,6 +54,13 @@ def _worker_watchdog_init(parent_pid: int) -> None:
     """
     extractors._IN_WORKER_PROCESS = True
 
+    # fitz-internen Cache begrenzen — verhindert unkontrolliertes Wachstum bei grossen PDFs
+    try:
+        import fitz
+        fitz.TOOLS.store_maxsize = 200 * 1024 * 1024  # 200 MB Cache-Limit
+    except Exception:
+        pass
+
     def _watch():
         while True:
             time.sleep(3)
@@ -75,22 +82,35 @@ def _track_pool(pool) -> None:
             with _worker_pids_lock:
                 _worker_pids.add(w.pid)
 
-_POLL_INTERVAL      = 5    # Sekunden zwischen RSS-Checks
+_POLL_INTERVAL      = 2    # Sekunden zwischen Speicher-Checks (vorher 5)
 _MAX_PDF_EXTRACT_MB = 500  # PDFs grösser als 500 MB werden nur registriert
 
 # RAM-Limits dynamisch je nach verfügbarem Systemspeicher
-def _auto_limits() -> tuple[float, int]:
-    """Gibt (_MAX_WORKER_RSS in GB, _TASK_TIMEOUT in Sekunden) zurück."""
+def _auto_limits() -> tuple[float, int, float]:
+    """Gibt (_MAX_WORKER_RSS in GB, _TASK_TIMEOUT in Sekunden, _MIN_FREE_GB) zurück."""
     try:
         import psutil
         total_gb = psutil.virtual_memory().total / (1024 ** 3)
     except Exception:
         total_gb = 16.0
-    rss_limit  = max(4.0, total_gb * 0.35)   # 35% des RAM (64 GB → ~22 GB)
-    timeout    = max(300, int(total_gb * 15)) # 15s pro GB RAM (64 GB → 960s)
-    return rss_limit, timeout
+    rss_limit  = max(3.0, total_gb * 0.20)   # 20% des RAM (64 GB → ~12.8 GB)
+    timeout    = max(120, int(total_gb * 10)) # 10s pro GB RAM (64 GB → 640s)
+    min_free   = max(4.0, total_gb * 0.20)   # Mindest-freier RAM im System (20%)
+    return rss_limit, timeout, min_free
 
-_MAX_WORKER_RSS, _TASK_TIMEOUT = _auto_limits()
+_MAX_WORKER_RSS, _TASK_TIMEOUT, _MIN_FREE_GB = _auto_limits()
+
+
+def _system_under_pressure() -> bool:
+    """True wenn das System systemweit unter Speicherdruck steht.
+    Misst verfügbaren RAM — reagiert auf Swap-Nutzung die RSS nicht zeigt.
+    """
+    try:
+        import psutil
+        vm = psutil.virtual_memory()
+        return (vm.available / (1024 ** 3)) < _MIN_FREE_GB
+    except Exception:
+        return False
 
 _LIST_ONLY_EXTENSIONS = {
     ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
@@ -255,6 +275,21 @@ def scan_project(project_id: int, root: Path,
             if cancel_flag and cancel_flag.get("cancel"):
                 log.info("Scan abgebrochen.")
                 break
+
+            # Vor jeder Datei: System-Speicher prüfen — wenn knapp, kurz warten
+            _pressure_waits = 0
+            while _system_under_pressure() and _pressure_waits < 6:
+                log.info("Speicherdruck — warte 10s vor nächster Datei (%s)", path.name)
+                time.sleep(10)
+                gc.collect()
+                _pressure_waits += 1
+            if _pressure_waits >= 6:
+                log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                if progress is not None:
+                    progress["processed"] += 1
+                    progress["errors"]    += 1
+                continue
+
             if progress is not None:
                 progress["current_file"] = path.name
 
@@ -262,17 +297,25 @@ def scan_project(project_id: int, root: Path,
             start  = time.monotonic()
             result = None
 
-            # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS prüfen
+            # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
             while result is None:
                 try:
                     result = ar.get(timeout=_POLL_INTERVAL)
                 except multiprocessing.TimeoutError:
                     elapsed = time.monotonic() - start
                     rss     = _worker_rss_gb(pool)
+                    pressure = _system_under_pressure()
 
                     if rss > _MAX_WORKER_RSS:
-                        log.warning("Worker RAM %.1f GB > %.1f GB — SIGKILL: %s",
+                        log.warning("Worker RSS %.1f GB > %.1f GB — SIGKILL: %s",
                                     rss, _MAX_WORKER_RSS, path.name)
+                        _kill_workers(pool)
+                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                        _track_pool(pool)
+                        result = "error"
+                    elif pressure:
+                        log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
                         _kill_workers(pool)
                         pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
                                         initializer=_worker_watchdog_init, initargs=(os.getpid(),))
