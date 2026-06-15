@@ -88,14 +88,14 @@ if [ ! -d "$VENV" ]; then
   echo "$(date): Erstinstallation – venv wird erstellt"
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip -q
-  "$VENV/bin/pip" install -r "$DIR/requirements.txt" -q
-  "$VENV/bin/pip" install rumps requests -q
+  "$VENV/bin/pip" install --prefer-binary -r "$DIR/requirements.txt" -q
+  "$VENV/bin/pip" install --prefer-binary rumps requests -q
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Installation abgeschlossen"
 elif [ "$(cat $VERSION_STAMP 2>/dev/null)" != "$CURRENT_VERSION" ]; then
   echo "$(date): Neue Version $CURRENT_VERSION – Abhängigkeiten aktualisieren"
-  "$VENV/bin/pip" install -q -r "$DIR/requirements.txt" >/dev/null 2>&1 || true
-  "$VENV/bin/pip" install -q rumps requests >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q --prefer-binary -r "$DIR/requirements.txt" >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q --prefer-binary rumps requests >/dev/null 2>&1 || true
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Abhängigkeiten aktualisiert"
 fi

@@ -176,7 +176,17 @@
 
 <div id="results">
   <div class="empty-state">
+    {% if total_docs == 0 %}
+    <p>Noch keine Dokumente in der Datenbank.</p>
+    <p style="font-size:12px;color:var(--text-2);margin-top:6px;">
+      Damit Archivio auf Dokumente und NAS-Ordner zugreifen kann, muss
+      <strong>Festplattenvollzugriff</strong> erteilt sein.<br>
+      <em>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff → Archivio Server ✓</em><br>
+      Danach im <a href="/dashboard">Dashboard</a> einen Scan starten.
+    </p>
+    {% else %}
     <p>Suchbegriff eingeben um Dokumente zu finden.</p>
+    {% endif %}
   </div>
 </div>
 

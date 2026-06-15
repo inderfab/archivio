@@ -278,6 +278,7 @@ async def index(request: Request):
     raw_mailboxes = conn.execute(
         "SELECT mailbox_name FROM mail_scan_config WHERE active=1 AND project_id IS NULL ORDER BY mailbox_name"
     ).fetchall()
+    total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     conn.close()
     mail_mailboxes = [
         {"mailbox_name": r["mailbox_name"], "display_name": _mailbox_display_name(r["mailbox_name"])}
@@ -287,6 +288,7 @@ async def index(request: Request):
         "request":        request,
         "projects":       projects,
         "mail_mailboxes": mail_mailboxes,
+        "total_docs":     total_docs,
     })
 
 
