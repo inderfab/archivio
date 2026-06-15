@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import logging
 import logging.handlers
+import os
 import re
+import signal
 import subprocess
 import sys
 import threading
@@ -107,9 +109,22 @@ async def lifespan(app: FastAPI):
     except Exception as _e:
         import logging
         logging.getLogger(__name__).warning("Migration fehlgeschlagen: %s", _e)
+    # SIGTERM → alle Scanner-Worker sofort killen bevor Prozess endet
+    def _sigterm(sig, frame):
+        from scanner.walker import kill_all_workers
+        kill_all_workers()
+        raise SystemExit(0)
+    try:
+        signal.signal(signal.SIGTERM, _sigterm)
+    except Exception:
+        pass
+
     threading.Thread(target=_scheduler_loop, daemon=True).start()
     threading.Thread(target=_resume_embeddings_on_startup, daemon=True).start()
     yield
+    # Shutdown: alle Worker killen
+    from scanner.walker import kill_all_workers
+    kill_all_workers()
 
 
 app = FastAPI(title="Archivio", lifespan=lifespan)

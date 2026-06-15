@@ -6,6 +6,7 @@ Erlaubt:  open(..., 'rb'), open(..., 'r'), Path.stat(), os.walk(), Path.is_file(
 """
 from __future__ import annotations
 
+import atexit
 import gc
 import logging
 import multiprocessing
@@ -21,6 +22,58 @@ from db import connection, queries
 from scanner import hasher, extractors
 
 log = logging.getLogger(__name__)
+
+# ── Globales Worker-PID-Register ──────────────────────────────────────────────
+# Alle laufenden Scanner-Worker-PIDs — überlebt Pool-Neuerstellungen.
+# Wird von atexit + SIGTERM-Handler genutzt um Worker beim App-Quit zu killen.
+_worker_pids: set[int] = set()
+_worker_pids_lock      = threading.Lock()
+
+
+def kill_all_workers() -> None:
+    """SIGKILL alle bekannten Scanner-Worker — für Cancel, App-Quit, SIGTERM."""
+    with _worker_pids_lock:
+        pids = list(_worker_pids)
+        _worker_pids.clear()
+    for pid in pids:
+        try:
+            os.kill(pid, signal.SIGKILL)
+            log.info("kill_all_workers: SIGKILL → PID %d", pid)
+        except ProcessLookupError:
+            pass
+        except Exception as exc:
+            log.warning("kill_all_workers PID %d: %s", pid, exc)
+
+
+atexit.register(kill_all_workers)
+
+
+def _worker_watchdog_init(parent_pid: int) -> None:
+    """Läuft im Worker-Prozess: Watchdog-Thread der Parent überwacht.
+    Wenn Parent stirbt (App-Quit ohne sauberes Cleanup) → SIGKILL sich selbst.
+    """
+    extractors._IN_WORKER_PROCESS = True
+
+    def _watch():
+        while True:
+            time.sleep(3)
+            try:
+                os.kill(parent_pid, 0)  # prüft ob Parent-Prozess noch existiert
+            except ProcessLookupError:
+                os.kill(os.getpid(), signal.SIGKILL)
+            except Exception:
+                pass
+
+    t = threading.Thread(target=_watch, daemon=True)
+    t.start()
+
+
+def _track_pool(pool) -> None:
+    """Trägt Worker-PIDs des Pools in die globale Menge ein."""
+    for w in getattr(pool, "_pool", []):
+        if w.pid:
+            with _worker_pids_lock:
+                _worker_pids.add(w.pid)
 
 _POLL_INTERVAL      = 5    # Sekunden zwischen RSS-Checks
 _MAX_PDF_EXTRACT_MB = 500  # PDFs grösser als 500 MB werden nur registriert
@@ -63,7 +116,6 @@ def _excluded_folders() -> set[str]:
 
 def _scan_file_worker(args: tuple) -> str:
     """Verarbeitet eine einzelne Datei im Pool-Prozess."""
-    extractors._IN_WORKER_PROCESS = True
     project_id, path_str = args
     conn = connection.get_connection()
     try:
@@ -82,35 +134,37 @@ def _scan_file_worker(args: tuple) -> str:
 
 
 def _kill_workers(pool) -> None:
-    """SIGKILL alle Worker-Prozesse und wartet mit Timeout.
-
-    pool.terminate() ruft intern _worker_handler.join() OHNE Timeout auf —
-    das kann hängen wenn der Pool gerade einen neuen Worker startet
-    (nach maxtasksperchild-Ersatz). Daher: terminate() in Daemon-Thread
-    mit 5s Timeout, danach Worker direkt joinen."""
+    """SIGKILL alle Worker — sofort, ohne auf pool.terminate() zu warten."""
     workers = list(getattr(pool, "_pool", []))
+
+    # Alle bekannten PIDs (Pool + globales Register) sofort killen
+    pids: set[int] = set()
     for w in workers:
+        if getattr(w, "pid", None):
+            pids.add(w.pid)
+    with _worker_pids_lock:
+        pids.update(_worker_pids)
+
+    for pid in pids:
         try:
-            if w.is_alive():
-                os.kill(w.pid, signal.SIGKILL)
-                log.info("SIGKILL → Worker PID %d", w.pid)
-        except Exception:
+            os.kill(pid, signal.SIGKILL)
+            log.info("SIGKILL → Worker PID %d", pid)
+        except ProcessLookupError:
             pass
+        except Exception as exc:
+            log.warning("SIGKILL PID %d: %s", pid, exc)
+
+    with _worker_pids_lock:
+        for pid in pids:
+            _worker_pids.discard(pid)
+
+    # pool.terminate() im Hintergrund — räumt interne Queues auf, darf hängen
     def _do_terminate():
         try:
             pool.terminate()
         except Exception:
             pass
-    t = threading.Thread(target=_do_terminate, daemon=True)
-    t.start()
-    t.join(timeout=5)
-    if t.is_alive():
-        log.warning("pool.terminate() nach 5s nicht fertig — Cleanup im Hintergrund")
-    for w in workers:
-        try:
-            w.join(timeout=10)
-        except Exception:
-            pass
+    threading.Thread(target=_do_terminate, daemon=True).start()
 
 
 def _worker_rss_gb(pool) -> float:
@@ -188,7 +242,13 @@ def scan_project(project_id: int, root: Path,
         progress["errors"]    = 0
 
     ctx = multiprocessing.get_context("spawn")
-    pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+    pool = ctx.Pool(
+        processes=1,
+        maxtasksperchild=tasks_per_worker,
+        initializer=_worker_watchdog_init,
+        initargs=(os.getpid(),),
+    )
+    _track_pool(pool)
 
     try:
         for path in batch:
@@ -214,13 +274,17 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Worker RAM %.1f GB > %.1f GB — SIGKILL: %s",
                                     rss, _MAX_WORKER_RSS, path.name)
                         _kill_workers(pool)
-                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                        _track_pool(pool)
                         result = "error"
                     elif elapsed > _TASK_TIMEOUT:
                         log.warning("Datei-Timeout (%ds): %s — SIGKILL",
                                     _TASK_TIMEOUT, path.name)
                         _kill_workers(pool)
-                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker)
+                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                        _track_pool(pool)
                         result = "error"
                 except Exception as exc:
                     log.warning("Pool-Fehler bei %s: %s", path.name, exc)
