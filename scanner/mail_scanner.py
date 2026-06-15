@@ -154,16 +154,15 @@ def extract_text_part(message) -> str:
 
 
 def extract_attachments_metadata(message) -> list[dict]:
+    """Nur Dateinamen — kein get_payload(decode=True), kein Anhang-RAM."""
     attachments = []
     for part in message.walk():
         filename = part.get_filename()
         if not filename:
             continue
-        fname    = decode_mime_header(filename)
-        ext      = Path(fname).suffix.lower()
-        payload  = part.get_payload(decode=True)
-        size     = len(payload) if payload else 0
-        attachments.append({"name": fname, "extension": ext, "size": size})
+        fname = decode_mime_header(filename)
+        ext   = Path(fname).suffix.lower()
+        attachments.append({"name": fname, "extension": ext})
     return attachments
 
 
@@ -177,7 +176,11 @@ def build_email_record(message, mailbox: str) -> dict:
     raw_text       = extract_text_part(message)
     attachments    = extract_attachments_metadata(message)
 
-    sender = f"{sender_name} <{sender_email}>".strip(" <>") if sender_email else sender_name
+    sender  = f"{sender_name} <{sender_email}>".strip(" <>") if sender_email else sender_name
+    cleaned = clean_mail_text(raw_text)
+    if attachments:
+        att_line = "Anhänge: " + ", ".join(a["name"] for a in attachments)
+        cleaned  = (cleaned + "\n\n" + att_line) if cleaned else att_line
 
     return {
         "message_id":   message_id,
@@ -187,7 +190,7 @@ def build_email_record(message, mailbox: str) -> dict:
         "cc":           cc_emails,
         "subject":      subject,
         "raw_text":     raw_text,
-        "cleaned_text": clean_mail_text(raw_text),
+        "cleaned_text": cleaned,
         "attachments":  attachments,
         "thread_id":    in_reply_to,
         "mailbox":      mailbox,
@@ -366,8 +369,12 @@ def _fetch_header(client: imaplib.IMAP4_SSL, uid):
     return message_from_bytes(data[0][1])
 
 
+_MAX_MAIL_FETCH = 524288  # 512 KB — Header + Text, keine Anhang-Daten via IMAP
+
+
 def _fetch_full(client: imaplib.IMAP4_SSL, uid):
-    status, data = client.fetch(uid, "(RFC822)")
+    """Partial-Fetch: nur erste 512 KB — reicht für Header + Text, keine Anhänge im RAM."""
+    status, data = client.fetch(uid, f"(BODY.PEEK[]<0.{_MAX_MAIL_FETCH}>)")
     if status != "OK" or not data or data[0] is None:
         raise RuntimeError(f"Mail-Abruf fehlgeschlagen UID {uid!r}")
     return message_from_bytes(data[0][1])

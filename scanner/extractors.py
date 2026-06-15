@@ -540,32 +540,54 @@ def extract_xlsx(path: Path) -> tuple[str, str]:
 
 # ── EML ───────────────────────────────────────────────────────────────────────
 
+_MAX_EML_BYTES = 524288  # 512 KB — Header + Text, keine Anhang-Binärdaten in RAM
+
+
 def extract_eml(path: Path) -> tuple[str, str]:
     import email
-    from email import policy
     try:
-        # READ-ONLY: NAS darf nie verändert werden — öffnet nur mit 'rb'
+        # Nur erste 512 KB lesen: Anhänge (Base64-Blöcke) kommen danach — nie in RAM
         with open(path, "rb") as f:
-            msg = email.message_from_binary_file(f, policy=policy.default)
+            raw = f.read(_MAX_EML_BYTES)
+        msg = email.message_from_bytes(raw)
 
         parts = []
-        subject = msg.get("subject", "")
-        sender  = msg.get("from", "")
+        subject  = msg.get("subject", "")
+        sender   = msg.get("from", "")
+        to_addr  = msg.get("to", "")
         if subject:
             parts.append(f"Betreff: {subject}")
         if sender:
             parts.append(f"Von: {sender}")
+        if to_addr:
+            parts.append(f"An: {to_addr}")
 
+        att_names = []
         if msg.is_multipart():
             for part in msg.walk():
-                if part.get_content_type() == "text/plain":
-                    payload = part.get_payload(decode=True)
-                    if payload:
-                        parts.append(payload.decode(part.get_content_charset() or "utf-8", errors="replace"))
+                fname = part.get_filename()
+                if fname:
+                    att_names.append(fname)
+                    continue  # Anhang: nur Dateiname, kein Inhalt
+                disp = part.get("Content-Disposition", "") or ""
+                if part.get_content_type() == "text/plain" and "attachment" not in disp:
+                    try:
+                        payload = part.get_payload(decode=True)
+                        if payload:
+                            charset = part.get_content_charset() or "utf-8"
+                            parts.append(payload.decode(charset, errors="replace"))
+                    except Exception:
+                        pass
         else:
-            payload = msg.get_payload(decode=True)
-            if payload:
-                parts.append(payload.decode(msg.get_content_charset() or "utf-8", errors="replace"))
+            try:
+                payload = msg.get_payload(decode=True)
+                if payload:
+                    parts.append(payload.decode(msg.get_content_charset() or "utf-8", errors="replace"))
+            except Exception:
+                pass
+
+        if att_names:
+            parts.append("Anhänge: " + ", ".join(att_names))
 
         return "\n".join(parts), ""
     except Exception as exc:
