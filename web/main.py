@@ -305,8 +305,15 @@ async def search(
     date_to:         str = Query(default=""),
     filesize:        str = Query(default=""),
     duplicates_only: str = Query(default=""),
-    show_folders:    str = Query(default=""),
+    search_in:       str = Query(default="docs"),
 ):
+    scope = set(search_in.split(",")) if search_in else {"docs"}
+    if not scope:
+        scope = {"docs"}
+    search_docs      = "docs" in scope
+    search_filenames = "filenames" in scope
+    search_folders   = "folders" in scope
+
     results, error, total = [], None, 0
     folder_results = []
     has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only])
@@ -316,10 +323,27 @@ async def search(
             project_id, type, from_addr, to_addr, subject_filter,
             date_from, date_to, filesize, duplicates_only,
         )
-        results, error = _search(conn, q.strip(), filters_str, filter_params)
-        total = len(results)
-        if show_folders and q.strip():
+        if search_docs and search_filenames:
+            results, error = _search(conn, q.strip(), filters_str, filter_params)
+        elif search_docs:
+            if q.strip():
+                results, error = _search_fts(conn, q.strip(), filters_str, filter_params)
+                if not results and not error:
+                    results, error = _search_like(conn, q.strip(), filters_str, filter_params)
+                    for r in results:
+                        r["fallback"] = True
+            else:
+                results, error = _search_filtered(conn, filters_str, filter_params)
+        elif search_filenames:
+            if q.strip():
+                results = _search_filename(conn, q.strip(), filters_str, filter_params)
+                results.sort(key=lambda r: _filename_score(r.get("filename", ""), q.strip()), reverse=True)
+                error = None
+            else:
+                results, error = _search_filtered(conn, filters_str, filter_params)
+        if search_folders and q.strip():
             folder_results = _search_folders(conn, q.strip(), project_id)
+        total = len(results)
         conn.close()
     return templates.TemplateResponse("search_results.html", {
         "request":        request,
@@ -328,7 +352,6 @@ async def search(
         "total":          total,
         "error":          error,
         "folder_results": folder_results,
-        "show_folders":   bool(show_folders),
     })
 
 
@@ -419,11 +442,27 @@ def _rerank_by_answer(sources: list, answer: str) -> list:
 
 
 def _filename_score(filename: str, q: str) -> int:
-    """Gibt Anzahl der Suchwörter zurück die im Dateinamen vorkommen (Stoppwörter ignoriert)."""
+    """Höherer Score = bessere Übereinstimmung mit Dateiname.
+    Stufen pro Suchwort: exakter Stem-Treffer (100) > Stem beginnt mit Wort (40)
+    > ganzes Token im Stem (20) > Substring irgendwo (5).
+    """
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.lower().split()]
     words = [w for w in words if w and w not in _STOPWORDS]
-    fn = filename.lower()
-    return sum(1 for w in words if w in fn)
+    if not words:
+        return 0
+    stem = re.sub(r'\.[^.]+$', '', filename.lower())  # extension entfernen
+    fn   = filename.lower()
+    score = 0
+    for w in words:
+        if stem == w:
+            score += 100
+        elif stem.startswith(w):
+            score += 40
+        elif re.search(r'(?<![a-z0-9À-ÿ])' + re.escape(w) + r'(?![a-z0-9À-ÿ])', stem):
+            score += 20
+        elif w in fn:
+            score += 5
+    return score
 
 def _search(conn, q: str, filters: str, filter_params: list):
     if not q:
