@@ -1526,6 +1526,45 @@ async def diagnostics():
             _chk(f"Ordner [{lbl}]", path, ok=False,
                  detail="Kein Lesezugriff — Festplattenvollzugriff prüfen")
 
+    # DB-Qualität
+    try:
+        from db import connection as _dbc
+        _conn = _dbc.get_connection()
+        status_counts = {r[0]: r[1] for r in _conn.execute(
+            "SELECT extraction_status, COUNT(*) FROM documents GROUP BY extraction_status"
+        ).fetchall()}
+        total_docs = sum(status_counts.values())
+        ok_docs   = status_counts.get("ok", 0)
+        err_docs  = status_counts.get("error", 0)
+        pend_docs = status_counts.get("pending", 0)
+        unsup_docs = status_counts.get("unsupported", 0)
+        doc_ok = err_docs == 0
+        _chk(
+            "Dokumente gesamt", str(total_docs),
+            ok=True if doc_ok else None,
+            detail=f"ok: {ok_docs}, Fehler: {err_docs}, ausstehend: {pend_docs}, nicht unterstützt: {unsup_docs}"
+        )
+        total_chunks = _conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
+        missing_emb  = _conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL").fetchone()[0]
+        docs_no_chunk = _conn.execute(
+            "SELECT COUNT(*) FROM documents d WHERE extraction_status='ok' "
+            "AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)"
+        ).fetchone()[0]
+        emb_ok = missing_emb == 0
+        _chk(
+            "Embeddings",
+            f"{total_chunks - missing_emb} / {total_chunks} Chunks",
+            ok=emb_ok if total_chunks > 0 else None,
+            detail=(
+                f"{missing_emb} Chunks ohne Embedding — Scan oder Backfill starten"
+                if not emb_ok else
+                (f"{docs_no_chunk} Dokumente ohne Chunks" if docs_no_chunk else "")
+            )
+        )
+        _conn.close()
+    except Exception as _exc:
+        _chk("DB-Qualität", str(_exc), ok=False)
+
     # HTML rendern
     rows = []
     for c in checks:
