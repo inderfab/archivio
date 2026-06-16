@@ -736,8 +736,18 @@ def _excerpt(text: str, query: str, window: int = 220) -> str:
 
 
 def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[dict]:
-    """Sucht per documents_fts nach Dateinamen-Treffern (chunks_fts hat keine Dateinamen)."""
-    fts_q = _make_fts_query(q)
+    """Sucht per documents_fts nach Dateinamen-Treffern — nur filename-Spalte, nicht content."""
+    # Column-Filter: nur filename-Spalte durchsuchen (documents_fts hat auch content)
+    words = []
+    for w in q.split():
+        w = re.sub(r'["\(\)\*\:\^]', "", w)
+        for part in w.split('.'):
+            part = part.strip()
+            if part and part.lower() not in _STOPWORDS:
+                words.append(part)
+    if not words:
+        return []
+    fts_q = " AND ".join(f"filename:{w}*" for w in words)
     sql = f"""
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
