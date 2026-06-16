@@ -30,7 +30,18 @@
       onchange="updateChips()">
       <option value="">Alle Projekte</option>
       {% for p in projects %}
-      <option value="{{ p.id }}">{{ p.name }}</option>
+        {% if p.children %}
+          <optgroup label="{{ p.name }}">
+            <option value="{{ p.id }}">{{ p.name }} (alle)</option>
+            {% for c in p.children %}
+            <option value="{{ c.id }}">↳ {{ c.name }}</option>
+            {% endfor %}
+          </optgroup>
+        {% else %}
+          <option value="{{ p.id }}"{% if p.parent_name %} style="padding-left:8px;"{% endif %}>
+            {%- if p.parent_name %}↳ {{ p.parent_name }} — {{ p.name }}{% else %}{{ p.name }}{% endif -%}
+          </option>
+        {% endif %}
       {% endfor %}
       {% if mail_mailboxes %}
       <optgroup label="── Postfächer ──">

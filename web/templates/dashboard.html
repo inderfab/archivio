@@ -136,6 +136,52 @@
       });
   }
 
+  document.body.addEventListener('archivio:projectListChanged', function() {
+    htmx.ajax('GET', '/dashboard/projects', { target: '#project-list', swap: 'innerHTML' });
+  });
+
+  document.body.addEventListener('archivio:browseProjectChanged', function(evt) {
+    var path = evt.detail.path;
+    var isProject = evt.detail.is_project;
+    var btn = null;
+    document.querySelectorAll('.browse-entry').forEach(function(el) {
+      if (el.dataset.path === path) btn = el;
+    });
+    if (!btn) return;
+    var old = btn.querySelector('.browse-project-badge, .browse-subproject-badge, .browse-arrow');
+    if (isProject) {
+      btn.classList.add('browse-is-project');
+      btn.classList.remove('browse-has-subproject');
+      if (old) old.remove();
+      var badge = document.createElement('span');
+      badge.className = 'browse-project-badge';
+      badge.textContent = '◆';
+      btn.appendChild(badge);
+    } else {
+      btn.classList.remove('browse-is-project');
+      if (old) old.remove();
+      if (btn.dataset.hasChildren === 'true') {
+        var arrow = document.createElement('span');
+        arrow.className = 'browse-arrow';
+        arrow.textContent = '▶';
+        btn.appendChild(arrow);
+      }
+    }
+  });
+
+  document.body.addEventListener('archivio:ignoredLevel', function(evt) {
+    var parent = evt.detail.parent_path;
+    if (!parent) return;
+    var ignored = evt.detail.ignored !== false; // default: true
+    document.querySelectorAll('.browse-entry').forEach(function(el) {
+      var p = el.dataset.path || '';
+      var entryParent = p.substring(0, p.lastIndexOf('/'));
+      if (entryParent === parent) {
+        updateBrowseEntry(p, ignored);
+      }
+    });
+  });
+
   function selectEntry(el, projectId, path) {
     document.querySelectorAll('.browse-entry').forEach(function(e) {
       e.classList.remove('selected');

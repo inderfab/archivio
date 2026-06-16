@@ -291,31 +291,9 @@ def scan_project(project_id: int, root: Path,
             progress["error"] = msg
         return
 
-    batch: list[Path] = []
-    for dirpath, dirnames, filenames in os.walk(root):
-        dirnames[:] = [
-            d for d in dirnames
-            if not d.startswith('.')
-            and not any(excl in unicodedata.normalize('NFC', d.lower())
-                        for excl in excluded)
-        ]
-        for filename in filenames:
-            if filename.startswith('.'):
-                continue
-            path = Path(dirpath) / filename
-            if path.suffix.lower() not in supported:
-                continue
-            batch.append(path)
-
-    if not batch:
-        log.warning("Scan: 0 Dateien gefunden in %s", root)
-        return
-
-    log.info("Scan: %d Dateien in %s", len(batch), root)
-
     if progress is not None:
         progress["phase"]     = "processing"
-        progress["total"]     = len(batch)
+        progress["total"]     = 0
         progress["processed"] = 0
         progress["new"]       = 0
         progress["skipped"]   = 0
@@ -332,83 +310,103 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
+    found_any = False
     try:
-        for path in batch:
-            if cancel_flag and cancel_flag.get("cancel"):
-                log.info("Scan abgebrochen.")
-                break
+        for dirpath, dirnames, filenames in os.walk(root):
+            dirnames[:] = [
+                d for d in dirnames
+                if not d.startswith('.')
+                and not any(excl in unicodedata.normalize('NFC', d.lower())
+                            for excl in excluded)
+            ]
+            for filename in filenames:
+                if filename.startswith('.'):
+                    continue
+                path = Path(dirpath) / filename
+                if path.suffix.lower() not in supported:
+                    continue
+                found_any = True
+                if progress is not None:
+                    progress["total"] += 1
 
-            # Vor jeder Datei: System-Speicher prüfen — wenn knapp, kurz warten
-            _pressure_waits = 0
-            while _system_under_pressure() and _pressure_waits < 6:
-                log.info("Speicherdruck — warte 10s vor nächster Datei (%s)", path.name)
-                time.sleep(10)
-                gc.collect()
-                _pressure_waits += 1
-            if _pressure_waits >= 6:
-                log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                if cancel_flag and cancel_flag.get("cancel"):
+                    log.info("Scan abgebrochen.")
+                    return
+
+                # Vor jeder Datei: System-Speicher prüfen — wenn knapp, kurz warten
+                _pressure_waits = 0
+                while _system_under_pressure() and _pressure_waits < 6:
+                    log.info("Speicherdruck — warte 10s vor nächster Datei (%s)", path.name)
+                    time.sleep(10)
+                    gc.collect()
+                    _pressure_waits += 1
+                if _pressure_waits >= 6:
+                    log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                    if progress is not None:
+                        progress["processed"] += 1
+                        progress["errors"]    += 1
+                    continue
+
+                if progress is not None:
+                    progress["current_file"] = path.name
+
+                ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
+                start  = time.monotonic()
+                result = None
+
+                # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
+                while result is None:
+                    try:
+                        result = ar.get(timeout=_POLL_INTERVAL)
+                    except multiprocessing.TimeoutError:
+                        elapsed  = time.monotonic() - start
+                        rss      = _total_workers_rss_gb()   # ALLE PIDs, nicht nur pool._pool
+                        pressure = _system_under_pressure()
+
+                        if rss > _MAX_WORKER_RSS:
+                            log.warning("Worker RSS %.1f GB > %.1f GB — SIGKILL: %s",
+                                        rss, _MAX_WORKER_RSS, path.name)
+                            _kill_workers(pool)
+                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                            initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                            _track_pool(pool)
+                            result = "error"
+                        elif pressure:
+                            log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
+                            _kill_workers(pool)
+                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                            initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                            _track_pool(pool)
+                            result = "error"
+                        elif elapsed > _TASK_TIMEOUT:
+                            log.warning("Datei-Timeout (%ds): %s — SIGKILL",
+                                        _TASK_TIMEOUT, path.name)
+                            _kill_workers(pool)
+                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                                            initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                            _track_pool(pool)
+                            result = "error"
+                    except Exception as exc:
+                        log.warning("Pool-Fehler bei %s: %s", path.name, exc)
+                        result = "error"
+
                 if progress is not None:
                     progress["processed"] += 1
-                    progress["errors"]    += 1
-                continue
+                    if result == "new":       progress["new"] += 1
+                    elif result == "skipped": progress["skipped"] += 1
+                    else:                     progress["errors"] += 1
 
-            if progress is not None:
-                progress["current_file"] = path.name
+                # WAL-Checkpoint alle 100 Dateien
+                if progress is not None and progress["processed"] % 100 == 0:
+                    try:
+                        _wal_conn = connection.get_connection()
+                        _wal_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        _wal_conn.close()
+                    except Exception:
+                        pass
 
-            ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
-            start  = time.monotonic()
-            result = None
-
-            # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
-            while result is None:
-                try:
-                    result = ar.get(timeout=_POLL_INTERVAL)
-                except multiprocessing.TimeoutError:
-                    elapsed  = time.monotonic() - start
-                    rss      = _total_workers_rss_gb()   # ALLE PIDs, nicht nur pool._pool
-                    pressure = _system_under_pressure()
-
-                    if rss > _MAX_WORKER_RSS:
-                        log.warning("Worker RSS %.1f GB > %.1f GB — SIGKILL: %s",
-                                    rss, _MAX_WORKER_RSS, path.name)
-                        _kill_workers(pool)
-                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
-                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
-                        _track_pool(pool)
-                        result = "error"
-                    elif pressure:
-                        log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
-                        _kill_workers(pool)
-                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
-                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
-                        _track_pool(pool)
-                        result = "error"
-                    elif elapsed > _TASK_TIMEOUT:
-                        log.warning("Datei-Timeout (%ds): %s — SIGKILL",
-                                    _TASK_TIMEOUT, path.name)
-                        _kill_workers(pool)
-                        pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
-                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
-                        _track_pool(pool)
-                        result = "error"
-                except Exception as exc:
-                    log.warning("Pool-Fehler bei %s: %s", path.name, exc)
-                    result = "error"
-
-            if progress is not None:
-                progress["processed"] += 1
-                if result == "new":       progress["new"] += 1
-                elif result == "skipped": progress["skipped"] += 1
-                else:                     progress["errors"] += 1
-
-            # WAL-Checkpoint alle 100 Dateien
-            if progress is not None and progress["processed"] % 100 == 0:
-                try:
-                    _wal_conn = connection.get_connection()
-                    _wal_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
-                    _wal_conn.close()
-                except Exception:
-                    pass
+        if not found_any:
+            log.warning("Scan: 0 Dateien gefunden in %s", root)
 
     finally:
         _kill_workers(pool)

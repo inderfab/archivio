@@ -4,7 +4,7 @@
   {% elif subdirs %}
     {% for d in subdirs %}
     <button
-      class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }}"
+      class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }} {{ 'browse-is-project' if d.is_project else 'browse-has-subproject' if d.has_subproject else '' }}"
       data-path="{{ d.path }}"
       data-excluded="{{ 'true' if d.excluded else 'false' }}"
       data-has-children="{{ 'true' if d.has_children else 'false' }}"
@@ -26,6 +26,10 @@
         <span class="browse-tag">ignoriert</span>
       {% elif d.excluded %}
         <span class="browse-tag">ausgeschlossen</span>
+      {% elif d.is_project %}
+        <span class="browse-project-badge">◆</span>
+      {% elif d.has_subproject %}
+        <span class="browse-subproject-badge">◈</span>
       {% elif d.has_children %}
         <span class="browse-arrow">▶</span>
       {% endif %}

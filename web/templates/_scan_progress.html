@@ -15,8 +15,8 @@
     <div class="spb-phase" style="color:#b91c1c; font-size:12px; margin-top:4px;">{{ error }}</div>
   {% endif %}
 
-  {% if phase == "collecting" and status == "running" %}
-    <div class="spb-phase">Dateien werden gesammelt…</div>
+  {% if status == "running" and processed == 0 and total == 0 %}
+    <div class="spb-phase">Ordner wird durchsucht…</div>
   {% elif total > 0 %}
     <div class="spb-bar-wrap">
       <div class="spb-bar-fill" style="width: {{ percent }}%"></div>

@@ -1,0 +1,97 @@
+{% if not subfolders %}
+<div style="font-size:12px; color:var(--text-3); padding:10px 14px;">Keine Unterordner gefunden.</div>
+{% else %}
+{% for sf in subfolders %}
+<div class="project-entry" style="margin:0; border-radius:0; border-bottom:1px solid var(--border); border-top:none;">
+
+  <div class="project-row" style="padding:10px 14px;">
+
+    {# Toggle — aktiviert/deaktiviert als eigenes Projekt #}
+    {% if sf.is_project %}
+    <form hx-post="/dashboard/projects/{{ project_id }}/subfolders/deactivate"
+          hx-target="#subfolders-{{ project_id }}"
+          hx-swap="innerHTML"
+          style="display:contents;">
+      <input type="hidden" name="subproject_id" value="{{ sf.project_id }}">
+      <button type="submit" class="project-toggle on" title="Als eigenes Projekt deaktivieren"></button>
+    </form>
+    {% else %}
+    <form hx-post="/dashboard/projects/{{ project_id }}/subfolders/activate"
+          hx-target="#subfolders-{{ project_id }}"
+          hx-swap="innerHTML"
+          style="display:contents;">
+      <input type="hidden" name="path" value="{{ sf.path }}">
+      <button type="submit" class="project-toggle" title="Als eigenes Projekt aktivieren"></button>
+    </form>
+    {% endif %}
+
+    {# Info #}
+    <div style="flex:1; min-width:0;">
+      <div class="project-name" style="font-size:13px;">{{ sf.name }}</div>
+      {% if sf.is_project %}
+        <div class="project-meta">
+          {{ sf.doc_count }} Dokumente{% if sf.last_scan %} · Scan: {{ sf.last_scan }}{% endif %}
+        </div>
+      {% else %}
+        <div class="project-meta" style="color:var(--text-3);">kein eigenes Projekt</div>
+      {% endif %}
+      <div class="project-path">{{ sf.path }}</div>
+    </div>
+
+    {# Aktionen — nur für aktive Sub-Projekte #}
+    {% if sf.is_project %}
+    <div class="project-actions">
+      {% if sf.scan_status == 'running' %}
+        <span class="scan-running-wrap"
+              hx-get="/dashboard/projects/{{ sf.project_id }}/scan-status"
+              hx-trigger="every 3s" hx-swap="outerHTML">
+          <span class="scan-badge running">Scannt…</span>
+          <button class="btn btn-cancel" style="margin-left:6px;"
+                  hx-post="/dashboard/projects/{{ sf.project_id }}/scan/cancel"
+                  hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>
+        </span>
+      {% elif sf.scan_status == 'done' %}
+        <span class="scan-badge done">✓ fertig</span>
+      {% elif sf.scan_status == 'error' %}
+        <span class="scan-badge error">Fehler</span>
+      {% else %}
+        <form hx-post="/dashboard/projects/{{ sf.project_id }}/scan"
+              hx-swap="outerHTML"
+              hx-target="find button[type=submit]"
+              style="display:contents;">
+          <button type="submit" class="btn btn-primary">Jetzt scannen</button>
+        </form>
+      {% endif %}
+
+      <button class="btn"
+              onclick="toggleBrowser({{ sf.project_id }}, '{{ sf.path | replace("'", "\\'") }}', '{{ sf.name | replace("'", "\\'") }}')">
+        Browser ▸
+      </button>
+
+      <button class="btn"
+              onclick="toggleSubfolders({{ sf.project_id }}, this)">
+        Unterordner ▸
+      </button>
+    </div>
+    {% endif %}
+
+  </div>
+
+  {# Inline Browser (gleiche Logik wie Hauptprojekte) #}
+  {% if sf.is_project %}
+  <div id="browser-{{ sf.project_id }}" style="display:none; border-top:1px solid var(--border);">
+    <div class="browser-body">
+      <div id="browse-cols-{{ sf.project_id }}" class="browse-cols"></div>
+      <div id="detail-panel-{{ sf.project_id }}" class="detail-panel" style="display:none;"></div>
+    </div>
+  </div>
+
+  {# Rekursive Unterordner #}
+  <div id="subfolders-{{ sf.project_id }}"
+       style="display:none; border-top:1px solid var(--border); padding-left:16px; background:var(--bg-2);">
+  </div>
+  {% endif %}
+
+</div>
+{% endfor %}
+{% endif %}

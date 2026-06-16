@@ -486,6 +486,11 @@ async def browse(
             "SELECT path FROM ignored_paths WHERE project_id=?", (project_id,)
         ).fetchall()
     }
+    project_paths = {
+        r["path"] for r in conn.execute(
+            "SELECT path FROM projects WHERE active=1"
+        ).fetchall()
+    }
     conn.close()
 
     excluded = {unicodedata.normalize('NFC', f.lower()) for f in settings.get("scanner.excluded_folders", [])}
@@ -497,12 +502,15 @@ async def browse(
             for entry in sorted(it, key=lambda e: e.name.lower()):
                 if not entry.is_dir() or entry.name.startswith('.'):
                     continue
+                ep = entry.path
                 subdirs.append({
-                    "name":         entry.name,
-                    "path":         entry.path,
-                    "ignored":      entry.path in ignored,
-                    "excluded":     any(excl in unicodedata.normalize('NFC', entry.name.lower()) for excl in excluded),
-                    "has_children": _has_subdirs(entry.path),
+                    "name":           entry.name,
+                    "path":           ep,
+                    "ignored":        ep in ignored,
+                    "excluded":       any(excl in unicodedata.normalize('NFC', entry.name.lower()) for excl in excluded),
+                    "has_children":   _has_subdirs(ep),
+                    "is_project":     ep in project_paths,
+                    "has_subproject": any(p.startswith(ep + "/") for p in project_paths),
                 })
     except PermissionError:
         log.warning("Kein Zugriff auf Ordner: %s (macOS Full Disk Access prüfen)", path)
@@ -541,6 +549,10 @@ async def folder_detail(
         JOIN documents d ON d.id = dp.document_id
         WHERE d.project_id = ? AND dp.path LIKE ?
     """, (project_id, f"{path}%")).fetchone()[0]
+
+    sub_project = conn.execute(
+        "SELECT id FROM projects WHERE path=? AND active=1", (path,)
+    ).fetchone()
     conn.close()
 
     file_count = 0
@@ -551,14 +563,126 @@ async def folder_detail(
         pass
 
     return templates.TemplateResponse("_dashboard_detail.html", {
-        "request":       request,
-        "path":          path,
-        "folder_name":   Path(path).name,
-        "project_id":    project_id,
-        "is_ignored":    is_ignored,
-        "indexed_count": indexed,
-        "file_count":    file_count,
+        "request":        request,
+        "path":           path,
+        "folder_name":    Path(path).name,
+        "project_id":     project_id,
+        "is_ignored":     is_ignored,
+        "indexed_count":  indexed,
+        "file_count":     file_count,
+        "is_sub_project": sub_project is not None,
+        "sub_project_id": sub_project["id"] if sub_project else None,
     })
+
+
+@router.post("/make-project", response_class=HTMLResponse)
+async def make_project(
+    request:    Request,
+    path:       str = Form(...),
+    project_id: int = Form(...),
+):
+    """Aktiviert einen Ordner als eigenständiges Projekt."""
+    name = Path(path).name
+    conn = connection.get_connection()
+    existing = conn.execute("SELECT id FROM projects WHERE path=?", (path,)).fetchone()
+    with conn:
+        if existing:
+            conn.execute("UPDATE projects SET active=1 WHERE path=?", (path,))
+        else:
+            conn.execute(
+                "INSERT INTO projects (name, path, active) VALUES (?,?,1)", (name, path)
+            )
+    conn.close()
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({
+        "archivio:projectListChanged": True,
+        "archivio:browseProjectChanged": {"path": path, "is_project": True},
+    })
+    return resp
+
+
+@router.post("/remove-project", response_class=HTMLResponse)
+async def remove_project_from_path(
+    request:    Request,
+    path:       str = Form(...),
+    project_id: int = Form(...),
+):
+    """Deaktiviert das Sub-Projekt für diesen Ordner."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute("UPDATE projects SET active=0 WHERE path=?", (path,))
+    conn.close()
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({
+        "archivio:projectListChanged": True,
+        "archivio:browseProjectChanged": {"path": path, "is_project": False},
+    })
+    return resp
+
+
+@router.post("/ignore-level", response_class=HTMLResponse)
+async def ignore_level(
+    request:    Request,
+    path:       str = Form(...),
+    project_id: int = Form(...),
+):
+    """Ignoriert alle Ordner auf der gleichen Ebene wie 'path' (Geschwister-Ordner)."""
+    parent = str(Path(path).parent)
+    conn = connection.get_connection()
+    # Erst alle Einträge sammeln, dann jeden einzeln einfügen (eigene Transaktion pro Insert)
+    siblings: list[str] = []
+    try:
+        with os.scandir(parent) as it:
+            siblings = [e.path for e in it if e.is_dir() and not e.name.startswith('.')]
+    except (PermissionError, OSError):
+        pass
+    for sibling_path in siblings:
+        try:
+            with conn:
+                conn.execute(
+                    "INSERT OR IGNORE INTO ignored_paths (project_id, path) VALUES (?,?)",
+                    (project_id, sibling_path),
+                )
+        except Exception as exc:
+            log.warning("ignore_level: Insert fehlgeschlagen %s: %s", sibling_path, exc)
+    conn.close()
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({
+        "archivio:ignoredLevel": {"parent_path": parent}
+    })
+    return resp
+
+
+@router.post("/unignore-level", response_class=HTMLResponse)
+async def unignore_level(
+    request:    Request,
+    path:       str = Form(...),
+    project_id: int = Form(...),
+):
+    """Hebt die Ignorierung aller Geschwister-Ordner von 'path' auf."""
+    parent = str(Path(path).parent)
+    conn = connection.get_connection()
+    siblings: list[str] = []
+    try:
+        with os.scandir(parent) as it:
+            siblings = [e.path for e in it if e.is_dir() and not e.name.startswith('.')]
+    except (PermissionError, OSError):
+        pass
+    for sibling_path in siblings:
+        try:
+            with conn:
+                conn.execute(
+                    "DELETE FROM ignored_paths WHERE project_id=? AND path=?",
+                    (project_id, sibling_path),
+                )
+        except Exception as exc:
+            log.warning("unignore_level: Delete fehlgeschlagen %s: %s", sibling_path, exc)
+    conn.close()
+    resp = await folder_detail(request, path=path, project_id=project_id)
+    resp.headers["HX-Trigger"] = json.dumps({
+        "archivio:ignoredLevel": {"parent_path": parent, "ignored": False}
+    })
+    return resp
 
 
 @router.post("/ignore", response_class=HTMLResponse)
@@ -595,6 +719,120 @@ async def unignore_path(
     resp = await folder_detail(request, path=path, project_id=project_id)
     resp.headers["HX-Trigger"] = json.dumps({"archivio:browseEntryChanged": {"path": path, "ignored": False}})
     return resp
+
+
+# ── Unterordner als eigene Projekte ──────────────────────────────────────────
+
+def _load_subfolders(conn, parent_project_id: int, parent_path: str) -> list[dict]:
+    """Unmittelbare Unterordner eines Projekts mit ihrem Projekt-Status."""
+    db_by_path = {
+        r["path"]: dict(r)
+        for r in conn.execute("SELECT * FROM projects").fetchall()
+    }
+    results = []
+    try:
+        with os.scandir(parent_path) as it:
+            for entry in sorted(it, key=lambda e: e.name.lower()):
+                if not entry.is_dir() or entry.name.startswith('.'):
+                    continue
+                path = entry.path
+                db   = db_by_path.get(path)
+                if db and db["active"]:
+                    doc_count = conn.execute(
+                        "SELECT COUNT(*) FROM documents WHERE project_id=?", (db["id"],)
+                    ).fetchone()[0]
+                    last_scan = conn.execute(
+                        "SELECT MAX(indexed_at) FROM documents WHERE project_id=?", (db["id"],)
+                    ).fetchone()[0]
+                    results.append({
+                        "name":        db["name"],
+                        "path":        path,
+                        "is_project":  True,
+                        "project_id":  db["id"],
+                        "doc_count":   doc_count,
+                        "last_scan":   _fmt_iso_date(last_scan),
+                        "scan_status": _scans.get(db["id"], {}).get("status"),
+                    })
+                else:
+                    results.append({
+                        "name":        entry.name,
+                        "path":        path,
+                        "is_project":  False,
+                        "project_id":  db["id"] if db else None,
+                        "doc_count":   0,
+                        "last_scan":   None,
+                        "scan_status": None,
+                    })
+    except PermissionError:
+        pass
+    return results
+
+
+@router.get("/projects/{project_id}/subfolders", response_class=HTMLResponse)
+async def project_subfolders(request: Request, project_id: int):
+    conn = connection.get_connection()
+    row  = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not row:
+        conn.close()
+        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+    subfolders = _load_subfolders(conn, project_id, row["path"])
+    conn.close()
+    return templates.TemplateResponse("_dashboard_subfolders.html", {
+        "request":        request,
+        "project_id":     project_id,
+        "subfolders":     subfolders,
+    })
+
+
+@router.post("/projects/{project_id}/subfolders/activate", response_class=HTMLResponse)
+async def activate_subfolder(
+    request:    Request,
+    project_id: int,
+    path:       str = Form(...),
+):
+    conn   = connection.get_connection()
+    parent = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not parent:
+        conn.close()
+        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+    name     = Path(path).name
+    existing = conn.execute("SELECT id FROM projects WHERE path=?", (path,)).fetchone()
+    with conn:
+        if existing:
+            conn.execute("UPDATE projects SET active=1 WHERE path=?", (path,))
+        else:
+            conn.execute(
+                "INSERT INTO projects (name, path, active) VALUES (?,?,1)", (name, path)
+            )
+    subfolders = _load_subfolders(conn, project_id, parent["path"])
+    conn.close()
+    return templates.TemplateResponse("_dashboard_subfolders.html", {
+        "request":    request,
+        "project_id": project_id,
+        "subfolders": subfolders,
+    })
+
+
+@router.post("/projects/{project_id}/subfolders/deactivate", response_class=HTMLResponse)
+async def deactivate_subfolder(
+    request:       Request,
+    project_id:    int,
+    subproject_id: int = Form(...),
+):
+    conn   = connection.get_connection()
+    parent = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not parent:
+        conn.close()
+        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+    with conn:
+        conn.execute("UPDATE projects SET active=0 WHERE id=?", (subproject_id,))
+    subfolders = _load_subfolders(conn, project_id, parent["path"])
+    conn.close()
+    return templates.TemplateResponse("_dashboard_subfolders.html", {
+        "request":    request,
+        "project_id": project_id,
+        "subfolders": subfolders,
+    })
 
 
 def _rematch_unassigned_mailboxes(conn) -> None:

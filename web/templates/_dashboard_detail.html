@@ -12,7 +12,9 @@
 <div class="detail-row">
   <span class="detail-label">Status</span>
   <span class="detail-value">
-    {% if is_ignored %}
+    {% if is_sub_project %}
+      <span style="font-size:11px; font-weight:600; color:var(--text-2);">eigenes Projekt</span>
+    {% elif is_ignored %}
       <span class="browse-ignored-badge" style="font-size:11px;">ignoriert</span>
     {% else %}
       aktiv
@@ -21,17 +23,52 @@
 </div>
 
 <div class="detail-actions">
+
+  {# ── Projekt-Aktionen ── #}
+  {% if is_sub_project %}
+    <form hx-post="/dashboard/remove-project" hx-target="closest .detail-panel" hx-swap="innerHTML">
+      <input type="hidden" name="path"       value="{{ path }}">
+      <input type="hidden" name="project_id" value="{{ project_id }}">
+      <button type="submit" class="btn" style="width:100%;">Nicht mehr als eigenes Projekt</button>
+    </form>
+  {% else %}
+    <form hx-post="/dashboard/make-project" hx-target="closest .detail-panel" hx-swap="innerHTML">
+      <input type="hidden" name="path"       value="{{ path }}">
+      <input type="hidden" name="project_id" value="{{ project_id }}">
+      <button type="submit" class="btn btn-primary" style="width:100%;">Diesen Ordner als eigenes Projekt</button>
+    </form>
+  {% endif %}
+
+  {# ── Alle Geschwister-Ordner ignorieren / Ignorierung aufheben ── #}
+  {% if is_ignored %}
+  <form hx-post="/dashboard/unignore-level" hx-target="closest .detail-panel" hx-swap="innerHTML"
+        onsubmit="return confirm('Ignorierung aller Ordner auf dieser Ebene aufheben?')">
+    <input type="hidden" name="path"       value="{{ path }}">
+    <input type="hidden" name="project_id" value="{{ project_id }}">
+    <button type="submit" class="btn" style="width:100%; margin-top:4px;">Alle Ordner auf dieser Ebene Ignorierung aufheben</button>
+  </form>
+  {% else %}
+  <form hx-post="/dashboard/ignore-level" hx-target="closest .detail-panel" hx-swap="innerHTML"
+        onsubmit="return confirm('Alle Ordner auf dieser Ebene ignorieren?')">
+    <input type="hidden" name="path"       value="{{ path }}">
+    <input type="hidden" name="project_id" value="{{ project_id }}">
+    <button type="submit" class="btn" style="width:100%; margin-top:4px;">Alle Ordner auf dieser Ebene ignorieren</button>
+  </form>
+  {% endif %}
+
+  {# ── Ignorieren / aufheben ── #}
   {% if is_ignored %}
     <form hx-post="/dashboard/unignore" hx-target="closest .detail-panel" hx-swap="innerHTML">
       <input type="hidden" name="path"       value="{{ path }}">
       <input type="hidden" name="project_id" value="{{ project_id }}">
-      <button type="submit" class="btn" style="width:100%;">Ignorierung aufheben</button>
+      <button type="submit" class="btn" style="width:100%; margin-top:4px;">Ignorierung aufheben</button>
     </form>
   {% else %}
     <form hx-post="/dashboard/ignore" hx-target="closest .detail-panel" hx-swap="innerHTML">
       <input type="hidden" name="path"       value="{{ path }}">
       <input type="hidden" name="project_id" value="{{ project_id }}">
-      <button type="submit" class="btn btn-danger" style="width:100%;">Ignorieren</button>
+      <button type="submit" class="btn btn-danger" style="width:100%; margin-top:4px;">Ignorieren</button>
     </form>
   {% endif %}
+
 </div>

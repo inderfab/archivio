@@ -264,6 +264,46 @@ async def search_ai_answer(
 
 # ── Routen ────────────────────────────────────────────────────────────────────
 
+def _build_project_groups(conn) -> list[dict]:
+    """Gibt Projekte zurück, annotiert mit Eltern-Info für den Suche-Dropdown."""
+    rows = conn.execute(
+        "SELECT id, name, path FROM projects WHERE active=1 ORDER BY path"
+    ).fetchall()
+    projects = [dict(r) for r in rows]
+    # Eltern-Projekt bestimmen: längstes path-Prefix das selbst ein Projekt ist
+    for p in projects:
+        parent = None
+        best = 0
+        for other in projects:
+            if other["id"] == p["id"]:
+                continue
+            if p["path"].startswith(other["path"] + "/") and len(other["path"]) > best:
+                parent = other
+                best = len(other["path"])
+        p["parent_id"]   = parent["id"]   if parent else None
+        p["parent_name"] = parent["name"] if parent else None
+    # Kinder pro Eltern sammeln
+    children: dict[int, list] = {}
+    top: list[dict] = []
+    for p in projects:
+        if p["parent_id"] is not None:
+            children.setdefault(p["parent_id"], []).append(p)
+        else:
+            top.append(p)
+    # Resultat: Top-Level-Projekte mit ihren Kindern
+    result = []
+    for p in top:
+        p["children"] = children.get(p["id"], [])
+        result.append(p)
+    # Verwaiste Sub-Projekte (Eltern nicht aktiv) ans Ende
+    all_top_ids = {p["id"] for p in top}
+    for p in projects:
+        if p["parent_id"] is not None and p["parent_id"] not in all_top_ids:
+            p["children"] = []
+            result.append(p)
+    return result
+
+
 def _mailbox_display_name(mailbox_name: str) -> str:
     last = mailbox_name.split("/")[-1].strip()
     return "Inbox" if last.upper() == "INBOX" else last
@@ -272,9 +312,7 @@ def _mailbox_display_name(mailbox_name: str) -> str:
 @app.get("/", response_class=HTMLResponse)
 async def index(request: Request):
     conn = connection.get_connection()
-    projects = conn.execute(
-        "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
-    ).fetchall()
+    projects = _build_project_groups(conn)
     raw_mailboxes = conn.execute(
         "SELECT mailbox_name FROM mail_scan_config WHERE active=1 AND project_id IS NULL ORDER BY mailbox_name"
     ).fetchall()
@@ -499,8 +537,21 @@ def _build_filters(
             params.append(project_id[8:])
         else:
             try:
-                filters += " AND d.project_id = ?"
-                params.append(int(project_id))
+                # Eltern-Projekt und alle Sub-Projekte (Pfad-Prefix) einschliessen.
+                # Zweite Bedingung: Dokumente die physisch im Sub-Projekt-Ordner liegen,
+                # aber noch unter dem Eltern-Projekt indexiert sind (vor Sub-Projekt-Aktivierung).
+                filters += (
+                    " AND (d.project_id IN ("
+                    "  SELECT p2.id FROM projects p2"
+                    "  JOIN projects p1 ON (p2.path = p1.path OR p2.path LIKE (p1.path || '/%'))"
+                    "  WHERE p1.id = ?"
+                    ") OR d.id IN ("
+                    "  SELECT dp2.document_id FROM document_paths dp2"
+                    "  JOIN projects p3 ON dp2.path LIKE (p3.path || '/%')"
+                    "  WHERE p3.id = ?"
+                    "))"
+                )
+                params.extend([int(project_id), int(project_id)])
             except ValueError:
                 pass
     if ext == "mail":
@@ -777,8 +828,13 @@ _STOPWORDS = {
 }
 
 def _make_fts_query(q: str) -> str:
-    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split()]
-    words = [w for w in words if w and w.lower() not in _STOPWORDS]
+    words = []
+    for w in q.split():
+        w = re.sub(r'["\(\)\*\:\^]', "", w)
+        for part in w.split('.'):          # Punkt ist kein gültiges FTS5-Query-Zeichen
+            part = part.strip()
+            if part and part.lower() not in _STOPWORDS:
+                words.append(part)
     if not words:
         return '""'
     return " AND ".join(f"{w}*" for w in words)
