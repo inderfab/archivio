@@ -11,31 +11,42 @@ VERSION=$(cat VERSION)
 PKG="$DIST/archivio-server-${VERSION}.pkg"
 
 mkdir -p "$DIST"
-rm -rf "$APP"
+# Immutable-Flags entfernen (codesign-Bundlesignierung setzt sie) — dann löschen
+if [ -d "$APP" ]; then
+    xattr -cr "$APP"    2>/dev/null || true
+    chflags -R nouchg "$APP" 2>/dev/null || true
+    chmod -R u+w "$APP" 2>/dev/null || true
+    rm -rf "$APP" 2>/dev/null || { echo "⚠  Konnte $APP nicht löschen — bitte einmal 'sudo rm -rf \"$APP\"' im Terminal ausführen"; exit 1; }
+fi
 
-# ── Eingebettetes Python ──────────────────────────────────────────────────────
+# ── Eingebettetes Python (universal: arm64 + x86_64) ─────────────────────────
 # Zum Updaten: nur diese Zeile anpassen (Major.Minor), neu builden — fertig.
 PYTHON_VERSION="3.13"
 
-ARCH=$(uname -m)
-[ "$ARCH" = "arm64" ] && PBS_ARCH="aarch64-apple-darwin" || PBS_ARCH="x86_64-apple-darwin"
-
-PY_BASE="$DIST/.python-base"           # Download-Cache (nur Python, keine Pakete)
-PY_INSTALLED="$DIST/.python-installed" # Build-Cache (Python + alle Pakete)
 REQ_HASH=$(md5 -q requirements.txt)
-STAMP_FILE="$DIST/.python-stamp"
-EXPECTED_STAMP="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH"
 
-if [ "$(cat "$STAMP_FILE" 2>/dev/null)" != "$EXPECTED_STAMP" ]; then
+_build_python() {
+    local PBS_ARCH="$1"   # z.B. aarch64-apple-darwin
+    local ARCH_TAG="$2"   # z.B. arm64 oder x86_64
 
-    # Basis-Python: nur herunterladen wenn Version/Architektur geändert
-    CACHED_PY="$(cat "$PY_BASE/.version" 2>/dev/null || echo "")"
-    if [ "$CACHED_PY" != "$PYTHON_VERSION:$PBS_ARCH" ]; then
-        echo "→ python-build-standalone $PYTHON_VERSION ($PBS_ARCH) herunterladen…"
+    local PY_BASE="$DIST/.python-base-$ARCH_TAG"
+    local PY_INSTALLED="$DIST/.python-installed-$ARCH_TAG"
+    local STAMP="$DIST/.python-stamp-$ARCH_TAG"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH"
+
+    if [ "$(cat "$STAMP" 2>/dev/null)" = "$EXPECTED" ] && [ -x "$PY_INSTALLED/bin/python3" ]; then
+        echo "  $ARCH_TAG: Cache gültig"
+        return
+    fi
+
+    # Basis-Python herunterladen wenn nötig
+    if [ "$(cat "$PY_BASE/.version" 2>/dev/null)" != "$PYTHON_VERSION:$PBS_ARCH" ]; then
+        echo "  $ARCH_TAG: Python herunterladen ($PBS_ARCH)…"
         rm -rf "$PY_BASE"
         mkdir -p "$PY_BASE"
 
-        PBS_URL=$(curl -sLf "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" \
+        local URL
+        URL=$(curl -sLf "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" \
             | python3 -c "
 import sys, json
 rel = json.load(sys.stdin)
@@ -50,32 +61,39 @@ for a in rel['assets']:
         print(u); break
 " 2>/dev/null || echo "")
 
-        if [ -z "$PBS_URL" ]; then
-            echo "⚠  python-build-standalone $PYTHON_VERSION nicht gefunden – eingebettetes Python wird übersprungen"
-        else
-            curl -L --progress-bar "$PBS_URL" | tar -xz -C "$PY_BASE" --strip-components=1
-            echo "$PYTHON_VERSION:$PBS_ARCH" > "$PY_BASE/.version"
-            echo "  Python $PYTHON_VERSION bereit"
+        if [ -z "$URL" ]; then
+            echo "  ⚠  $ARCH_TAG: python-build-standalone nicht gefunden"
+            return
         fi
+        curl -L --progress-bar "$URL" | tar -xz -C "$PY_BASE" --strip-components=1
+        echo "$PYTHON_VERSION:$PBS_ARCH" > "$PY_BASE/.version"
     else
-        echo "→ Python $PYTHON_VERSION bereits im Cache"
+        echo "  $ARCH_TAG: Python bereits im Cache"
     fi
 
-    # Pakete installieren (nur wenn Python vorhanden)
-    if [ -x "$PY_BASE/bin/python3" ]; then
-        echo "→ Python-Pakete installieren (dauert ~2 Minuten beim ersten Mal)…"
-        rm -rf "$PY_INSTALLED"
-        cp -r "$PY_BASE" "$PY_INSTALLED"
-        "$PY_INSTALLED/bin/python3" -m pip install --prefer-binary -q \
-            --no-warn-script-location \
-            -r requirements.txt \
-            rumps requests
-        echo "$EXPECTED_STAMP" > "$STAMP_FILE"
-        echo "  Pakete installiert"
+    # Pakete installieren
+    echo "  $ARCH_TAG: Pakete installieren…"
+    rm -rf "$PY_INSTALLED"
+    cp -r "$PY_BASE" "$PY_INSTALLED"
+
+    # x86_64-Python auf Apple Silicon via Rosetta ausführen
+    local PIP_CMD="$PY_INSTALLED/bin/python3"
+    if [ "$ARCH_TAG" = "x86_64" ] && [ "$(uname -m)" = "arm64" ]; then
+        PIP_CMD="arch -x86_64 $PY_INSTALLED/bin/python3"
     fi
-else
-    echo "→ Python-Umgebung unverändert (Cache gültig)"
-fi
+
+    $PIP_CMD -m pip install --prefer-binary -q \
+        --no-warn-script-location \
+        -r requirements.txt \
+        rumps requests
+
+    echo "$EXPECTED" > "$STAMP"
+    echo "  $ARCH_TAG: Pakete installiert"
+}
+
+echo "→ Python-Umgebungen vorbereiten…"
+_build_python "aarch64-apple-darwin" "arm64"
+_build_python "x86_64-apple-darwin"  "x86_64"
 
 # ── Bundle-Struktur ────────────────────────────────────────────────────────────
 mkdir -p "$APP/Contents/MacOS"
@@ -100,21 +118,53 @@ cp archivio.icns           "$APP/Contents/Resources/"
 mkdir -p "$APP/Contents/Resources/dist"
 cp "dist/archivio-helper-${VERSION}.zip" "$APP/Contents/Resources/dist/"
 
-# Eingebettetes Python ins Bundle kopieren
-if [ -d "$PY_INSTALLED" ] && [ -x "$PY_INSTALLED/bin/python3" ]; then
-    echo "→ Eingebettetes Python ins Bundle kopieren…"
-    cp -r "$PY_INSTALLED" "$APP/Contents/Frameworks/archivio-python"
+# Python-Umgebungen ins Bundle kopieren und bereinigen
+_install_python_to_bundle() {
+    local ARCH_TAG="$1"
+    local SRC="$DIST/.python-installed-$ARCH_TAG"
+    local DST="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+
+    if [ ! -x "$SRC/bin/python3" ]; then
+        echo "  ⚠  $ARCH_TAG: kein Python — wird übersprungen"
+        return
+    fi
+
+    echo "  $ARCH_TAG: kopieren…"
+    cp -r "$SRC" "$DST"
+
     # Unnötige Dateien bereinigen
-    PF="$APP/Contents/Frameworks/archivio-python"
-    find "$PF" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
-    find "$PF" -name "*.pyc"  -delete 2>/dev/null || true
-    find "$PF" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
-    find "$PF" -name "*.pyi"  -delete 2>/dev/null || true
-    # PyObjCTest: Testcode von rumps, nicht benötigt
-    rm -rf "$PF/lib/python3"*"/site-packages/PyObjCTest" 2>/dev/null || true
-    echo "  $(du -sh "$PF" | cut -f1) eingebettet"
-else
-    echo "⚠  Kein eingebettetes Python — Fallback auf system Python"
+    find "$DST" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$DST" -name "*.pyc"  -delete 2>/dev/null || true
+    find "$DST" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$DST" -name "*.pyi"  -delete 2>/dev/null || true
+    rm -rf "$DST/lib/python3"*"/site-packages/PyObjCTest" 2>/dev/null || true
+
+    echo "  $ARCH_TAG: $(du -sh "$DST" | cut -f1)"
+}
+
+echo "→ Python-Umgebungen ins Bundle kopieren…"
+_install_python_to_bundle "arm64"
+_install_python_to_bundle "x86_64"
+
+# ── Ad-hoc Code-Signierung ────────────────────────────────────────────────────
+# Erforderlich damit macOS Gatekeeper die nativen Bibliotheken (.so, .dylib) zulässt.
+if command -v codesign &>/dev/null; then
+    echo "→ Ad-hoc Code-Signierung…"
+    for ARCH_TAG in arm64 x86_64; do
+        PF="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+        [ -d "$PF" ] || continue
+        # .so und .dylib signieren (inner-to-outer)
+        find "$PF" \( -name "*.so" -o -name "*.dylib" \) -type f \
+            | while read -r f; do
+                codesign -s - --force "$f" 2>/dev/null || true
+            done
+        # Python-Binary signieren
+        find "$PF/bin" -type f \
+            | while read -r f; do
+                codesign -s - --force "$f" 2>/dev/null || true
+            done
+    done
+    echo "  Signierung abgeschlossen (nur Binaries, nicht Bundle)"
 fi
 
 # ── Launcher-Script ────────────────────────────────────────────────────────────
@@ -126,18 +176,17 @@ LOG="$HOME/Library/Logs/ArchivioServer.log"
 exec >> "$LOG" 2>&1
 echo "$(date): Archivio Server v$(cat "$RESOURCES/VERSION" 2>/dev/null) starting"
 
-# ── 1. Eingebettetes Python (immer bevorzugt) ─────────────────────────────────
-# Hat Full Disk Access über das App-Bundle — keine separate Freigabe nötig.
-EMBEDDED_PY="$BUNDLE/Frameworks/archivio-python/bin/python3"
+# ── 1. Eingebettetes Python (immer bevorzugt — FDA über App-Bundle) ───────────
+ARCH=$(uname -m)
+EMBEDDED_PY="$BUNDLE/Frameworks/archivio-python-$ARCH/bin/python3"
 if [ -x "$EMBEDDED_PY" ]; then
-    echo "$(date): Eingebettetes Python: $("$EMBEDDED_PY" --version 2>&1)"
+    echo "$(date): Eingebettetes Python ($ARCH): $("$EMBEDDED_PY" --version 2>&1)"
     exec "$EMBEDDED_PY" "$RESOURCES/archivio_server.py"
 fi
 
-# ── 2. Fallback: Venv aus früherer Installation (oder Erstinstallation) ───────
-echo "$(date): Kein eingebettetes Python — Fallback auf system Python"
+# ── 2. Fallback: Venv / system Python ────────────────────────────────────────
+echo "$(date): Kein eingebettetes Python für $ARCH — Fallback"
 
-# python.org-Framework zuerst prüfen (hat FDA via Python Launcher.app)
 PYTHON=""
 for p in \
   /Library/Frameworks/Python.framework/Versions/3.13/bin/python3 \
@@ -170,7 +219,7 @@ VERSION_STAMP="$DATA_DIR/.venv_version"
 if [ -d "$VENV" ]; then
   VENV_MINOR=$("$VENV/bin/python3" -c "import sys; print(sys.version_info.minor)" 2>/dev/null || echo "0")
   if [ "$VENV_MINOR" -lt 11 ]; then
-    echo "$(date): Venv Python 3.$VENV_MINOR zu alt — wird neu aufgebaut"
+    echo "$(date): Venv zu alt — wird neu aufgebaut"
     rm -rf "$VENV"
   fi
 fi
@@ -237,7 +286,7 @@ echo "✓ $DIST/archivio-server-${VERSION}.zip erstellt"
 
 # ── PKG-Installer ─────────────────────────────────────────────────────────────
 if ! command -v pkgbuild &>/dev/null; then
-  echo "⚠️  pkgbuild nicht gefunden – PKG wird übersprungen (Xcode Command Line Tools nötig)"
+  echo "⚠️  pkgbuild nicht gefunden – PKG wird übersprungen"
   exit 0
 fi
 
@@ -251,7 +300,6 @@ cat > "$PKG_SCRIPTS/postinstall" <<'POSTINSTALL'
 #!/bin/bash
 CURRENT_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
 
-# Helper-ZIP in DATA_DIR kopieren damit der Download-Endpoint ihn sicher findet
 if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   DATA_DIR="/Users/$CURRENT_USER/Library/Application Support/Archivio"
   sudo -u "$CURRENT_USER" mkdir -p "$DATA_DIR/dist"
@@ -260,7 +308,9 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
     "$DATA_DIR/dist/" 2>/dev/null || true
 fi
 
-# Login-Item hinzufügen und App starten
+# Quarantine entfernen (verhindert Gatekeeper-Blockierung bei unsigned App)
+xattr -cr /Applications/Archivio\ Server.app 2>/dev/null || true
+
 if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   sudo -u "$CURRENT_USER" osascript -e \
     'tell application "System Events" to make new login item at end with properties {path:"/Applications/Archivio Server.app", hidden:true}' || true

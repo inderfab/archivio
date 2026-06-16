@@ -246,7 +246,7 @@ def _prepare_data_dir():
 
     db = _DATA_DIR / "archivio.db"
     if not db.exists():
-        python = str(_VENV / "bin" / "python3")
+        python = sys.executable if _IN_BUNDLE else str(_VENV / "bin" / "python3")
         schema = _CODE_ROOT / "db" / "schema.sql"
         log.info("Datenbank initialisieren: %s", db)
         subprocess.run(
@@ -280,7 +280,7 @@ def _start_server():
         _kill_port_8000()
         if _IN_BUNDLE:
             _prepare_data_dir()
-        python = str(_VENV / "bin" / "python3")
+        python = sys.executable if _IN_BUNDLE else str(_VENV / "bin" / "python3")
         log_path = (_DATA_DIR / "logs" / "server.log") if _IN_BUNDLE else (_CODE_ROOT / "logs" / "server.log")
         log_path.parent.mkdir(exist_ok=True)
         log_file = open(log_path, "a")
