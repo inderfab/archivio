@@ -50,7 +50,13 @@ log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUN
 
 _ollama_proc: subprocess.Popen | None = None
 _ollama_lock = threading.Lock()
-_OLLAMA_BIN  = shutil.which("ollama") or "/usr/local/bin/ollama"
+_OLLAMA_BIN  = (
+    shutil.which("ollama") or
+    next((str(p) for p in [
+        Path("/opt/homebrew/bin/ollama"),  # Apple Silicon + Homebrew
+        Path("/usr/local/bin/ollama"),      # Intel + Homebrew / Ollama.app
+    ] if p.exists()), None)
+)
 
 
 def _is_ollama_running() -> bool:
@@ -529,6 +535,9 @@ class ArchivioServer(rumps.App):
         self._nas_item.title = (
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
         self._ki_item.title = _ollama_status_label()
+        # Ollama neu starten falls es unerwartet gestoppt ist
+        if _OLLAMA_BIN and Path(_OLLAMA_BIN).exists() and not _is_ollama_running():
+            threading.Thread(target=_start_ollama, daemon=True).start()
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])
@@ -539,14 +548,11 @@ class ArchivioServer(rumps.App):
         sender.state = new_state
 
     def _ki_action(self, _):
-        if not Path(_OLLAMA_BIN).exists():
+        if not _OLLAMA_BIN or not Path(_OLLAMA_BIN).exists():
             subprocess.run(["open", "https://ollama.com/download"])
         elif not _is_ollama_running():
-            rumps.alert(
-                title="KI-Suche",
-                message="Ollama ist installiert aber nicht aktiv. "
-                        "Archivio Server neu starten um Ollama zu starten."
-            )
+            rumps.notification("Archivio", "KI-Suche", "Ollama wird gestartet…")
+            threading.Thread(target=_start_ollama, daemon=True).start()
 
     def check_update(self, _):
         current = _local_version()
