@@ -50,11 +50,13 @@ log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUN
 
 _ollama_proc: subprocess.Popen | None = None
 _ollama_lock = threading.Lock()
+_OLLAMA_APP  = Path("/Applications/Ollama.app")
 _OLLAMA_BIN  = (
     shutil.which("ollama") or
     next((str(p) for p in [
-        Path("/opt/homebrew/bin/ollama"),  # Apple Silicon + Homebrew
-        Path("/usr/local/bin/ollama"),      # Intel + Homebrew / Ollama.app
+        Path("/opt/homebrew/bin/ollama"),                        # Apple Silicon + Homebrew
+        Path("/usr/local/bin/ollama"),                           # Intel + Homebrew
+        Path("/Applications/Ollama.app/Contents/MacOS/ollama"), # curl-Install / Ollama.app
     ] if p.exists()), None)
 )
 
@@ -67,22 +69,36 @@ def _is_ollama_running() -> bool:
         return False
 
 
+def _ollama_available() -> bool:
+    """Gibt True zurück wenn Ollama installiert ist (App oder CLI)."""
+    return bool(_OLLAMA_BIN) or _OLLAMA_APP.exists()
+
+
 def _start_ollama():
     global _ollama_proc
     with _ollama_lock:
         if _is_ollama_running():
             return
-        if not Path(_OLLAMA_BIN).exists():
-            log.warning("Ollama nicht gefunden (%s)", _OLLAMA_BIN)
-            return
+        # CLI-Binary bevorzugen (headless); Fallback: Ollama.app öffnen
+        bin_is_standalone = (
+            _OLLAMA_BIN and
+            "/Applications/Ollama.app" not in _OLLAMA_BIN and
+            Path(_OLLAMA_BIN).exists()
+        )
         try:
-            _ollama_proc = subprocess.Popen(
-                [_OLLAMA_BIN, "serve"],
-                stdout=subprocess.DEVNULL,
-                stderr=subprocess.DEVNULL,
-            )
-            log.info("ollama serve gestartet (pid %s)", _ollama_proc.pid)
-            # kurz warten bis Ollama bereit
+            if bin_is_standalone:
+                _ollama_proc = subprocess.Popen(
+                    [_OLLAMA_BIN, "serve"],
+                    stdout=subprocess.DEVNULL,
+                    stderr=subprocess.DEVNULL,
+                )
+                log.info("ollama serve gestartet (pid %s)", _ollama_proc.pid)
+            elif _OLLAMA_APP.exists():
+                subprocess.Popen(["open", "-a", "Ollama"])
+                log.info("Ollama.app gestartet via 'open -a Ollama'")
+            else:
+                log.warning("Ollama nicht gefunden")
+                return
             for _ in range(20):
                 time.sleep(0.5)
                 if _is_ollama_running():
@@ -213,7 +229,7 @@ def _ensure_ollama_models():
 
 
 def _ollama_status_label() -> str:
-    if not Path(_OLLAMA_BIN).exists():
+    if not _ollama_available():
         return "🔴  KI-Suche (Ollama fehlt)"
     if not _is_ollama_running():
         return "🔴  KI-Suche offline"
@@ -536,7 +552,7 @@ class ArchivioServer(rumps.App):
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
         self._ki_item.title = _ollama_status_label()
         # Ollama neu starten falls es unerwartet gestoppt ist
-        if _OLLAMA_BIN and Path(_OLLAMA_BIN).exists() and not _is_ollama_running():
+        if _ollama_available() and not _is_ollama_running():
             threading.Thread(target=_start_ollama, daemon=True).start()
 
     def open_browser(self, _):
@@ -548,7 +564,7 @@ class ArchivioServer(rumps.App):
         sender.state = new_state
 
     def _ki_action(self, _):
-        if not _OLLAMA_BIN or not Path(_OLLAMA_BIN).exists():
+        if not _ollama_available():
             subprocess.run(["open", "https://ollama.com/download"])
         elif not _is_ollama_running():
             rumps.notification("Archivio", "KI-Suche", "Ollama wird gestartet…")
