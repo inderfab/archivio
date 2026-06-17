@@ -106,7 +106,7 @@ def _start_memory_watchdog() -> None:
             try:
                 rss      = _total_workers_rss_gb()
                 pressure = _system_under_pressure()
-                if rss > _MAX_WORKER_RSS or pressure:
+                if rss > _MAX_WORKER_RSS:
                     with _worker_pids_lock:
                         pids = list(_worker_pids)
                     if pids:
@@ -137,9 +137,9 @@ def _auto_limits() -> tuple[float, int, float]:
         total_gb = psutil.virtual_memory().total / (1024 ** 3)
     except Exception:
         total_gb = 16.0
-    rss_limit  = max(3.0, total_gb * 0.20)   # 20% des RAM (64 GB → ~12.8 GB)
-    timeout    = max(120, int(total_gb * 10)) # 10s pro GB RAM (64 GB → 640s)
-    min_free   = max(4.0, total_gb * 0.20)   # Mindest-freier RAM im System (20%)
+    rss_limit  = max(3.0, total_gb * 0.20)       # 20% des RAM (64 GB → ~12.8 GB)
+    timeout    = max(120, int(total_gb * 10))   # 10s pro GB RAM (64 GB → 640s)
+    min_free   = max(2.0, min(4.0, total_gb * 0.08))  # max 4 GB — 20% war zu aggressiv für grosse Maschinen
     return rss_limit, timeout, min_free
 
 _MAX_WORKER_RSS, _TASK_TIMEOUT, _MIN_FREE_GB = _auto_limits()
