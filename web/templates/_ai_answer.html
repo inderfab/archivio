@@ -44,6 +44,9 @@ function pollOllamaInstall() {
 <div class="ai-error">
   <span class="ai-error-icon">⚠</span>
   {{ error }}
+  {% if "läuft nicht" in error or "nicht installiert" in error %}
+  — <a href="https://bauchat.ch/docs.html#ki" target="_blank" rel="noopener">Anleitung zur Installation</a>
+  {% endif %}
   {% if "Embeddings" in error %}
   — <a href="#" onclick="fetch('/api/ai/backfill',{method:'POST'}).then(function(){alert('Backfill gestartet. Das kann einige Minuten dauern.')});return false">Jetzt generieren</a>
   {% endif %}
