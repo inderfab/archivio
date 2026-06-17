@@ -67,9 +67,12 @@
       padding: 14px 32px;
       border-radius: 6px;
       text-decoration: none;
+      border: none;
+      cursor: pointer;
       transition: background 0.15s;
     }
     .btn-download:hover { background: #333; }
+    .btn-download:disabled { background: #888; cursor: default; }
     .hero-buttons {
       display: inline-flex;
       gap: 12px;
@@ -172,10 +175,9 @@
       <h1>Archivio</h1>
       <p>Die lokale Wissensplattform für Architekturbüros</p>
       <div class="hero-buttons">
-        <a class="btn-download" href="https://github.com/inderfab/archivio/releases/latest"
-           onclick="this.textContent='Wird geladen…'; setTimeout(()=>this.textContent='Herunterladen',2000)">
+        <button class="btn-download" id="btn-dl" onclick="downloadLatest()">
           Herunterladen
-        </a>
+        </button>
         <a class="btn-docs" href="docs.html">Anleitung</a>
       </div>
       <p class="hero-sub">macOS &nbsp;·&nbsp; Kostenlos</p>
@@ -199,5 +201,33 @@
     </div>
   </footer>
 
+  <script>
+    function downloadLatest() {
+      var btn = document.getElementById('btn-dl');
+      btn.textContent = 'Wird geladen…';
+      btn.disabled = true;
+      fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          var asset = data.assets.find(function(a) {
+            return a.name.indexOf('archivio-server') !== -1 && a.name.endsWith('.pkg');
+          });
+          if (asset) {
+            window.location.href = asset.browser_download_url;
+          } else {
+            window.location.href = 'https://github.com/inderfab/archivio/releases/latest';
+          }
+          setTimeout(function() {
+            btn.textContent = 'Herunterladen';
+            btn.disabled = false;
+          }, 3000);
+        })
+        .catch(function() {
+          window.location.href = 'https://github.com/inderfab/archivio/releases/latest';
+          btn.textContent = 'Herunterladen';
+          btn.disabled = false;
+        });
+    }
+  </script>
 </body>
 </html>
