@@ -308,6 +308,16 @@ async def scan_progress_json(project_id: int):
     })
 
 
+@router.get("/stats", response_class=HTMLResponse)
+async def dashboard_stats(request: Request):
+    conn = connection.get_connection()
+    stats = _global_stats(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_stats.html", {
+        "request": request, "stats": stats,
+    })
+
+
 @router.get("/scan-progress-banner", response_class=HTMLResponse)
 async def scan_progress_banner(request: Request):
     """Liefert den Fortschritts-Banner für HTMX-Polling. Leer wenn kein Scan aktiv."""
@@ -329,7 +339,7 @@ async def scan_progress_banner(request: Request):
     total     = s.get("total", 0)
     processed = s.get("processed", 0)
     percent   = int(processed / total * 100) if total > 0 else 0
-    return templates.TemplateResponse("_scan_progress.html", {
+    resp = templates.TemplateResponse("_scan_progress.html", {
         "request":      request,
         "status":       s.get("status"),
         "phase":        s.get("phase", ""),
@@ -344,6 +354,10 @@ async def scan_progress_banner(request: Request):
         "error":        s.get("error", ""),
         "project_id":   pid,
     })
+    if s.get("status") in ("done", "error"):
+        import json as _json
+        resp.headers["HX-Trigger"] = _json.dumps({"archivio:scanComplete": True})
+    return resp
 
 
 def _elapsed_seconds(iso_str: str) -> float:

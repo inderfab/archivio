@@ -1,0 +1,17 @@
+<div id="stats-bar" class="stats-bar"
+     hx-get="/dashboard/stats"
+     hx-trigger="archivio:scanComplete from:body"
+     hx-swap="outerHTML">
+  <div class="stat">
+    <span class="stat-n">{{ stats.total }}</span>
+    <span class="stat-l">Dokumente</span>
+  </div>
+  <div class="stat">
+    <span class="stat-n">{{ stats.active_projects }}</span>
+    <span class="stat-l">Aktive Projekte</span>
+  </div>
+  <div class="stat">
+    <span class="stat-n">{{ stats.last_scan }}</span>
+    <span class="stat-l">Letzter Scan</span>
+  </div>
+</div>

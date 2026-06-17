@@ -19,23 +19,13 @@
   </div>
 
   {# ── Statistiken ── #}
-  <div class="stats-bar">
-    <div class="stat">
-      <span class="stat-n">{{ stats.total }}</span>
-      <span class="stat-l">Dokumente</span>
-    </div>
-    <div class="stat">
-      <span class="stat-n">{{ stats.active_projects }}</span>
-      <span class="stat-l">Aktive Projekte</span>
-    </div>
-    <div class="stat">
-      <span class="stat-n">{{ stats.last_scan }}</span>
-      <span class="stat-l">Letzter Scan</span>
-    </div>
-  </div>
+  {% include "_dashboard_stats.html" %}
 
   {# ── Projektliste ── #}
-  <div id="project-list">
+  <div id="project-list"
+       hx-get="/dashboard/projects/list"
+       hx-trigger="archivio:scanComplete from:body"
+       hx-swap="innerHTML">
     {% include "_dashboard_projects.html" %}
   </div>
 
