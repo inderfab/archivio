@@ -238,6 +238,31 @@ def extract_pdf(path: Path) -> tuple[str, str]:
     return "\n".join(p["content"] for p in pages), ""
 
 
+_PLAN_APPS = {"archicad", "vectorworks"}
+
+
+def extract_pdf_metadata(path: Path) -> dict:
+    """Liest Creator/Producer aus PDF-Metadaten. Erkennt ArchiCAD/Vectorworks → is_plan."""
+    creator = producer = ""
+    try:
+        import fitz
+        with fitz.open(str(path)) as doc:
+            m = doc.metadata or {}
+            creator  = str(m.get("creator",  "") or "")
+            producer = str(m.get("producer", "") or "")
+    except Exception:
+        try:
+            import pypdf
+            info     = pypdf.PdfReader(str(path)).metadata or {}
+            creator  = str(info.get("/Creator",  "") or "")
+            producer = str(info.get("/Producer", "") or "")
+        except Exception:
+            return {}
+    combined = (creator + " " + producer).lower()
+    creator_app = next((a for a in _PLAN_APPS if a in combined), "")
+    return {"creator_app": creator_app, "is_plan": bool(creator_app)}
+
+
 def extract_pdf_pages(path: Path) -> list[dict]:
     """Gibt [{page_number, content}] zurück.
 

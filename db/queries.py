@@ -38,6 +38,20 @@ def set_extraction_status(conn: sqlite3.Connection, document_id: int, status: st
     )
 
 
+def update_metadata(conn: sqlite3.Connection, document_id: int, meta: dict):
+    import json
+    row = conn.execute("SELECT metadata FROM documents WHERE id = ?", (document_id,)).fetchone()
+    if not row:
+        return
+    try:
+        current = json.loads(row["metadata"] or "{}")
+    except Exception:
+        current = {}
+    current.update(meta)
+    conn.execute("UPDATE documents SET metadata = ? WHERE id = ?",
+                 (json.dumps(current), document_id))
+
+
 def upsert_content(conn: sqlite3.Connection, document_id: int, content: str, language: str = ""):
     conn.execute(
         """

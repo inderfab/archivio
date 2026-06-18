@@ -539,6 +539,16 @@ def _extract_and_store(conn, doc_id: int, path: Path):
             queries.upsert_content(conn, doc_id, text, "")
         if chunks:
             queries.save_chunks(conn, doc_id, chunks)
+
+    # PDF-Metadaten (Creator/Producer) für Plan-Erkennung
+    if path.suffix.lower() == ".pdf":
+        try:
+            meta = extractors.extract_pdf_metadata(path)
+            if meta:
+                with conn:
+                    queries.update_metadata(conn, doc_id, meta)
+        except Exception:
+            pass
     # Kein Embedding im Worker — läuft nach dem Scan als separater Schritt
     # (verhindert dass ein langsamer Ollama-Call den ganzen Scan blockiert)
 

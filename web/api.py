@@ -1572,6 +1572,26 @@ async def diagnostics():
     except Exception as _exc:
         _chk("DB-Qualität", str(_exc), ok=False)
 
+    # Ollama
+    try:
+        from scanner.embedder import is_ollama_installed, is_ollama_running, ai_status, EMBED_MODEL, LLM_MODEL
+        if not is_ollama_installed():
+            _chk("Ollama", "Nicht installiert", ok=False,
+                 detail='<a href="https://bauchat.ch/docs.html#ki" target="_blank">Anleitung zur Installation</a>')
+        elif not is_ollama_running():
+            _chk("Ollama", "Installiert, aber nicht gestartet", ok=False,
+                 detail="Ollama starten: Menubar → KI-Suche klicken, oder 'ollama serve' im Terminal")
+        else:
+            status = ai_status()
+            if status["ok"]:
+                _chk("Ollama", "Läuft", ok=True,
+                     detail=f"Modelle: {EMBED_MODEL}, {LLM_MODEL}")
+            else:
+                _chk("Ollama", f"Läuft – {status['reason']}", ok=None,
+                     detail=f"Modelle prüfen: {EMBED_MODEL}, {LLM_MODEL}")
+    except Exception as _exc:
+        _chk("Ollama", str(_exc), ok=False)
+
     # HTML rendern
     rows = []
     for c in checks:

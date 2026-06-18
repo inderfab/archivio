@@ -348,9 +348,11 @@ async def search(
     scope = set(search_in.split(",")) if search_in else {"docs"}
     if not scope:
         scope = {"docs"}
-    search_docs      = "docs" in scope
-    search_filenames = "filenames" in scope
-    search_folders   = "folders" in scope
+    filter_plans     = "plans" in scope
+    content_scope    = scope - {"plans"} or {"docs"}  # mindestens docs wenn nur plans aktiv
+    search_docs      = "docs" in content_scope
+    search_filenames = "filenames" in content_scope
+    search_folders   = "folders" in content_scope
 
     results, error, total = [], None, 0
     folder_results = []
@@ -360,6 +362,7 @@ async def search(
         filters_str, filter_params = _build_filters(
             project_id, type, from_addr, to_addr, subject_filter,
             date_from, date_to, filesize, duplicates_only,
+            filter_plans=filter_plans,
         )
         if search_docs and search_filenames:
             results, error = _search(conn, q.strip(), filters_str, filter_params)
@@ -529,8 +532,11 @@ def _build_filters(
     from_addr: str = "", to_addr: str = "", subject_filter: str = "",
     date_from: str = "", date_to: str = "",
     filesize: str = "", duplicates_only: str = "",
+    filter_plans: bool = False,
 ) -> tuple[str, list]:
     filters, params = "", []
+    if filter_plans:
+        filters += " AND json_extract(d.metadata, '$.is_plan') = 1"
     if project_id:
         if project_id.startswith("mailbox:"):
             filters += " AND m.mailbox_name = ? AND d.project_id IS NULL"
