@@ -931,6 +931,7 @@ async def settings_save(request: Request):
     server_host = form.get("server_host", "127.0.0.1").strip()
     server_port = int(form.get("server_port", "8000") or "8000")
     scan_time   = form.get("scan_time", "").strip()
+    num_workers = max(1, min(4, int(form.get("num_workers", "1") or "1")))
 
     # Mail — mehrere Konten
     labels    = form.getlist("mail_label")
@@ -981,6 +982,7 @@ async def settings_save(request: Request):
         "scanner": {
             "base_folders":     base_folders,
             "excluded_folders": excluded_folders,
+            "num_workers":      num_workers,
         },
     }
     settings.save(updates)

@@ -251,6 +251,22 @@
               value="{{ cfg.get('server', {}).get('port', 8000) }}">
           </div>
         </div>
+
+        <div class="field" style="max-width: 360px;">
+          <label>Scanner-Worker</label>
+          <select name="num_workers">
+            {% set nw = cfg.get('scanner', {}).get('num_workers', 1)|int %}
+            <option value="1" {% if nw == 1 %}selected{% endif %}>1 Worker (Standard)</option>
+            <option value="2" {% if nw == 2 %}selected{% endif %}>2 Worker</option>
+            <option value="3" {% if nw == 3 %}selected{% endif %}>3 Worker</option>
+            <option value="4" {% if nw == 4 %}selected{% endif %}>4 Worker</option>
+          </select>
+          <span class="hint">
+            Mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch.<br>
+            Empfehlung: 1 Worker (bis 16 GB RAM) · 2 Worker (16–32 GB) · 3–4 Worker (ab 64 GB).
+          </span>
+        </div>
+
         <div style="padding-top:4px;">
           <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
@@ -389,6 +405,38 @@ function addExcludedFolder() {
     '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
   document.getElementById('excluded-folders-list').appendChild(item);
   item.querySelector('input').focus();
+}
+
+function startMetaBackfill(link) {
+  var parent = link.parentNode;
+  link.style.display = 'none';
+  var prog = document.createElement('span');
+  prog.style.cssText = 'font-size:11px; color:#6b7280;';
+  prog.textContent = 'Startet…';
+  parent.appendChild(prog);
+  fetch('/api/pdf-metadata/backfill', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok) { prog.textContent = d.message || 'Fehler'; link.style.display = ''; return; }
+      var poll = setInterval(function() {
+        fetch('/api/pdf-metadata/backfill/status')
+          .then(function(r) { return r.json(); })
+          .then(function(s) {
+            if (s.running) {
+              prog.textContent = s.done + ' / ' + s.total + ' PDFs…';
+            } else {
+              clearInterval(poll);
+              if (s.error) {
+                prog.textContent = 'Fehler: ' + s.error;
+                link.style.display = '';
+              } else {
+                prog.textContent = s.done + ' PDFs aktualisiert ✓';
+              }
+            }
+          });
+      }, 1000);
+    })
+    .catch(function(e) { prog.textContent = 'Fehler: ' + e; link.style.display = ''; });
 }
 </script>
 {% endblock %}

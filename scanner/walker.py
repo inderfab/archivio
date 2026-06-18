@@ -264,7 +264,7 @@ def scan_project(project_id: int, root: Path,
                  cancel_flag: dict | None = None):
     """Walk root, extract text, embed, persist to DB.
 
-    Jede Datei läuft in einem Pool-Worker (processes=1).
+    Jede Datei läuft in einem oder mehreren Pool-Workern (konfigurierbar via scanner.num_workers).
     Der Hauptprozess überwacht alle _POLL_INTERVAL Sekunden den RSS des Workers.
     Bei Überschreitung von _MAX_WORKER_RSS GB oder _TASK_TIMEOUT Sekunden:
     SIGKILL → sofortige Speicherfreigabe → neuer Pool.
@@ -272,6 +272,7 @@ def scan_project(project_id: int, root: Path,
     supported = _supported_extensions()
     excluded  = _excluded_folders()
     tasks_per_worker = max(3, int(settings.get("scanner.tasks_per_worker", 5)))
+    num_workers      = max(1, min(4, int(settings.get("scanner.num_workers", 1))))
 
     if progress is not None:
         progress["phase"] = "collecting"
@@ -303,7 +304,7 @@ def scan_project(project_id: int, root: Path,
 
     ctx = multiprocessing.get_context("spawn")
     pool = ctx.Pool(
-        processes=1,
+        processes=num_workers,
         maxtasksperchild=tasks_per_worker,
         initializer=_worker_watchdog_init,
         initargs=(os.getpid(),),
@@ -353,6 +354,10 @@ def scan_project(project_id: int, root: Path,
                 ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
                 start  = time.monotonic()
                 result = None
+                # Nicht-PDF-Formate (DOCX, EML, RTF …) haben zwar SIGALRM (30s), aber
+                # auf macOS blockiert NAS-I/O den Syscall und SIGALRM kommt nicht durch.
+                # Daher max 120s als harte Grenze im Polling-Loop.
+                file_timeout = _TASK_TIMEOUT if path.suffix.lower() == ".pdf" else min(_TASK_TIMEOUT, 120)
 
                 # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
                 while result is None:
@@ -367,22 +372,22 @@ def scan_project(project_id: int, root: Path,
                             log.warning("Worker RSS %.1f GB > %.1f GB — SIGKILL: %s",
                                         rss, _MAX_WORKER_RSS, path.name)
                             _kill_workers(pool)
-                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                            pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
                             result = "error"
                         elif pressure:
                             log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
                             _kill_workers(pool)
-                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                            pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
                             result = "error"
-                        elif elapsed > _TASK_TIMEOUT:
+                        elif elapsed > file_timeout:
                             log.warning("Datei-Timeout (%ds): %s — SIGKILL",
-                                        _TASK_TIMEOUT, path.name)
+                                        file_timeout, path.name)
                             _kill_workers(pool)
-                            pool = ctx.Pool(processes=1, maxtasksperchild=tasks_per_worker,
+                            pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
                             result = "error"

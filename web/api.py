@@ -1427,6 +1427,55 @@ async def mail_reset_and_rescan():
                          "message": f"{deleted} Mails gelöscht. Scan gestartet — inkl. Chunking + Embedding."})
 
 
+# ── PDF-Metadaten-Backfill ────────────────────────────────────────────────────
+
+_meta_backfill_state: dict = {"running": False, "done": 0, "total": 0, "error": ""}
+
+
+@router.post("/pdf-metadata/backfill")
+async def pdf_metadata_backfill():
+    """Liest Creator/Producer aus allen gescannten PDFs und setzt is_plan/creator_app."""
+    if _meta_backfill_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Läuft bereits"})
+
+    def _run():
+        from scanner import extractors
+        from db import queries
+        _meta_backfill_state.update({"running": True, "done": 0, "total": 0, "error": ""})
+        conn = connection.get_connection()
+        try:
+            rows = conn.execute("""
+                SELECT d.id, dp.path
+                FROM documents d
+                JOIN document_paths dp ON dp.document_id = d.id
+                WHERE d.extension = '.pdf' AND d.extraction_status = 'ok'
+                GROUP BY d.id
+            """).fetchall()
+            _meta_backfill_state["total"] = len(rows)
+            for row in rows:
+                try:
+                    meta = extractors.extract_pdf_metadata(Path(row["path"]))
+                    if meta:
+                        with conn:
+                            queries.update_metadata(conn, row["id"], meta)
+                except Exception:
+                    pass
+                _meta_backfill_state["done"] += 1
+        except Exception as e:
+            _meta_backfill_state["error"] = str(e)
+        finally:
+            _meta_backfill_state["running"] = False
+            conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Metadaten-Backfill gestartet"})
+
+
+@router.get("/pdf-metadata/backfill/status")
+async def pdf_metadata_backfill_status():
+    return JSONResponse(_meta_backfill_state)
+
+
 # ── Diagnose ──────────────────────────────────────────────────────────────────
 
 @router.get("/debug/diagnostics", response_class=HTMLResponse)
@@ -1567,6 +1616,29 @@ async def diagnostics():
             f"{total_chunks - missing_emb} / {total_chunks} Chunks",
             ok=emb_ok if total_chunks > 0 else None,
             detail=emb_detail
+        )
+        pdfs_ok       = _conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE extension='.pdf' AND extraction_status='ok'"
+        ).fetchone()[0]
+        pdfs_with_meta = _conn.execute(
+            "SELECT COUNT(*) FROM documents WHERE extension='.pdf' AND extraction_status='ok'"
+            " AND json_extract(metadata,'$.is_plan') IS NOT NULL"
+        ).fetchone()[0]
+        pdfs_missing_meta = pdfs_ok - pdfs_with_meta
+        if pdfs_missing_meta > 0:
+            meta_detail = (
+                f"{pdfs_missing_meta} PDFs ohne Plan-Metadaten — "
+                f'<a href="#" onclick="startMetaBackfill(this);return false">Jetzt nachführen</a>'
+            )
+            meta_ok = None
+        else:
+            meta_detail = ""
+            meta_ok = True
+        _chk(
+            "Plan-Metadaten (PDFs)",
+            f"{pdfs_with_meta} / {pdfs_ok} PDFs analysiert",
+            ok=meta_ok if pdfs_ok > 0 else None,
+            detail=meta_detail
         )
         _conn.close()
     except Exception as _exc:
