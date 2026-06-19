@@ -302,6 +302,18 @@ def scan_project(project_id: int, root: Path,
 
     _start_memory_watchdog()  # einmalig starten (noop wenn bereits läuft)
 
+    # FTS5-Automerge während des Scans deaktivieren — bei grossen Archiven (>10k Dokumente)
+    # löst der automatische Segment-Merge mitten im Worker-Commit aus und blockiert
+    # den Prozess für Minuten (erscheint als "hängt bei 99%").
+    # Nach dem Scan wird einmalig optimize() aufgerufen.
+    try:
+        _fts_conn = connection.get_connection()
+        _fts_conn.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=0')")
+        _fts_conn.commit()
+        _fts_conn.close()
+    except Exception:
+        pass
+
     ctx = multiprocessing.get_context("spawn")
     pool = ctx.Pool(
         processes=num_workers,
@@ -406,7 +418,7 @@ def scan_project(project_id: int, root: Path,
                 if progress is not None and progress["processed"] % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()
-                        _wal_conn.execute("PRAGMA wal_checkpoint(TRUNCATE)")
+                        _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
                         _wal_conn.close()
                     except Exception:
                         pass
@@ -416,6 +428,20 @@ def scan_project(project_id: int, root: Path,
 
     finally:
         _kill_workers(pool)
+
+    # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
+    def _fts_optimize():
+        try:
+            c = connection.get_connection()
+            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
+            c.commit()
+            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
+            c.commit()
+            c.close()
+            log.info("FTS5 optimize abgeschlossen")
+        except Exception as exc:
+            log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
+    threading.Thread(target=_fts_optimize, daemon=True, name="fts-optimize").start()
 
 
 def _process_file(conn, project_id: int, path: Path) -> str:
