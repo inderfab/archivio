@@ -294,6 +294,16 @@ def _kill_port_8000():
         pass
 
 
+def _probe_permissions():
+    """Ruft Diagnose-Endpoint auf sobald der Server bereit ist.
+    Triggert macOS-Berechtigungsdialoge (Schreibtisch, FDA) beim ersten Start."""
+    if _wait_for_server(timeout=60):
+        try:
+            requests.get("http://127.0.0.1:8000/api/debug/diagnostics", timeout=30)
+        except Exception:
+            pass
+
+
 def _start_server():
     global _server_proc
     with _server_lock:
@@ -530,6 +540,7 @@ class ArchivioServer(rumps.App):
         _start_server()
         threading.Thread(target=_ensure_ollama_models, daemon=True).start()
         threading.Thread(target=_server_memory_watchdog, daemon=True).start()
+        threading.Thread(target=_probe_permissions, daemon=True).start()
         time.sleep(3)
         self._status_loop()
 

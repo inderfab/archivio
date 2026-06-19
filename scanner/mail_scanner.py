@@ -72,6 +72,31 @@ def _decode_imap_utf7(text: str) -> str:
     return re.sub(r"&([^-]*)-", repl, text)
 
 
+def _encode_imap_utf7(text: str) -> str:
+    """UTF-8 Postfachname → IMAP modified UTF-7 (RFC 3501) für client.select()."""
+    result = []
+    buf: list[str] = []
+
+    def flush():
+        if buf:
+            raw = "".join(buf).encode("utf-16-be")
+            b64 = base64.b64encode(raw).decode("ascii").rstrip("=").replace("/", ",")
+            result.append(f"&{b64}-")
+            buf.clear()
+
+    for ch in text:
+        if ch == "&":
+            flush()
+            result.append("&-")
+        elif 0x20 <= ord(ch) <= 0x7E:
+            flush()
+            result.append(ch)
+        else:
+            buf.append(ch)
+    flush()
+    return "".join(result)
+
+
 # ── Projekt-Matching ──────────────────────────────────────────────────────────
 
 def match_mailbox_to_project(conn, mailbox_name: str) -> int | None:
@@ -352,12 +377,14 @@ def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: st
 
 def _fetch_uids(client: imaplib.IMAP4_SSL, mailbox: str) -> list:
     # READ-ONLY: kein STORE/DELETE — nur SELECT readonly + FETCH PEEK
-    status, _ = client.select(f'"{mailbox}"', readonly=True)
+    # Postfachname muss in IMAP modified UTF-7 kodiert werden (RFC 3501)
+    imap_name = _encode_imap_utf7(mailbox)
+    status, _ = client.select(f'"{imap_name}"', readonly=True)
     if status != "OK":
-        raise RuntimeError(f"Postfach nicht öffenbar: {mailbox}")
+        raise RuntimeError(f"Postfach nicht öffenbar: {mailbox!r}")
     status, data = client.search(None, "ALL")
     if status != "OK":
-        raise RuntimeError(f"Suche fehlgeschlagen: {mailbox}")
+        raise RuntimeError(f"Suche fehlgeschlagen: {mailbox!r}")
     return data[0].split() if data and data[0] else []
 
 

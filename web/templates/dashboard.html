@@ -30,7 +30,12 @@
   </div>
 
   {# ── Mail-Integration ── #}
-  {% include "_dashboard_mail.html" %}
+  <div id="mail-section-wrap"
+       hx-get="/dashboard/mail"
+       hx-trigger="load"
+       hx-swap="innerHTML">
+    {% include "_dashboard_mail.html" %}
+  </div>
 
   {# ── Fehlerhafte Dokumente — lazy via HTMX ── #}
   <div id="problem-docs-container"

@@ -434,6 +434,26 @@ async def open_mail(document_id: int):
     return JSONResponse({"ok": True, "url": url})
 
 
+@app.post("/api/open/mail/{document_id}")
+async def open_mail_server(document_id: int):
+    """Öffnet Mail direkt auf dem Server-Mac (Fallback wenn kein Helper läuft)."""
+    conn = connection.get_connection()
+    row  = conn.execute(
+        "SELECT hash FROM documents WHERE id=? AND source_type='email'",
+        (document_id,),
+    ).fetchone()
+    conn.close()
+    if not row:
+        return JSONResponse({"ok": False, "error": "Mail nicht gefunden"}, status_code=404)
+    mid = row["hash"].strip("<>").strip()
+    url = f"message://<{mid}>"
+    try:
+        subprocess.run(["open", url], timeout=5, check=False)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        return JSONResponse({"ok": False, "error": str(exc)}, status_code=500)
+
+
 @app.get("/preview/{document_id}", response_class=HTMLResponse)
 async def preview(request: Request, document_id: int, q: str = Query(default="")):
     """Lazy-Vorschau für ein Suchergebnis."""
@@ -853,4 +873,18 @@ def _make_fts_query(q: str) -> str:
                 words.append(part)
     if not words:
         return '""'
-    return " AND ".join(f"{w}*" for w in words)
+    if len(words) == 1:
+        return f"{words[0]}*"
+
+    and_query = " AND ".join(f"{w}*" for w in words)
+
+    # Deutsche Komposita: "fenster liste" und "liste fenster" finden beide "Fensterliste".
+    # Benachbarte Wortpaare in beiden Reihenfolgen zusammenkleben + vollständige Konkatenation.
+    extras: list[str] = []
+    for i in range(len(words) - 1):
+        extras.append(f"{words[i]}{words[i + 1]}*")        # vorwärts
+        extras.append(f"{words[i + 1]}{words[i]}*")        # rückwärts
+    if len(words) > 2:
+        extras.append("".join(words) + "*")
+
+    return "(" + and_query + ") OR " + " OR ".join(extras)

@@ -349,7 +349,8 @@ def scan_project(project_id: int, root: Path,
                     continue
 
                 if progress is not None:
-                    progress["current_file"] = path.name
+                    progress["current_file"]   = path.name
+                    progress["current_folder"] = path.parent.name
 
                 ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
                 start  = time.monotonic()

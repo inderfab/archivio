@@ -515,6 +515,7 @@
     .scan-badge { font-size: 12px; padding: 3px 8px; border-radius: 4px; }
     .scan-badge.running { background: #fef9c3; color: #92400e; }
     .scan-badge.done    { background: #dcfce7; color: #166534; }
+    .scan-badge.warn    { background: #fef9c3; color: #92400e; }
     .scan-badge.error   { background: #fee2e2; color: #991b1b; }
 
     /* ── Scan-Fortschrittsbalken ── */
@@ -682,6 +683,27 @@ function helperOpen(path) {
 function helperReveal(path) {
   fetch(HELPER + '/reveal?path=' + encodeURIComponent(path))
     .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
+}
+
+function openMail(documentId) {
+  fetch('/open/mail/' + documentId)
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok) { alert('Fehler: ' + d.error); return; }
+      // Versuch 1: Helper (läuft auf Client-Mac)
+      fetch(HELPER + '/open?path=' + encodeURIComponent(d.url))
+        .then(function(r) {
+          if (!r.ok) throw new Error('helper-unavailable');
+        })
+        .catch(function() {
+          // Versuch 2: Server-seitiges open (wenn Browser und Server auf derselben Maschine)
+          fetch('/api/open/mail/' + documentId, { method: 'POST' })
+            .then(function(r) { return r.json(); })
+            .then(function(s) { if (!s.ok) alert('Fehler: ' + s.error); })
+            .catch(function() { alert('Mail konnte nicht geöffnet werden.'); });
+        });
+    })
+    .catch(function() { alert('Verbindungsfehler.'); });
 }
 </script>
 </body>

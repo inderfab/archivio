@@ -23,8 +23,7 @@
 
   <div style="margin-top:10px;">
     <button class="btn btn-sm"
-            hx-get="/open/mail/{{ doc.id }}"
-            hx-swap="none">In Apple Mail öffnen ↗</button>
+            onclick="openMail({{ doc.id }})">In Apple Mail öffnen ↗</button>
   </div>
 
 {% else %}

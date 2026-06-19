@@ -80,13 +80,30 @@ def _server_info() -> tuple[bool, str]:
 async def dashboard(request: Request):
     conn = connection.get_connection()
     connection.init_schema()
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
+    groups   = _project_groups(conn)
+    stats    = _global_stats(conn)
+    configs  = conn.execute("""
+        SELECT msc.id, msc.mailbox_name, msc.active, msc.last_scanned_at, msc.mail_count,
+               p.name AS project_name, p.id AS project_id
+        FROM mail_scan_config msc
+        LEFT JOIN projects p ON p.id = msc.project_id
+        ORDER BY msc.mailbox_name
+    """).fetchall()
+    projects = conn.execute(
+        "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
+    ).fetchall()
     conn.close()
     return templates.TemplateResponse("dashboard.html", {
-        "request": request,
-        "groups":  groups,
-        "stats":   stats,
+        "request":     request,
+        "groups":      groups,
+        "stats":       stats,
+        "configs":     [dict(r) for r in configs],
+        "projects":    [dict(r) for r in projects],
+        "scan_status":  _mail_scan.get("status"),
+        "scan_new":     _mail_scan.get("total_new"),
+        "scan_error":   _mail_scan.get("error"),
+        "scan_detail":  _mail_scan.get("detail"),
+        "scan_warning": _mail_scan.get("warning"),
     })
 
 
@@ -260,8 +277,9 @@ async def start_scan(request: Request, project_id: int):
         "new":          0,
         "skipped":      0,
         "errors":       0,
-        "current_file": "",
-        "started_at":   _now(),
+        "current_file":   "",
+        "current_folder": "",
+        "started_at":     _now(),
     }
     _cancel_flags[project_id] = {"cancel": False}
     threading.Thread(
@@ -284,7 +302,7 @@ async def cancel_scan(project_id: int):
     s = _scans.get(project_id, {})
     if s.get("status") == "running":
         s["status"] = "cancelled"
-    return HTMLResponse(_scan_badge(project_id, "cancelled"))
+    return HTMLResponse("")
 
 
 @router.get("/projects/{project_id}/scan-progress")
@@ -350,9 +368,10 @@ async def scan_progress_banner(request: Request):
         "new":          s.get("new", 0),
         "skipped":      s.get("skipped", 0),
         "errors":       s.get("errors", 0),
-        "current_file": s.get("current_file", ""),
-        "error":        s.get("error", ""),
-        "project_id":   pid,
+        "current_file":   s.get("current_file", ""),
+        "current_folder": s.get("current_folder", ""),
+        "error":          s.get("error", ""),
+        "project_id":     pid,
     })
     if s.get("status") in ("done", "error"):
         import json as _json
@@ -386,12 +405,14 @@ async def mail_dashboard(request: Request):
     ).fetchall()
     conn.close()
     return templates.TemplateResponse("_dashboard_mail.html", {
-        "request":     request,
-        "configs":     [dict(r) for r in configs],
-        "projects":    [dict(r) for r in projects],
-        "scan_status": _mail_scan.get("status"),
-        "scan_new":    _mail_scan.get("total_new"),
-        "scan_error":  _mail_scan.get("error"),
+        "request":      request,
+        "configs":      [dict(r) for r in configs],
+        "projects":     [dict(r) for r in projects],
+        "scan_status":  _mail_scan.get("status"),
+        "scan_new":     _mail_scan.get("total_new"),
+        "scan_error":   _mail_scan.get("error"),
+        "scan_detail":  _mail_scan.get("detail"),
+        "scan_warning": _mail_scan.get("warning"),
     })
 
 
@@ -459,12 +480,33 @@ async def mail_assign_project(
     project_id:   str = Form(""),
 ):
     conn = connection.get_connection()
-    pid  = int(project_id) if project_id else None
-    with conn:
+    if project_id == "new":
+        # Postfach als eigenes Projekt anlegen
+        virtual_path = f"mailbox:{mailbox_name}"
+        display_name = mailbox_name.split("/")[-1]  # letzter Teil bei "acc/INBOX"
+        with conn:
+            existing = conn.execute(
+                "SELECT id FROM projects WHERE path=?", (virtual_path,)
+            ).fetchone()
+            if existing:
+                pid = existing["id"]
+            else:
+                pid = conn.execute(
+                    "INSERT INTO projects (name, path, active) VALUES (?, ?, 1)",
+                    (display_name, virtual_path),
+                ).lastrowid
         conn.execute(
-            "UPDATE mail_scan_config SET project_id=? WHERE mailbox_name=?",
+            "UPDATE mail_scan_config SET project_id=?, active=1 WHERE mailbox_name=?",
             (pid, mailbox_name),
         )
+        conn.commit()
+    else:
+        pid = int(project_id) if project_id else None
+        with conn:
+            conn.execute(
+                "UPDATE mail_scan_config SET project_id=? WHERE mailbox_name=?",
+                (pid, mailbox_name),
+            )
     conn.close()
     return await mail_dashboard(request)
 
@@ -901,6 +943,16 @@ async def settings_page(
             "password": old.get("password", ""),
         }]
     available, version = _helper_info()
+    # Schneller FDA-Test: Desktop lesbar?
+    import os as _os
+    _desktop = Path(_os.environ.get("HOME", str(Path.home()))) / "Desktop"
+    try:
+        list(_os.scandir(str(_desktop)))
+        fda_missing = False
+    except PermissionError:
+        fda_missing = True
+    except FileNotFoundError:
+        fda_missing = False
     return templates.TemplateResponse("settings.html", {
         "request":          request,
         "cfg":              cfg,
@@ -909,6 +961,7 @@ async def settings_page(
         "helper_available": available,
         "helper_version":   version,
         "helper_url_hint":  _helper_url_hint(cfg),
+        "fda_missing":      fda_missing,
     })
 
 
@@ -1176,14 +1229,34 @@ def _run_mail_scan():
         ).fetchall()
         conn.close()
 
+        if not active:
+            _mail_scan["status"]      = "done"
+            _mail_scan["total_new"]   = 0
+            _mail_scan["finished_at"] = _now()
+            _mail_scan["warning"]     = "Keine aktiven Postfächer — bitte Postfach aktivieren."
+            _mail_scan.pop("detail", None)
+            return
+
         total_new = 0
+        mailbox_details = []
         for row in active:
+            if row["project_id"] is None:
+                log.warning("Postfach '%s' hat kein Projekt — übersprungen", row["mailbox_name"])
+                mailbox_details.append(f"{row['mailbox_name']}: kein Projekt")
+                continue
             try:
                 stats      = scan_mailbox(client, row["mailbox_name"], row["project_id"],
                                           progress=_mail_scan)
                 total_new += stats["new"]
+                log.info("Postfach '%s': %s", row["mailbox_name"], stats)
+                short = row["mailbox_name"].split("/")[-1]
+                mailbox_details.append(
+                    f"{short}: {stats['new']} neu, {stats['skipped']} übersprungen"
+                    + (f", {stats['errors']} Fehler" if stats["errors"] else "")
+                )
             except Exception as exc:
                 log.error("Postfach '%s' fehlgeschlagen: %s", row["mailbox_name"], exc)
+                mailbox_details.append(f"{row['mailbox_name']}: Fehler — {exc}")
 
         try:
             client.logout()
@@ -1193,6 +1266,8 @@ def _run_mail_scan():
         _mail_scan["status"]      = "done"
         _mail_scan["total_new"]   = total_new
         _mail_scan["finished_at"] = _now()
+        _mail_scan["detail"]      = " · ".join(mailbox_details) if mailbox_details else None
+        _mail_scan.pop("warning", None)
     except Exception as exc:
         _mail_scan["status"] = "error"
         _mail_scan["error"]  = str(exc)
@@ -1201,6 +1276,16 @@ def _run_mail_scan():
 def _run_scan(project_id: int, path: str):
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
+
+    # Mailbox-Projekte: Mail-Scan starten statt Datei-Scan
+    if path.startswith("mailbox:"):
+        if _mail_scan.get("status") != "running":
+            _mail_scan.clear()
+            _mail_scan["status"]     = "running"
+            _mail_scan["started_at"] = _now()
+            threading.Thread(target=_run_mail_scan, daemon=True).start()
+        progress.update({"status": "done", "count": 0, "finished_at": _now()})
+        return
 
     # Warten bis kein anderer Scan läuft (1 Worker-Prozess gleichzeitig)
     if not _scan_lock.acquire(blocking=False):
@@ -1319,9 +1404,12 @@ def _now() -> str:
 
 def _scan_badge(project_id: int, status: str) -> str:
     if status == "running":
-        processed = _scans.get(project_id, {}).get("processed", 0)
-        total     = _scans.get(project_id, {}).get("total", 0)
-        label     = f"Scannt… {processed}/{total}" if total else "Scannt…"
+        scan      = _scans.get(project_id, {})
+        processed = scan.get("processed", 0)
+        total     = scan.get("total", 0)
+        folder    = scan.get("current_folder", "")
+        progress  = f" {processed}/{total}" if total else ""
+        label     = f"Scan: {folder}{progress}" if folder else f"Scannt…{progress}"
         return (
             f'<span class="scan-running-wrap" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '

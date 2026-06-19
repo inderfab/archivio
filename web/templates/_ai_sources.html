@@ -39,7 +39,12 @@
   {% endif %}
   <div class="result-excerpt">{{ s.content[:300] }}{% if s.content|length > 300 %}…{% endif %}</div>
   <div class="result-actions">
-    {% if s.filepath %}
+    {% if s.extension == '.eml' %}
+    <button class="btn-sm" data-id="{{ s.document_id }}"
+      onclick="openMail(this.dataset.id)">
+      In Apple Mail öffnen ↗
+    </button>
+    {% elif s.filepath %}
     <button class="btn-sm" data-path="{{ s.filepath }}"
       onclick="helperOpen(this.dataset.path)">
       Öffnen

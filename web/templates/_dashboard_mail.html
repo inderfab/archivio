@@ -5,19 +5,30 @@
   {# Status-Banner #}
   {% if scan_status == 'running' %}
     <div class="scan-badge running"
-         style="display:inline-block; margin-bottom:12px;"
+         style="display:inline-block; margin-bottom:4px;"
          hx-get="/dashboard/mail/scan-status"
          hx-trigger="every 3s"
          hx-target="#mail-section"
          hx-swap="outerHTML">Scannt Mails…</div>
   {% elif scan_status == 'done' %}
-    <div class="scan-badge done" style="display:inline-block; margin-bottom:12px;">
-      ✓ Scan abgeschlossen — {{ scan_new }} neue Mail{{ 's' if scan_new != 1 else '' }}
-    </div>
+    {% if scan_warning %}
+      <div class="scan-badge warn" style="display:inline-block; margin-bottom:4px;">⚠ {{ scan_warning }}</div>
+    {% else %}
+      <div class="scan-badge done" style="display:inline-block; margin-bottom:4px;">
+        ✓ Scan abgeschlossen — {{ scan_new }} neue Mail{{ 's' if scan_new != 1 else '' }}
+      </div>
+    {% endif %}
+    {% if scan_detail %}
+      <div style="font-size:11px; color:var(--text-3); margin-bottom:12px;">{{ scan_detail }}</div>
+    {% else %}
+      <div style="margin-bottom:12px;"></div>
+    {% endif %}
   {% elif scan_status == 'error' %}
     <div class="scan-badge error" style="display:inline-block; margin-bottom:12px;">
       Fehler: {{ scan_error }}
     </div>
+  {% else %}
+    <div style="margin-bottom:12px;"></div>
   {% endif %}
 
   {# Aktions-Leiste #}
@@ -85,6 +96,7 @@
                          color:{% if c.project_id %}var(--text-1){% else %}var(--text-3){% endif %};
                          max-width:200px;">
             <option value="">— Projekt wählen —</option>
+            <option value="new">+ Als eigenes Projekt speichern</option>
             {% for p in projects %}
               <option value="{{ p.id }}" {% if p.id == c.project_id %}selected{% endif %}>{{ p.name }}</option>
             {% endfor %}
