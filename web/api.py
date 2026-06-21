@@ -1025,10 +1025,9 @@ async def install_ollama():
             if is_ollama_installed():
                 _ollama_install_state.update({"running": False, "done": True})
             else:
-                _ollama_install_state.update({
-                    "running": False,
-                    "error": f"Installation fehlgeschlagen (Exit {proc.returncode}) — bitte Terminal öffnen und manuell ausführen: curl -fsSL https://ollama.com/install.sh | sh"
-                })
+                # Der curl-Installer beendet sich bevor der macOS-Passwortdialog
+                # erscheint — die Installation läuft danach im Hintergrund weiter.
+                _ollama_install_state.update({"running": False, "needs_reload": True})
         except Exception as e:
             _ollama_install_state.update({"running": False, "error": str(e)})
 

@@ -59,6 +59,10 @@ function ollamaSetupPoll() {
       if (s.done) {
         status.innerHTML = '<span style="color:#16a34a; font-weight:600;">✓ Ollama installiert — bitte Archivio Server neu starten.</span>';
         localStorage.setItem('ollama_setup_dismissed', '1');
+      } else if (s.needs_reload) {
+        status.innerHTML =
+          '<span style="color:#555;">Bitte das Passwort-Fenster bestätigen (falls noch offen), danach Seite neu laden.</span>' +
+          '<br><button class="btn btn-primary" style="margin-top:10px;" onclick="location.reload()">Seite neu laden</button>';
       } else if (s.error) {
         status.innerHTML = '<span style="color:#dc2626;">' + s.error + '</span>';
         document.getElementById('btn-ollama-setup-install').disabled = false;
