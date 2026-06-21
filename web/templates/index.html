@@ -93,15 +93,15 @@
     <div class="search-scope-group">
       <span class="search-scope-label">Suche in:</span>
       <button type="button" class="scope-btn active" id="scope-docs" onclick="toggleScope('docs')">Dokumente</button>
-      <button type="button" class="scope-btn" id="scope-folders" onclick="toggleScope('folders')">Ordnernamen</button>
-      <button type="button" class="scope-btn" id="scope-filenames" onclick="toggleScope('filenames')">Dateinamen</button>
+      <button type="button" class="scope-btn active" id="scope-folders" onclick="toggleScope('folders')">Ordnernamen</button>
+      <button type="button" class="scope-btn active" id="scope-filenames" onclick="toggleScope('filenames')">Dateinamen</button>
       <span style="color:var(--border);margin:0 2px;">|</span>
       <button type="button" class="scope-btn" id="scope-plans" onclick="toggleScope('plans')" title="Nur Pläne aus ArchiCAD/Vectorworks">Pläne</button>
     </div>
     <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
       onclick="toggleMehrFilter()">⚙ Mehr Filter</button>
   </div>
-  <input type="hidden" name="search_in" id="search_in_input" value="docs">
+  <input type="hidden" name="search_in" id="search_in_input" value="docs,filenames,folders">
 
   <div id="mehr-filter-panel" class="mehr-filter-panel" style="display:none;">
 

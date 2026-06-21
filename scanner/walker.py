@@ -157,8 +157,21 @@ def _system_under_pressure() -> bool:
         return False
 
 _LIST_ONLY_EXTENSIONS = {
-    ".c4d", ".tiff", ".tif", ".png", ".jpg", ".jpeg",
-    ".xml", ".3ds", ".obj", ".stp", ".step", ".stl", ".tx",
+    # Bilder
+    ".png", ".jpg", ".jpeg", ".gif", ".bmp", ".webp",
+    ".heic", ".heif", ".tiff", ".tif", ".svg",
+    ".raw", ".cr2", ".nef", ".arw", ".dng",
+    # Video / Audio
+    ".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv",
+    ".mp3", ".wav", ".aac", ".m4a", ".flac",
+    # 3D / Render
+    ".c4d", ".3ds", ".obj", ".fbx", ".exr", ".hdr",
+    ".stp", ".step", ".stl", ".tx",
+    # Adobe / Design
+    ".ai", ".psd", ".indd",
+    # Archiv / Sonstiges
+    ".zip", ".rar", ".7z", ".gz",
+    ".xml",
 }
 
 # Formate die komplett in RAM geladen werden → Grössencheck
@@ -339,7 +352,7 @@ def scan_project(project_id: int, root: Path,
                 if filename.startswith('.'):
                     continue
                 path = Path(dirpath) / filename
-                if path.suffix.lower() not in supported:
+                if path.suffix.lower() not in supported and path.suffix.lower() not in _LIST_ONLY_EXTENSIONS:
                     continue
                 found_any = True
                 if progress is not None:
