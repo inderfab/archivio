@@ -58,33 +58,13 @@
       onchange="updateChips()">
       <option value="">Alle Typen</option>
       <option value="mail">✉ Mail</option>
-      <optgroup label="Dokumente">
-        <option value=".pdf">PDF</option>
-        <option value=".docx">DOCX</option>
-        <option value=".doc">DOC</option>
-        <option value=".xlsx">XLSX</option>
-        <option value=".txt">TXT</option>
-        <option value=".rtf">RTF</option>
+      {% if doc_extensions %}
+      <optgroup label="Dateitypen in Archiv">
+        {% for ext in doc_extensions %}
+        <option value="{{ ext }}">{{ ext.lstrip('.').upper() }}</option>
+        {% endfor %}
       </optgroup>
-      <optgroup label="CAD / BIM">
-        <option value=".dwg">DWG</option>
-        <option value=".dxf">DXF</option>
-        <option value=".pln">PLN (ArchiCAD)</option>
-        <option value=".vwx">VWX (Vectorworks)</option>
-        <option value=".ifc">IFC</option>
-        <option value=".rvt">RVT (Revit)</option>
-        <option value=".skp">SKP (SketchUp)</option>
-        <option value=".3dm">3DM (Rhino)</option>
-        <option value=".nwd">NWD (Navisworks)</option>
-      </optgroup>
-      <optgroup label="Medien">
-        <option value=".psd">PSD</option>
-        <option value=".ai">AI</option>
-        <option value=".indd">INDD</option>
-        <option value=".mp4">MP4</option>
-        <option value=".mov">MOV</option>
-        <option value=".zip">ZIP</option>
-      </optgroup>
+      {% endif %}
     </select>
   </div>
 
