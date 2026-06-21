@@ -306,10 +306,13 @@ def scan_project(project_id: int, root: Path,
     # löst der automatische Segment-Merge mitten im Worker-Commit aus und blockiert
     # den Prozess für Minuten (erscheint als "hängt bei 99%").
     # Nach dem Scan wird einmalig optimize() aufgerufen.
+    # isolation_level=None = autocommit — keine implizite Transaktion, kein Risiko
+    # dass der Lock nach close() noch gehalten wird (Python 3.13 Kompatibilität)
     try:
-        _fts_conn = connection.get_connection()
+        import sqlite3 as _sqlite3
+        _db_path = str(connection._resolve_path())
+        _fts_conn = _sqlite3.connect(_db_path, timeout=10, isolation_level=None)
         _fts_conn.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=0')")
-        _fts_conn.commit()
         _fts_conn.close()
     except Exception:
         pass
@@ -432,11 +435,11 @@ def scan_project(project_id: int, root: Path,
     # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
     def _fts_optimize():
         try:
-            c = connection.get_connection()
+            import sqlite3 as _sqlite3
+            _db_path = str(connection._resolve_path())
+            c = _sqlite3.connect(_db_path, timeout=30, isolation_level=None)
             c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
-            c.commit()
             c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
-            c.commit()
             c.close()
             log.info("FTS5 optimize abgeschlossen")
         except Exception as exc:
