@@ -270,18 +270,21 @@
           var asset = data.assets.find(function(a) {
             return a.name.indexOf('archivio-server') !== -1 && a.name.endsWith('.pkg');
           });
-          window.location.href = asset
+          var downloadUrl = asset
             ? asset.browser_download_url
             : 'https://github.com/inderfab/archivio/releases/latest';
+          // Download in verstecktem iframe starten (kein Seitenwechsel)
+          var iframe = document.createElement('iframe');
+          iframe.style.display = 'none';
+          iframe.src = downloadUrl;
+          document.body.appendChild(iframe);
+          // Zur Anleitung weiterleiten
           setTimeout(function() {
-            btn.textContent = 'Herunterladen';
-            btn.disabled = false;
-          }, 3000);
+            window.location.href = 'docs.html#setup';
+          }, 1500);
         })
         .catch(function() {
-          window.location.href = 'https://github.com/inderfab/archivio/releases/latest';
-          btn.textContent = 'Herunterladen';
-          btn.disabled = false;
+          window.location.href = 'docs.html#setup';
         });
     }
 

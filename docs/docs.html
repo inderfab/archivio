@@ -269,8 +269,7 @@
 
         <h3>Schritt 1 — Archivio Server installieren</h3>
         <ol class="step-list">
-          <li>Das neuste <code>.pkg</code> von der <a href="https://github.com/inderfab/archivio/releases/latest">Releases-Seite</a> herunterladen.</li>
-          <li>Doppelklick auf die <code>.pkg</code>-Datei — der Installer öffnet sich.</li>
+          <li>Doppelklick auf die heruntergeladene <code>.pkg</code>-Datei — der Installer öffnet sich.<br><small style="color:#888;">Falls macOS die Datei blockiert: <a href="#sicherheitswarnung">Sicherheitswarnung beim ersten Öffnen ↓</a></small></li>
           <li>Auf <strong>Fortfahren</strong> und dann <strong>Installieren</strong> klicken.</li>
           <li>Mac-Passwort eingeben und auf <strong>Software installieren</strong> klicken.</li>
           <li>Zwei Berechtigungsdialoge erscheinen — jeweils <strong>Erlauben</strong> klicken.</li>
@@ -324,7 +323,7 @@
             <figcaption>So sieht es aus wenn Archivio Server aktiv ist.</figcaption>
           </figure>
         </div>
-        <h3>Sicherheitswarnung beim ersten Öffnen</h3>
+        <h3 id="sicherheitswarnung">Sicherheitswarnung beim ersten Öffnen</h3>
         <p>Auf macOS Ventura und neuer kann macOS die App beim ersten Öffnen blockieren. So gehst du vor:</p>
         <ol class="step-list">
           <li>Beim ersten Start erscheint der Hinweis, dass „Archivio Server.app" nicht geöffnet werden konnte. Klicke auf <strong>Fertig</strong>.</li>
@@ -466,11 +465,11 @@
         <p>Ollama wird direkt aus Archivio heraus installiert — kein manuelles Herunterladen nötig.</p>
         <ol class="step-list">
           <li>KI-Suche öffnen. Falls Ollama fehlt, erscheint die Meldung „KI-Suche nicht verfügbar" mit einem Button <strong>„Ollama jetzt installieren"</strong>.</li>
-          <li>Button klicken — Archivio führt <code>brew install ollama</code> automatisch aus. Der Fortschritt wird direkt angezeigt.</li>
+          <li>Button klicken — Archivio lädt Ollama automatisch herunter und installiert es. Der Fortschritt wird direkt angezeigt.</li>
           <li>Nach erfolgreicher Installation: Archivio Server neu starten. Er lädt das Sprachmodell automatisch beim ersten Start.</li>
         </ol>
         <div class="callout">
-          <strong>Wichtig:</strong> Ollama muss per Terminal installiert werden — die Ollama.app von ollama.com funktioniert nicht, da sie keine Terminal-Verbindung herstellt. Archivio installiert Ollama korrekt per Button automatisch.
+          <strong>Hinweis:</strong> Ollama läuft vollständig lokal auf diesem Computer — keine Cloud, keine Abos. Archivio installiert es per Button automatisch.
         </div>
         <h3>Manuelle Installation (Alternative)</h3>
         <p>Ollama lässt sich auch manuell installieren: Das Programm <strong>Terminal</strong> öffnen, folgenden Befehl reinkopieren und mit Enter bestätigen:</p>
