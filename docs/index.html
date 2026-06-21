@@ -118,6 +118,39 @@
       color: #999;
     }
 
+    /* ── Newsletter ── */
+    .newsletter {
+      margin-top: 28px;
+      display: flex;
+      gap: 8px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .newsletter input[type="email"] {
+      font-size: 15px;
+      padding: 11px 16px;
+      border: 1.5px solid #d0d0d0;
+      border-radius: 6px;
+      outline: none;
+      width: 240px;
+      transition: border-color 0.15s;
+    }
+    .newsletter input[type="email"]:focus { border-color: #111; }
+    .newsletter button {
+      font-size: 15px;
+      font-weight: 500;
+      padding: 11px 20px;
+      border-radius: 6px;
+      border: none;
+      background: #111;
+      color: #fff;
+      cursor: pointer;
+      transition: background 0.15s;
+      white-space: nowrap;
+    }
+    .newsletter button:hover { background: #333; }
+    .newsletter button:disabled { background: #888; cursor: default; }
+
     /* ── Demo-Video ── */
     .demo-video {
       max-width: 960px;
@@ -180,6 +213,11 @@
         <a class="btn-docs" href="docs.html">Anleitung</a>
       </div>
       <p class="hero-meta">macOS &nbsp;·&nbsp; Kostenlos</p>
+
+      <div class="newsletter">
+        <input type="email" id="nl-email" placeholder="E-Mail für Updates eintragen">
+        <button id="nl-btn" onclick="subscribeNewsletter()">Eintragen</button>
+      </div>
     </section>
 
     <section class="demo-video">
@@ -199,21 +237,42 @@
   </footer>
 
   <script>
+    var _TRACKING_URL = 'https://script.google.com/macros/s/AKfycbxXHYI5XyzKuH08YUP_jhTUunXRfLcC4wPJwUobE4gyZXJ-24HN5moHUDW9Eio81y8ZQg/exec';
+    var _latestVersion = '';
+
+    // Version beim Seitenload im Hintergrund holen
+    fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { _latestVersion = d.tag_name || ''; })
+      .catch(function() {});
+
+    function _track(payload) {
+      fetch(_TRACKING_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(function() {});
+    }
+
     function downloadLatest() {
       var btn = document.getElementById('btn-dl');
       btn.textContent = 'Wird geladen…';
       btn.disabled = true;
+
+      // Tracking parallel feuern — Download nicht blockieren
+      _track({ type: 'download', version: _latestVersion });
+
       fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
         .then(function(r) { return r.json(); })
         .then(function(data) {
+          _latestVersion = data.tag_name || _latestVersion;
           var asset = data.assets.find(function(a) {
             return a.name.indexOf('archivio-server') !== -1 && a.name.endsWith('.pkg');
           });
-          if (asset) {
-            window.location.href = asset.browser_download_url;
-          } else {
-            window.location.href = 'https://github.com/inderfab/archivio/releases/latest';
-          }
+          window.location.href = asset
+            ? asset.browser_download_url
+            : 'https://github.com/inderfab/archivio/releases/latest';
           setTimeout(function() {
             btn.textContent = 'Herunterladen';
             btn.disabled = false;
@@ -224,6 +283,15 @@
           btn.textContent = 'Herunterladen';
           btn.disabled = false;
         });
+    }
+
+    function subscribeNewsletter() {
+      var email = document.getElementById('nl-email').value.trim();
+      if (!email) return;
+      var btn = document.getElementById('nl-btn');
+      btn.disabled = true;
+      _track({ type: 'newsletter', email: email, version: _latestVersion });
+      btn.textContent = '✓ Eingetragen';
     }
   </script>
 </body>
