@@ -115,7 +115,7 @@ async def problem_docs(request: Request):
     docs = _problem_documents(conn)
     conn.close()
     if not docs:
-        return HTMLResponse("")
+        return HTMLResponse('<div id="problem-docs-container"></div>')
     return templates.TemplateResponse("_problem_docs.html", {
         "request":      request,
         "problem_docs": docs,

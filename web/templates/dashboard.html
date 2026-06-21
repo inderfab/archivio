@@ -43,7 +43,7 @@
   {# ── Fehlerhafte Dokumente — lazy via HTMX ── #}
   <div id="problem-docs-container"
        hx-get="/dashboard/problem-docs"
-       hx-trigger="load"
+       hx-trigger="load, archivio:scanComplete from:body"
        hx-swap="outerHTML"
        style="margin-top: 32px; color: var(--text-3); font-size: 13px;">
   </div>
