@@ -317,11 +317,6 @@ async def index(request: Request):
         "SELECT mailbox_name FROM mail_scan_config WHERE active=1 AND project_id IS NULL ORDER BY mailbox_name"
     ).fetchall()
     total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
-    doc_extensions = [
-        r[0] for r in conn.execute(
-            "SELECT DISTINCT extension FROM documents WHERE extension IS NOT NULL AND extension != '' ORDER BY extension"
-        ).fetchall()
-    ]
     conn.close()
     mail_mailboxes = [
         {"mailbox_name": r["mailbox_name"], "display_name": _mailbox_display_name(r["mailbox_name"])}
@@ -332,7 +327,6 @@ async def index(request: Request):
         "projects":       projects,
         "mail_mailboxes": mail_mailboxes,
         "total_docs":     total_docs,
-        "doc_extensions": doc_extensions,
     })
 
 

@@ -340,7 +340,6 @@ def scan_project(project_id: int, root: Path,
     _track_pool(pool)
 
     found_any = False
-    total_processed = 0  # kumulativ über alle Ordner für WAL-Checkpoint
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [
@@ -349,25 +348,15 @@ def scan_project(project_id: int, root: Path,
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
             ]
-
-            # Verarbeitbare Dateien für diesen Ordner — os.walk hat sie bereits im Speicher,
-            # kein Extra-I/O nötig. Damit zeigt der Fortschrittsbalken X/Y pro Ordnerebene.
-            dir_processable = [
-                f for f in filenames
-                if not f.startswith('.')
-                and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
-            ]
-            if not dir_processable:
-                continue
-
-            found_any = True
-            if progress is not None:
-                progress["total"]          = len(dir_processable)
-                progress["processed"]      = 0
-                progress["current_folder"] = Path(dirpath).name
-
-            for filename in dir_processable:
+            for filename in filenames:
+                if filename.startswith('.'):
+                    continue
                 path = Path(dirpath) / filename
+                if path.suffix.lower() not in supported and path.suffix.lower() not in _LIST_ONLY_EXTENSIONS:
+                    continue
+                found_any = True
+                if progress is not None:
+                    progress["total"] += 1
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
@@ -385,11 +374,11 @@ def scan_project(project_id: int, root: Path,
                     if progress is not None:
                         progress["processed"] += 1
                         progress["errors"]    += 1
-                    total_processed += 1
                     continue
 
                 if progress is not None:
-                    progress["current_file"] = path.name
+                    progress["current_file"]   = path.name
+                    progress["current_folder"] = path.parent.name
 
                 ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
                 start  = time.monotonic()
@@ -435,15 +424,14 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
 
-                total_processed += 1
                 if progress is not None:
                     progress["processed"] += 1
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
                     else:                     progress["errors"] += 1
 
-                # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
-                if total_processed > 0 and total_processed % 100 == 0:
+                # WAL-Checkpoint alle 100 Dateien
+                if progress is not None and progress["processed"] % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()
                         _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
