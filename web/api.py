@@ -1021,12 +1021,13 @@ async def install_ollama():
             for line in proc.stdout:
                 _ollama_install_state["log"].append(line.rstrip())
             proc.wait()
-            if proc.returncode == 0:
+            from scanner.embedder import is_ollama_installed
+            if is_ollama_installed():
                 _ollama_install_state.update({"running": False, "done": True})
             else:
                 _ollama_install_state.update({
                     "running": False,
-                    "error": f"Installation fehlgeschlagen (Exit {proc.returncode})"
+                    "error": f"Installation fehlgeschlagen (Exit {proc.returncode}) — bitte Terminal öffnen und manuell ausführen: curl -fsSL https://ollama.com/install.sh | sh"
                 })
         except Exception as e:
             _ollama_install_state.update({"running": False, "error": str(e)})

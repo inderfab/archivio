@@ -14,12 +14,13 @@
     Soll Ollama jetzt kostenlos installiert werden?
   </div>
 
-  <div id="ollama-setup-actions" style="display:flex; gap:10px; flex-wrap:wrap;">
+  <div id="ollama-setup-actions" style="display:flex; align-items:center; gap:16px; flex-wrap:wrap;">
     <button class="btn btn-primary" id="btn-ollama-setup-install" onclick="ollamaSetupInstall()">
       Jetzt installieren
     </button>
-    <button class="btn" id="btn-ollama-setup-skip" onclick="ollamaSetupDismiss()" style="background:transparent; border:1px solid var(--border); color:var(--text-1);">
-      Später
+    <button id="btn-ollama-setup-skip" onclick="ollamaSetupDismiss()"
+      style="background:none; border:none; padding:0; font-size:13px; color:var(--text-3); cursor:pointer; text-decoration:underline;">
+      Nicht installieren
     </button>
   </div>
 
