@@ -460,21 +460,25 @@
 
       <div class="doc-section" id="ki">
         <h2>KI-Suche aktivieren</h2>
-        <p>Die KI-Suche beantwortet Fragen auf Basis der indizierten Dokumente — ohne Cloud, vollständig lokal.</p>
-        <h3>Voraussetzung: Ollama installieren</h3>
-        <p>Ollama wird direkt aus Archivio heraus installiert — kein manuelles Herunterladen nötig.</p>
+        <p>Die KI-Suche beantwortet Fragen auf Basis der indizierten Dokumente — ohne Cloud, vollständig lokal. Als Grundlage dient <strong>Ollama</strong>, ein kostenloses, lokales Sprachmodell.</p>
+
+        <h3>Ollama installieren</h3>
+        <p>Beim ersten Öffnen von Archivio erscheint eine Karte im Dashboard, falls Ollama noch nicht installiert ist:</p>
         <ol class="step-list">
-          <li>KI-Suche öffnen. Falls Ollama fehlt, erscheint die Meldung „KI-Suche nicht verfügbar" mit einem Button <strong>„Ollama jetzt installieren"</strong>.</li>
-          <li>Button klicken — Archivio lädt Ollama automatisch herunter und installiert es. Der Fortschritt wird direkt angezeigt.</li>
-          <li>Nach erfolgreicher Installation: Archivio Server neu starten. Er lädt das Sprachmodell automatisch beim ersten Start.</li>
+          <li>Im Dashboard die Karte <strong>„KI-Suche einrichten"</strong> anklicken — <strong>Jetzt installieren</strong> wählen.</li>
+          <li>Archivio lädt Ollama automatisch herunter und installiert es. Der Fortschritt wird direkt angezeigt.</li>
+          <li>Nach erfolgreicher Installation: Archivio Server neu starten (Menüleisten-Icon → Beenden → wieder öffnen).</li>
+          <li>Archivio lädt das Sprachmodell beim ersten Start automatisch — das kann einige Minuten dauern.</li>
         </ol>
         <div class="callout">
-          <strong>Hinweis:</strong> Ollama läuft vollständig lokal auf diesem Computer — keine Cloud, keine Abos. Archivio installiert es per Button automatisch.
+          <strong>Hinweis:</strong> Ollama läuft vollständig lokal auf diesem Computer — keine Cloud, keine Abos. Die Karte erscheint nicht mehr, sobald Ollama installiert ist. Falls du die Karte mit „Später" weggeklickt hast, kannst du Ollama über die KI-Suche nachinstallieren.
         </div>
-        <h3>Manuelle Installation (Alternative)</h3>
-        <p>Ollama lässt sich auch manuell installieren: Das Programm <strong>Terminal</strong> öffnen, folgenden Befehl reinkopieren und mit Enter bestätigen:</p>
+
+        <h3>Manuelle Installation</h3>
+        <p>Alternativ lässt sich Ollama per Terminal installieren. Das Programm <strong>Terminal</strong> öffnen, folgenden Befehl reinkopieren und mit Enter bestätigen:</p>
         <pre style="background:#1a1a1a;color:#d4d4d4;padding:14px 18px;border-radius:8px;font-family:'SF Mono',Menlo,Monaco,monospace;font-size:13px;overflow-x:auto;">curl -fsSL https://ollama.com/install.sh | sh</pre>
         <p>Danach Archivio Server neu starten.</p>
+
         <h3>KI-Suche verwenden</h3>
         <p>Im Suchfeld oben den Tab <strong>„KI-Suche"</strong> wählen und eine Frage in ganzen Sätzen stellen, z.&nbsp;B.: <em>„Welche Anforderungen gelten für den Brandschutz im Treppenhaus?"</em></p>
         <p>Archivio sucht die relevantesten Textstellen und formuliert eine Antwort mit Quellenangaben.</p>
