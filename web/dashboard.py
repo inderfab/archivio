@@ -78,6 +78,7 @@ def _server_info() -> tuple[bool, str]:
 
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
+    from scanner.embedder import is_ollama_installed
     conn = connection.get_connection()
     connection.init_schema()
     groups   = _project_groups(conn)
@@ -94,16 +95,17 @@ async def dashboard(request: Request):
     ).fetchall()
     conn.close()
     return templates.TemplateResponse("dashboard.html", {
-        "request":     request,
-        "groups":      groups,
-        "stats":       stats,
-        "configs":     [dict(r) for r in configs],
-        "projects":    [dict(r) for r in projects],
+        "request":      request,
+        "groups":       groups,
+        "stats":        stats,
+        "configs":      [dict(r) for r in configs],
+        "projects":     [dict(r) for r in projects],
         "scan_status":  _mail_scan.get("status"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
         "scan_warning": _mail_scan.get("warning"),
+        "ollama_missing": not is_ollama_installed(),
     })
 
 

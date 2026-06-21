@@ -4,6 +4,9 @@
 {% block content %}
 <div style="padding-top: 32px;">
 
+  {# ── Ollama-Setup (nur wenn nicht installiert und nicht weggeklickt) ── #}
+  {% include "_ollama_setup.html" %}
+
   {# ── Scan-Fortschritt ── #}
   <div id="scan-progress-banner"
        hx-get="/dashboard/scan-progress-banner"

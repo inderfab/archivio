@@ -1,0 +1,80 @@
+{% if ollama_missing %}
+<div id="ollama-setup-card" style="
+  background: #f8f8f8;
+  border: 1px solid #e0e0e0;
+  border-radius: 10px;
+  padding: 24px 28px;
+  margin-bottom: 28px;
+  max-width: 640px;
+">
+  <div style="font-weight: 600; font-size: 15px; margin-bottom: 8px;">KI-Suche einrichten</div>
+  <div style="font-size: 14px; color: var(--text-2); margin-bottom: 20px; line-height: 1.6;">
+    Für die KI-Suche braucht es das lokale Sprachmodell <strong>Ollama</strong>.
+    Es läuft vollständig auf diesem Computer — keine Cloud, keine Abos.
+    Soll Ollama jetzt kostenlos installiert werden?
+  </div>
+
+  <div id="ollama-setup-actions" style="display:flex; gap:10px; flex-wrap:wrap;">
+    <button class="btn btn-primary" id="btn-ollama-setup-install" onclick="ollamaSetupInstall()">
+      Jetzt installieren
+    </button>
+    <button class="btn" id="btn-ollama-setup-skip" onclick="ollamaSetupDismiss()" style="background:transparent; border:1px solid var(--border); color:var(--text-1);">
+      Später
+    </button>
+  </div>
+
+  <div id="ollama-setup-log" style="display:none; margin-top:16px; background:#1a1a1a; color:#d4d4d4;
+    font-family: monospace; font-size: 12px; padding: 12px; border-radius: 6px;
+    max-height: 180px; overflow-y: auto; white-space: pre-wrap;"></div>
+
+  <div id="ollama-setup-status" style="margin-top:12px; font-size:13px;"></div>
+</div>
+
+<script>
+function ollamaSetupDismiss() {
+  localStorage.setItem('ollama_setup_dismissed', '1');
+  document.getElementById('ollama-setup-card').style.display = 'none';
+}
+
+function ollamaSetupInstall() {
+  document.getElementById('btn-ollama-setup-install').disabled = true;
+  document.getElementById('btn-ollama-setup-install').textContent = 'Wird installiert…';
+  document.getElementById('btn-ollama-setup-skip').style.display = 'none';
+  document.getElementById('ollama-setup-log').style.display = 'block';
+  fetch('/api/ai/install-ollama', { method: 'POST' })
+    .then(function() { ollamaSetupPoll(); });
+}
+
+function ollamaSetupPoll() {
+  fetch('/api/ai/install-ollama/status')
+    .then(function(r) { return r.json(); })
+    .then(function(s) {
+      var log    = document.getElementById('ollama-setup-log');
+      var status = document.getElementById('ollama-setup-status');
+      if (s.log && s.log.length) {
+        log.textContent = s.log.join('\n');
+        log.scrollTop = log.scrollHeight;
+      }
+      if (s.done) {
+        status.innerHTML = '<span style="color:#16a34a; font-weight:600;">✓ Ollama installiert — bitte Archivio Server neu starten.</span>';
+        localStorage.setItem('ollama_setup_dismissed', '1');
+      } else if (s.error) {
+        status.innerHTML = '<span style="color:#dc2626;">' + s.error + '</span>';
+        document.getElementById('btn-ollama-setup-install').disabled = false;
+        document.getElementById('btn-ollama-setup-install').textContent = 'Erneut versuchen';
+        document.getElementById('btn-ollama-setup-skip').style.display = '';
+      } else if (s.running) {
+        setTimeout(ollamaSetupPoll, 1000);
+      }
+    });
+}
+
+// Einmalig prüfen ob der User es schon weggeklickt hatte
+(function() {
+  if (localStorage.getItem('ollama_setup_dismissed') === '1') {
+    var card = document.getElementById('ollama-setup-card');
+    if (card) card.style.display = 'none';
+  }
+})();
+</script>
+{% endif %}

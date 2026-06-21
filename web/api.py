@@ -1012,19 +1012,10 @@ async def install_ollama():
 
     def _run():
         _ollama_install_state.update({"running": True, "done": False, "error": "", "log": []})
-        brew = next(
-            (p for p in ["/opt/homebrew/bin/brew", "/usr/local/bin/brew"] if Path(p).exists()),
-            None
-        )
-        if not brew:
-            _ollama_install_state.update({
-                "running": False,
-                "error": "Homebrew nicht gefunden. Bitte Homebrew zuerst installieren (brew.sh)."
-            })
-            return
         try:
             proc = subprocess.Popen(
-                [brew, "install", "ollama"],
+                "curl -fsSL https://ollama.com/install.sh | sh",
+                shell=True,
                 stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
             )
             for line in proc.stdout:
