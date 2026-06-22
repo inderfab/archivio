@@ -354,11 +354,14 @@ def scan_project(project_id: int, root: Path,
     _track_pool(pool)
 
     # Erste Ebene der Unterordner — ein einziger listdir()-Aufruf, sofort fertig
-    top_dirs     = _first_level_dirs(root, excluded)
-    total_top    = max(1, len(top_dirs))
-    top_idx_map  = {d: i + 1 for i, d in enumerate(top_dirs)}  # 1-basiert
-    current_top  = 0   # aktuell aktiver Top-Level-Ordner-Index
-    total_processed = 0  # kumulativ für WAL-Checkpoint
+    top_dirs       = _first_level_dirs(root, excluded)
+    total_top      = max(1, len(top_dirs))
+    top_idx_map    = {d: i + 1 for i, d in enumerate(top_dirs)}  # 1-basiert
+    current_top    = 0      # aktuell aktiver Top-Level-Ordner-Index (1-basiert)
+    top_per_folder = 100.0 / total_top  # Prozent-Anteil pro Top-Level-Ordner
+    top_base       = 0.0   # Prozent am Eingang des aktuellen Top-Level-Ordners
+    files_in_top   = 0     # Dateien im aktuellen Top-Level-Ordner (kumulativ, für Fortschritt)
+    total_processed = 0    # kumulativ für WAL-Checkpoint
 
     found_any = False
     try:
@@ -377,10 +380,11 @@ def scan_project(project_id: int, root: Path,
             except ValueError:
                 new_top = 0
             if new_top != current_top:
-                current_top = new_top
+                current_top  = new_top
+                top_base     = (current_top - 1) * top_per_folder
+                files_in_top = 0
                 if progress is not None:
-                    # Prozent springt am Eingang jedes Top-Level-Ordners
-                    progress["percent"] = min(99, int((current_top - 1) / total_top * 100))
+                    progress["percent"] = min(99, int(top_base))
 
             # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
             dir_processable = [
@@ -416,9 +420,14 @@ def scan_project(project_id: int, root: Path,
                     _pressure_waits += 1
                 if _pressure_waits >= 6:
                     log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                    files_in_top += 1
                     if progress is not None:
                         progress["processed"] += 1
-                        progress["errors"]    += 1
+                        if path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
+                            progress["listed"] += 1
+                        else:
+                            progress["errors"] += 1
+                        progress["percent"] = min(99, int(top_base + top_per_folder * (1 - 1.0 / (1 + files_in_top / 50.0))))
                     total_processed += 1
                     continue
 
@@ -469,13 +478,20 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
 
+                # Bilder/Videos/3D: "error" → "listed" (Text wurde nie erwartet)
+                if result == "error" and path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
+                    result = "listed"
+
                 total_processed += 1
+                files_in_top += 1
                 if progress is not None:
                     progress["processed"] += 1
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
                     elif result == "listed":  progress["listed"] += 1
                     else:                     progress["errors"] += 1
+                    # Fortschritt steigt asymptotisch innerhalb des Top-Level-Ordner-Bereichs
+                    progress["percent"] = min(99, int(top_base + top_per_folder * (1 - 1.0 / (1 + files_in_top / 50.0))))
 
                 # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
                 if total_processed % 100 == 0:
