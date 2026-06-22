@@ -28,6 +28,8 @@ _scans: dict[int, dict] = {}
 _cancel_flags: dict[int, dict] = {}
 # Mail-Scan-Status
 _mail_scan: dict = {}
+# Lösch-Status {project_id: "running"|"done"|"error"}
+_deletions: dict[int, str] = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
 _scan_lock        = threading.Semaphore(1)
 _embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
@@ -248,12 +250,58 @@ async def deactivate_project(request: Request, project_id: int):
     })
 
 
+def _delete_project_bg(project_id: int) -> None:
+    """Löscht Projekt + alle Dokumente im Hintergrund-Thread."""
+    try:
+        conn = connection.get_connection()
+        with conn:
+            # FTS-Einträge vorab in einem Bulk-Delete entfernen, damit der
+            # per-Row-Trigger (AFTER DELETE ON document_content) weniger tun muss.
+            conn.execute(
+                "DELETE FROM documents_fts WHERE rowid IN "
+                "(SELECT id FROM documents WHERE project_id=?)",
+                (project_id,),
+            )
+            conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        conn.close()
+        _deletions[project_id] = "done"
+        log.info("Projekt %s aus DB gelöscht", project_id)
+    except Exception as exc:
+        log.error("Fehler beim Löschen von Projekt %s: %s", project_id, exc)
+        _deletions[project_id] = "error"
+
+
+def _delete_loading_html(project_id: int) -> str:
+    return (
+        f'<div style="padding:12px 16px; color:var(--text-3); font-size:13px;'
+        f' border:1px solid var(--border); border-radius:8px; margin-bottom:8px;"'
+        f' hx-get="/dashboard/projects/{project_id}/delete-status"'
+        f' hx-trigger="every 2s"'
+        f' hx-target="#project-list"'
+        f' hx-swap="innerHTML">'
+        f'⟳ Wird aus Datenbank entfernt…</div>'
+    )
+
+
 @router.post("/projects/{project_id}/delete", response_class=HTMLResponse)
-async def delete_project(request: Request, project_id: int):
-    """Projekt und alle Dokumente aus DB entfernen."""
+async def delete_project(project_id: int):
+    """Startet Löschung im Hintergrund, gibt sofort Loading-State zurück."""
+    if _deletions.get(project_id) != "running":
+        _deletions[project_id] = "running"
+        threading.Thread(
+            target=_delete_project_bg, args=(project_id,), daemon=True
+        ).start()
+    return HTMLResponse(_delete_loading_html(project_id))
+
+
+@router.get("/projects/{project_id}/delete-status", response_class=HTMLResponse)
+async def delete_project_status(request: Request, project_id: int):
+    """Polling-Endpunkt: liefert Loading-State oder fertige Projektliste."""
+    status = _deletions.get(project_id, "done")
+    if status == "running":
+        return HTMLResponse(_delete_loading_html(project_id))
+    _deletions.pop(project_id, None)
     conn = connection.get_connection()
-    with conn:
-        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
