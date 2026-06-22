@@ -301,6 +301,16 @@ def scan_project(project_id: int, root: Path,
     """
     supported = _supported_extensions()
     excluded  = _excluded_folders()
+
+    # Vom Benutzer via UI ignorierte Unterordner (ignored_paths-Tabelle)
+    _ic = connection.get_connection()
+    ignored_paths: set[str] = {
+        row[0] for row in _ic.execute(
+            "SELECT path FROM ignored_paths WHERE project_id=?", (project_id,)
+        )
+    }
+    _ic.close()
+
     tasks_per_worker = max(3, int(settings.get("scanner.tasks_per_worker", 5)))
     num_workers      = max(1, min(4, int(settings.get("scanner.num_workers", 1))))
 
@@ -371,6 +381,7 @@ def scan_project(project_id: int, root: Path,
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
                 and Path(d).suffix.lower() not in _FAKE_DIR_SUFFIXES
+                and str(Path(dirpath) / d) not in ignored_paths
             ]
 
             # Verarbeitbare Dateien dieses Ordners (Extension-Filter, kein stat())
