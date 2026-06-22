@@ -254,9 +254,9 @@ def _delete_project_bg(project_id: int) -> None:
     try:
         conn = connection.get_connection()
         with conn:
-            # mail_scan_configs hat kein ON DELETE CASCADE → vorher entkoppeln
+            # mail_scan_config hat kein ON DELETE CASCADE — Mailbox mitlöschen
             conn.execute(
-                "UPDATE mail_scan_configs SET project_id=NULL WHERE project_id=?",
+                "DELETE FROM mail_scan_config WHERE project_id=?",
                 (project_id,),
             )
             # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
