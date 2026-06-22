@@ -33,7 +33,10 @@
       {% endif %}
     {% endif %}
     <div class="spb-stats">
-      ✓ {{ new }} neu &nbsp;&nbsp; ↷ {{ skipped }} unverändert &nbsp;&nbsp; ⚠ {{ errors }} Fehler
+      ✓ {{ new }} neu &nbsp;&nbsp;
+      {% if listed %} 📄 {{ listed }} ohne Text &nbsp;&nbsp; {% endif %}
+      ↷ {{ skipped }} unverändert
+      {% if errors %} &nbsp;&nbsp; ⚠ {{ errors }} Fehler {% endif %}
     </div>
   {% endif %}
 </div>

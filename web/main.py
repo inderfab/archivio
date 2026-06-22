@@ -547,6 +547,19 @@ def _search(conn, q: str, filters: str, filter_params: list):
     return results, error
 
 
+_TYPE_CATEGORIES: dict[str, list[str]] = {
+    "cat:bilder":    [".png", ".jpg", ".jpeg", ".tiff", ".tif", ".heic", ".heif",
+                      ".webp", ".gif", ".bmp", ".svg", ".raw", ".cr2", ".nef", ".arw", ".dng"],
+    "cat:cad":       [".dwg", ".dxf", ".pln", ".vwx", ".ifc", ".rvt", ".skp", ".3dm", ".nwd"],
+    "cat:3d":        [".step", ".stp", ".stl", ".3ds", ".obj", ".fbx", ".c4d"],
+    "cat:adobe":     [".psd", ".ai", ".indd"],
+    "cat:video":     [".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv",
+                      ".mp3", ".wav", ".aac", ".m4a", ".flac"],
+    "cat:dokumente": [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".xlsm",
+                      ".pptx", ".ppt", ".txt", ".rtf", ".csv", ".eml", ".msg"],
+}
+
+
 def _build_filters(
     project_id: str, ext: str,
     from_addr: str = "", to_addr: str = "", subject_filter: str = "",
@@ -582,6 +595,11 @@ def _build_filters(
                 pass
     if ext == "mail":
         filters += " AND d.source_type = 'email'"
+    elif ext in _TYPE_CATEGORIES:
+        exts = _TYPE_CATEGORIES[ext]
+        placeholders = ",".join("?" * len(exts))
+        filters += f" AND d.extension IN ({placeholders})"
+        params.extend(exts)
     elif ext:
         e = ext if ext.startswith(".") else f".{ext}"
         filters += " AND d.extension = ?"

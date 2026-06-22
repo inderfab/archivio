@@ -83,8 +83,8 @@ async def scan_nav_status():
         s         = running[0]
         total     = s.get("total", 0)
         processed = s.get("processed", 0)
-        pct       = f"{int(processed/total*100)}%" if total > 0 else "…"
-        label     = f"⟳ Scan läuft {pct}" if total > 0 else "⟳ Scan läuft…"
+        percent   = s.get("percent", int(processed / total * 100) if total > 0 else 0)
+        label     = f"⟳ Scan läuft {percent}%"
         return _HTML(f'<span class="nav-scan-pill">{label}</span>')
 
     # Mail-Scan

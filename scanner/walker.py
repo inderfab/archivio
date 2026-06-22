@@ -272,6 +272,19 @@ def _total_workers_rss_gb() -> float:
         return 0.0
 
 
+def _first_level_dirs(root: Path, excluded: set[str]) -> list[Path]:
+    """Gibt die direkte erste Ebene der Unterordner zurück — ein einziger listdir()-Aufruf."""
+    try:
+        return sorted([
+            d for d in root.iterdir()
+            if d.is_dir()
+            and not d.name.startswith('.')
+            and not any(excl in unicodedata.normalize('NFC', d.name.lower()) for excl in excluded)
+        ])
+    except OSError:
+        return []
+
+
 def scan_project(project_id: int, root: Path,
                  progress: dict | None = None,
                  cancel_flag: dict | None = None):
@@ -311,6 +324,7 @@ def scan_project(project_id: int, root: Path,
         progress["processed"] = 0
         progress["new"]       = 0
         progress["skipped"]   = 0
+        progress["listed"]    = 0
         progress["errors"]    = 0
 
     _start_memory_watchdog()  # einmalig starten (noop wenn bereits läuft)
@@ -339,6 +353,16 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
+    # Erste Ebene zählen — ein einziger listdir()-Aufruf, sofort fertig
+    top_dirs        = _first_level_dirs(root, excluded)
+    total_top       = max(1, len(top_dirs))
+    top_per_folder  = 100.0 / total_top
+    # Monotoner Counter: steigt nur, springt nie rückwärts (os.walk != alphabetisch)
+    seen_top_dirs   = set()   # bereits besuchte Top-Level-Ordner
+    top_count       = 0       # wie viele Top-Level-Ordner bisher betreten
+    top_base        = 0.0     # Prozent-Basis des aktuellen Top-Level-Ordners
+    total_processed = 0       # kumulativ für WAL-Checkpoint
+
     found_any = False
     try:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -348,15 +372,40 @@ def scan_project(project_id: int, root: Path,
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
             ]
-            for filename in filenames:
-                if filename.startswith('.'):
-                    continue
-                path = Path(dirpath) / filename
-                if path.suffix.lower() not in supported and path.suffix.lower() not in _LIST_ONLY_EXTENSIONS:
-                    continue
-                found_any = True
+
+            # Welchem Top-Level-Ordner gehört dieser Pfad?
+            try:
+                rel = Path(dirpath).relative_to(root)
+                top_dir = (root / rel.parts[0]) if rel.parts else None
+            except ValueError:
+                top_dir = None
+            if top_dir is not None and top_dir not in seen_top_dirs:
+                seen_top_dirs.add(top_dir)
+                top_count += 1
+                top_base = (top_count - 1) * top_per_folder
                 if progress is not None:
-                    progress["total"] += 1
+                    progress["percent"] = min(99, int(top_base))
+
+            # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
+            dir_processable = [
+                f for f in filenames
+                if not f.startswith('.')
+                and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
+            ]
+
+            if progress is not None:
+                progress["current_folder"] = Path(dirpath).name
+                if dir_processable:
+                    progress["total"]     = len(dir_processable)
+                    progress["processed"] = 0
+
+            if not dir_processable:
+                continue
+
+            found_any = True
+
+            for i, filename in enumerate(dir_processable):
+                path = Path(dirpath) / filename
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
@@ -373,12 +422,15 @@ def scan_project(project_id: int, root: Path,
                     log.warning("Speicherdruck hält an — %s übersprungen", path.name)
                     if progress is not None:
                         progress["processed"] += 1
-                        progress["errors"]    += 1
+                        if path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
+                            progress["listed"] += 1
+                        else:
+                            progress["errors"] += 1
+                    total_processed += 1
                     continue
 
                 if progress is not None:
-                    progress["current_file"]   = path.name
-                    progress["current_folder"] = path.parent.name
+                    progress["current_file"] = path.name
 
                 ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
                 start  = time.monotonic()
@@ -424,14 +476,20 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
 
+                # Bilder/Videos/3D: "error" → "listed" (Text wurde nie erwartet)
+                if result == "error" and path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
+                    result = "listed"
+
+                total_processed += 1
                 if progress is not None:
                     progress["processed"] += 1
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
+                    elif result == "listed":  progress["listed"] += 1
                     else:                     progress["errors"] += 1
 
-                # WAL-Checkpoint alle 100 Dateien
-                if progress is not None and progress["processed"] % 100 == 0:
+                # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
+                if total_processed % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()
                         _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
@@ -482,6 +540,29 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     if fast:
         return "skipped"
 
+    # List-Only-Formate (Bilder, Video, 3D, …): Datei NICHT lesen.
+    # Metadaten-Hash aus Pfad+Grösse+mtime — kein Datei-I/O, sofort fertig.
+    if ext in _LIST_ONLY_EXTENSIONS:
+        import hashlib as _hl
+        file_hash = "m:" + _hl.sha256(
+            f"{path}:{stat.st_size}:{mtime_iso}".encode()
+        ).hexdigest()
+        data = {
+            "project_id":  project_id,
+            "hash":        file_hash,
+            "filename":    path.name,
+            "extension":   ext,
+            "filesize":    stat.st_size,
+            "modified_at": mtime_iso,
+            "source_type": "filesystem",
+        }
+        with conn:
+            doc_id = queries.upsert_document(conn, data)
+            queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "listed"
+
+    # Text-Formate: SHA256 des Dateiinhalts (für Deduplikation bei Verschiebungen)
     try:
         file_hash = hasher.sha256(path)
     except OSError as exc:
@@ -509,11 +590,6 @@ def _process_file(conn, project_id: int, path: Path) -> str:
         doc_id = queries.upsert_document(conn, data)
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
 
-    if ext in _LIST_ONLY_EXTENSIONS:
-        with conn:
-            queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
-
     size_mb = stat.st_size / (1024 * 1024)
 
     # Grosse PDFs (Pläne, Scan-Archive) nur registrieren
@@ -522,7 +598,7 @@ def _process_file(conn, project_id: int, path: Path) -> str:
                     size_mb, _MAX_PDF_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
+        return "listed"
 
     # Grössencheck: Formate die alles in RAM laden
     if ext in _SIZE_LIMITED_EXTENSIONS and size_mb > _MAX_EXTRACT_MB:
@@ -530,16 +606,23 @@ def _process_file(conn, project_id: int, path: Path) -> str:
                     size_mb, _MAX_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
+        return "listed"
 
-    _extract_and_store(conn, doc_id, path)
+    extract_status = _extract_and_store(conn, doc_id, path)
+    # "error" nur wenn Text erwartet wurde aber Extraktion scheiterte;
+    # "unsupported" (falsches Format im supported-Set) zählt als "kein Text"
+    if extract_status == "error":
+        return "error"
+    if extract_status == "unsupported":
+        return "listed"
     return "new"
 
 
 _EXTRACT_TIMEOUT = 30
 
 
-def _extract_and_store(conn, doc_id: int, path: Path):
+def _extract_and_store(conn, doc_id: int, path: Path) -> str:
+    """Extrahiert Text und speichert ihn. Gibt 'ok', 'unsupported' oder 'error' zurück."""
     if extractors._IN_WORKER_PROCESS:
         # Im Worker-Prozess: direkt aufrufen — der Pool-Timeout (_TASK_TIMEOUT) ist
         # die Sicherheitsgrenze, kein Thread nötig.
@@ -599,6 +682,7 @@ def _extract_and_store(conn, doc_id: int, path: Path):
             pass
     # Kein Embedding im Worker — läuft nach dem Scan als separater Schritt
     # (verhindert dass ein langsamer Ollama-Call den ganzen Scan blockiert)
+    return status
 
 
 def _iso(ts: float) -> str:
