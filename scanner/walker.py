@@ -353,15 +353,13 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
-    # Erste Ebene zählen — ein einziger listdir()-Aufruf, sofort fertig
-    top_dirs        = _first_level_dirs(root, excluded)
-    total_top       = max(1, len(top_dirs))
-    top_per_folder  = 100.0 / total_top
-    # Monotoner Counter: steigt nur, springt nie rückwärts (os.walk != alphabetisch)
-    seen_top_dirs   = set()   # bereits besuchte Top-Level-Ordner
-    top_count       = 0       # wie viele Top-Level-Ordner bisher betreten
-    top_base        = 0.0     # Prozent-Basis des aktuellen Top-Level-Ordners
-    total_processed = 0       # kumulativ für WAL-Checkpoint
+    # Hauptprozess-Verbindung für Schnellpfad (unveränderte Dateien ohne Worker-Overhead)
+    main_conn = connection.get_connection()
+
+    # Kumulative Zähler über den gesamten Scan — kein Reset pro Ordner
+    global_total     = 0  # Dateien in allen bisher entdeckten Ordnern zusammen
+    global_processed = 0  # Bisher fertig verarbeitete Dateien
+    total_processed  = 0  # Für WAL-Checkpoint
 
     found_any = False
     try:
@@ -373,42 +371,31 @@ def scan_project(project_id: int, root: Path,
                             for excl in excluded)
             ]
 
-            # Welchem Top-Level-Ordner gehört dieser Pfad?
-            try:
-                rel = Path(dirpath).relative_to(root)
-                top_dir = (root / rel.parts[0]) if rel.parts else None
-            except ValueError:
-                top_dir = None
-            if top_dir is not None and top_dir not in seen_top_dirs:
-                seen_top_dirs.add(top_dir)
-                top_count += 1
-                top_base = (top_count - 1) * top_per_folder
-                if progress is not None:
-                    progress["percent"] = min(99, int(top_base))
-
-            # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
+            # Verarbeitbare Dateien dieses Ordners (Extension-Filter, kein stat())
             dir_processable = [
                 f for f in filenames
                 if not f.startswith('.')
                 and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
             ]
 
+            global_total += len(dir_processable)
+
             if progress is not None:
                 progress["current_folder"] = Path(dirpath).name
-                if dir_processable:
-                    progress["total"]     = len(dir_processable)
-                    progress["processed"] = 0
+                progress["total"]          = global_total
+                progress["processed"]      = global_processed
 
             if not dir_processable:
                 continue
 
             found_any = True
 
-            for i, filename in enumerate(dir_processable):
+            for filename in dir_processable:
                 path = Path(dirpath) / filename
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
+                    main_conn.close()
                     return
 
                 # Vor jeder Datei: System-Speicher prüfen — wenn knapp, kurz warten
@@ -420,15 +407,48 @@ def scan_project(project_id: int, root: Path,
                     _pressure_waits += 1
                 if _pressure_waits >= 6:
                     log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                    global_processed += 1
+                    total_processed  += 1
                     if progress is not None:
-                        progress["processed"] += 1
+                        progress["processed"] = global_processed
                         if path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
                             progress["listed"] += 1
                         else:
                             progress["errors"] += 1
-                    total_processed += 1
+                        progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
                     continue
 
+                # ── Hauptprozess-Schnellpfad ──────────────────────────────────────────
+                # Unveränderte Dateien (gleicher Pfad + Grösse + mtime) direkt überspringen
+                # ohne Worker-Prozess — spart ~50-100ms IPC-Overhead pro Datei.
+                try:
+                    st        = path.stat()
+                    mtime_q   = _iso(st.st_mtime)
+                    if main_conn.execute(
+                        "SELECT 1 FROM document_paths dp "
+                        "JOIN documents d ON d.id = dp.document_id "
+                        "WHERE dp.path = ? AND d.filesize = ? AND d.modified_at = ? "
+                        "AND d.extraction_status IN ('ok','listed','error','unsupported')",
+                        (str(path), st.st_size, mtime_q),
+                    ).fetchone():
+                        global_processed += 1
+                        total_processed  += 1
+                        if progress is not None:
+                            progress["processed"] = global_processed
+                            progress["skipped"]  += 1
+                            progress["percent"]   = min(99, int(global_processed / max(1, global_total) * 100))
+                        if total_processed % 100 == 0:
+                            try:
+                                _wal_conn = connection.get_connection()
+                                _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
+                                _wal_conn.close()
+                            except Exception:
+                                pass
+                        continue
+                except OSError:
+                    pass
+
+                # ── Worker-Verarbeitung (neue oder geänderte Dateien) ─────────────────
                 if progress is not None:
                     progress["current_file"] = path.name
 
@@ -446,7 +466,7 @@ def scan_project(project_id: int, root: Path,
                         result = ar.get(timeout=_POLL_INTERVAL)
                     except multiprocessing.TimeoutError:
                         elapsed  = time.monotonic() - start
-                        rss      = _total_workers_rss_gb()   # ALLE PIDs, nicht nur pool._pool
+                        rss      = _total_workers_rss_gb()
                         pressure = _system_under_pressure()
 
                         if rss > _MAX_WORKER_RSS:
@@ -480,15 +500,17 @@ def scan_project(project_id: int, root: Path,
                 if result == "error" and path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
                     result = "listed"
 
-                total_processed += 1
+                global_processed += 1
+                total_processed  += 1
                 if progress is not None:
-                    progress["processed"] += 1
-                    if result == "new":       progress["new"] += 1
+                    progress["processed"] = global_processed
+                    if result == "new":       progress["new"]     += 1
                     elif result == "skipped": progress["skipped"] += 1
-                    elif result == "listed":  progress["listed"] += 1
-                    else:                     progress["errors"] += 1
+                    elif result == "listed":  progress["listed"]  += 1
+                    else:                     progress["errors"]  += 1
+                    progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
 
-                # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
+                # WAL-Checkpoint alle 100 Dateien
                 if total_processed % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()
@@ -502,6 +524,10 @@ def scan_project(project_id: int, root: Path,
 
     finally:
         _kill_workers(pool)
+        try:
+            main_conn.close()
+        except Exception:
+            pass
 
     # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
     def _fts_optimize():
