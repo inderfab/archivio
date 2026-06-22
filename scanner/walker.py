@@ -272,6 +272,20 @@ def _total_workers_rss_gb() -> float:
         return 0.0
 
 
+def _count_folders(root: Path, excluded: set[str]) -> int:
+    """Zählt Verzeichnisse unter root mit denselben Filtern wie der Scan.
+    Liest nur Directory-Einträge — kein stat() auf Dateien, vernachlässigbar schnell."""
+    count = 0
+    for _, dirnames, _ in os.walk(root):
+        dirnames[:] = [
+            d for d in dirnames
+            if not d.startswith('.')
+            and not any(excl in unicodedata.normalize('NFC', d.lower()) for excl in excluded)
+        ]
+        count += 1
+    return count
+
+
 def scan_project(project_id: int, root: Path,
                  progress: dict | None = None,
                  cancel_flag: dict | None = None):
@@ -340,6 +354,11 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
+    # Ordner vorab zählen — nur Dir-Einträge, kein File-I/O, vernachlässigbar schnell
+    total_folders = max(1, _count_folders(root, excluded))
+    folder_idx    = 0
+    total_processed = 0  # kumulativ für WAL-Checkpoint
+
     found_any = False
     try:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -349,15 +368,30 @@ def scan_project(project_id: int, root: Path,
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
             ]
-            for filename in filenames:
-                if filename.startswith('.'):
-                    continue
+            folder_idx += 1
+
+            # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
+            dir_processable = [
+                f for f in filenames
+                if not f.startswith('.')
+                and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
+            ]
+
+            if progress is not None:
+                progress["current_folder"] = Path(dirpath).name
+                if dir_processable:
+                    progress["total"]     = len(dir_processable)
+                    progress["processed"] = 0
+                # Ordner-Anteil am Gesamtfortschritt (Eingang des Ordners)
+                progress["percent"] = min(99, int((folder_idx - 1) / total_folders * 100))
+
+            if not dir_processable:
+                continue
+
+            found_any = True
+
+            for i, filename in enumerate(dir_processable):
                 path = Path(dirpath) / filename
-                if path.suffix.lower() not in supported and path.suffix.lower() not in _LIST_ONLY_EXTENSIONS:
-                    continue
-                found_any = True
-                if progress is not None:
-                    progress["total"] += 1
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
@@ -375,11 +409,11 @@ def scan_project(project_id: int, root: Path,
                     if progress is not None:
                         progress["processed"] += 1
                         progress["errors"]    += 1
+                    total_processed += 1
                     continue
 
                 if progress is not None:
-                    progress["current_file"]   = path.name
-                    progress["current_folder"] = path.parent.name
+                    progress["current_file"] = path.name
 
                 ar     = pool.apply_async(_scan_file_worker, ((project_id, str(path)),))
                 start  = time.monotonic()
@@ -425,15 +459,21 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
 
+                total_processed += 1
+                files_done = i + 1
                 if progress is not None:
-                    progress["processed"] += 1
+                    progress["processed"] = files_done
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
                     elif result == "listed":  progress["listed"] += 1
                     else:                     progress["errors"] += 1
+                    # Glatter Fortschritt: Ordner-Basis + Anteil der verarbeiteten Dateien
+                    folder_base = (folder_idx - 1) / total_folders
+                    folder_frac = files_done / len(dir_processable) / total_folders
+                    progress["percent"] = min(99, int((folder_base + folder_frac) * 100))
 
-                # WAL-Checkpoint alle 100 Dateien
-                if progress is not None and progress["processed"] % 100 == 0:
+                # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
+                if total_processed % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()
                         _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")

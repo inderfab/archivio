@@ -318,7 +318,7 @@ async def scan_progress_json(project_id: int):
         return JSONResponse({"status": "idle"})
     total     = s.get("total", 0)
     processed = s.get("processed", 0)
-    percent   = int(processed / total * 100) if total > 0 else 0
+    percent   = s.get("percent", int(processed / total * 100) if total > 0 else 0)
     return JSONResponse({
         "status":       s.get("status", "idle"),
         "phase":        s.get("phase", ""),
@@ -362,7 +362,8 @@ async def scan_progress_banner(request: Request):
     pid, s    = active
     total     = s.get("total", 0)
     processed = s.get("processed", 0)
-    percent   = int(processed / total * 100) if total > 0 else 0
+    # Percent wird vom Scanner vorberechnet (Ordner-gewichtet); Fallback für alte Einträge
+    percent   = s.get("percent", int(processed / total * 100) if total > 0 else 0)
     resp = templates.TemplateResponse("_scan_progress.html", {
         "request":      request,
         "status":       s.get("status"),
