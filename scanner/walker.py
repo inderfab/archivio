@@ -540,6 +540,29 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     if fast:
         return "skipped"
 
+    # List-Only-Formate (Bilder, Video, 3D, …): Datei NICHT lesen.
+    # Metadaten-Hash aus Pfad+Grösse+mtime — kein Datei-I/O, sofort fertig.
+    if ext in _LIST_ONLY_EXTENSIONS:
+        import hashlib as _hl
+        file_hash = "m:" + _hl.sha256(
+            f"{path}:{stat.st_size}:{mtime_iso}".encode()
+        ).hexdigest()
+        data = {
+            "project_id":  project_id,
+            "hash":        file_hash,
+            "filename":    path.name,
+            "extension":   ext,
+            "filesize":    stat.st_size,
+            "modified_at": mtime_iso,
+            "source_type": "filesystem",
+        }
+        with conn:
+            doc_id = queries.upsert_document(conn, data)
+            queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "listed"
+
+    # Text-Formate: SHA256 des Dateiinhalts (für Deduplikation bei Verschiebungen)
     try:
         file_hash = hasher.sha256(path)
     except OSError as exc:
@@ -566,11 +589,6 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     with conn:
         doc_id = queries.upsert_document(conn, data)
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
-
-    if ext in _LIST_ONLY_EXTENSIONS:
-        with conn:
-            queries.set_extraction_status(conn, doc_id, "listed")
-        return "listed"
 
     size_mb = stat.st_size / (1024 * 1024)
 
