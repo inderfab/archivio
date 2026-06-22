@@ -384,6 +384,7 @@ def scan_project(project_id: int, root: Path,
 
             if progress is not None:
                 progress["current_folder"] = Path(dirpath).name
+                progress["current_dir"]    = str(dirpath)
                 progress["total"]          = global_total
                 progress["processed"]      = global_processed
 

@@ -3,7 +3,7 @@
     <span class="spb-icon">{% if status == "running" %}⟳{% elif status == "done" %}✓{% else %}⚠{% endif %}</span>
     <span class="spb-title">
       {% if status == "running" %}
-        {{ project_root or project_name }}
+        {{ current_dir or project_root or project_name }}
       {% elif status == "done" %}Scan abgeschlossen — {{ project_name }}
       {% else %}Scan-Fehler — {{ project_name }}
       {% endif %}
