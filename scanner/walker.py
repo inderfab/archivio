@@ -272,18 +272,17 @@ def _total_workers_rss_gb() -> float:
         return 0.0
 
 
-def _count_folders(root: Path, excluded: set[str]) -> int:
-    """Zählt Verzeichnisse unter root mit denselben Filtern wie der Scan.
-    Liest nur Directory-Einträge — kein stat() auf Dateien, vernachlässigbar schnell."""
-    count = 0
-    for _, dirnames, _ in os.walk(root):
-        dirnames[:] = [
-            d for d in dirnames
-            if not d.startswith('.')
-            and not any(excl in unicodedata.normalize('NFC', d.lower()) for excl in excluded)
-        ]
-        count += 1
-    return count
+def _first_level_dirs(root: Path, excluded: set[str]) -> list[Path]:
+    """Gibt die direkte erste Ebene der Unterordner zurück — ein einziger listdir()-Aufruf."""
+    try:
+        return sorted([
+            d for d in root.iterdir()
+            if d.is_dir()
+            and not d.name.startswith('.')
+            and not any(excl in unicodedata.normalize('NFC', d.name.lower()) for excl in excluded)
+        ])
+    except OSError:
+        return []
 
 
 def scan_project(project_id: int, root: Path,
@@ -354,9 +353,11 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
-    # Ordner vorab zählen — nur Dir-Einträge, kein File-I/O, vernachlässigbar schnell
-    total_folders = max(1, _count_folders(root, excluded))
-    folder_idx    = 0
+    # Erste Ebene der Unterordner — ein einziger listdir()-Aufruf, sofort fertig
+    top_dirs     = _first_level_dirs(root, excluded)
+    total_top    = max(1, len(top_dirs))
+    top_idx_map  = {d: i + 1 for i, d in enumerate(top_dirs)}  # 1-basiert
+    current_top  = 0   # aktuell aktiver Top-Level-Ordner-Index
     total_processed = 0  # kumulativ für WAL-Checkpoint
 
     found_any = False
@@ -368,7 +369,18 @@ def scan_project(project_id: int, root: Path,
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
             ]
-            folder_idx += 1
+
+            # Welchem Top-Level-Ordner gehört dieser Pfad?
+            try:
+                rel = Path(dirpath).relative_to(root)
+                new_top = top_idx_map.get(root / rel.parts[0], 0) if rel.parts else 0
+            except ValueError:
+                new_top = 0
+            if new_top != current_top:
+                current_top = new_top
+                if progress is not None:
+                    # Prozent springt am Eingang jedes Top-Level-Ordners
+                    progress["percent"] = min(99, int((current_top - 1) / total_top * 100))
 
             # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
             dir_processable = [
@@ -382,8 +394,6 @@ def scan_project(project_id: int, root: Path,
                 if dir_processable:
                     progress["total"]     = len(dir_processable)
                     progress["processed"] = 0
-                # Ordner-Anteil am Gesamtfortschritt (Eingang des Ordners)
-                progress["percent"] = min(99, int((folder_idx - 1) / total_folders * 100))
 
             if not dir_processable:
                 continue
@@ -460,17 +470,12 @@ def scan_project(project_id: int, root: Path,
                         result = "error"
 
                 total_processed += 1
-                files_done = i + 1
                 if progress is not None:
-                    progress["processed"] = files_done
+                    progress["processed"] += 1
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
                     elif result == "listed":  progress["listed"] += 1
                     else:                     progress["errors"] += 1
-                    # Glatter Fortschritt: Ordner-Basis + Anteil der verarbeiteten Dateien
-                    folder_base = (folder_idx - 1) / total_folders
-                    folder_frac = files_done / len(dir_processable) / total_folders
-                    progress["percent"] = min(99, int((folder_base + folder_frac) * 100))
 
                 # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
                 if total_processed % 100 == 0:
