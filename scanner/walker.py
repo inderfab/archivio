@@ -353,9 +353,6 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
-    # Hauptprozess-Verbindung für Schnellpfad (unveränderte Dateien ohne Worker-Overhead)
-    main_conn = connection.get_connection()
-
     # Kumulative Zähler über den gesamten Scan — kein Reset pro Ordner
     global_total     = 0  # Dateien in allen bisher entdeckten Ordnern zusammen
     global_processed = 0  # Bisher fertig verarbeitete Dateien
@@ -395,7 +392,6 @@ def scan_project(project_id: int, root: Path,
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
-                    main_conn.close()
                     return
 
                 # Vor jeder Datei: System-Speicher prüfen — wenn knapp, kurz warten
@@ -418,37 +414,7 @@ def scan_project(project_id: int, root: Path,
                         progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
                     continue
 
-                # ── Hauptprozess-Schnellpfad ──────────────────────────────────────────
-                # Unveränderte Dateien (gleicher Pfad + Grösse + mtime) direkt überspringen
-                # ohne Worker-Prozess — spart ~50-100ms IPC-Overhead pro Datei.
-                try:
-                    st        = path.stat()
-                    mtime_q   = _iso(st.st_mtime)
-                    if main_conn.execute(
-                        "SELECT 1 FROM document_paths dp "
-                        "JOIN documents d ON d.id = dp.document_id "
-                        "WHERE dp.path = ? AND d.filesize = ? AND d.modified_at = ? "
-                        "AND d.extraction_status IN ('ok','listed','error','unsupported')",
-                        (str(path), st.st_size, mtime_q),
-                    ).fetchone():
-                        global_processed += 1
-                        total_processed  += 1
-                        if progress is not None:
-                            progress["processed"] = global_processed
-                            progress["skipped"]  += 1
-                            progress["percent"]   = min(99, int(global_processed / max(1, global_total) * 100))
-                        if total_processed % 100 == 0:
-                            try:
-                                _wal_conn = connection.get_connection()
-                                _wal_conn.execute("PRAGMA wal_checkpoint(PASSIVE)")
-                                _wal_conn.close()
-                            except Exception:
-                                pass
-                        continue
-                except OSError:
-                    pass
-
-                # ── Worker-Verarbeitung (neue oder geänderte Dateien) ─────────────────
+                # ── Worker-Verarbeitung ──────────────────────────────────────────────
                 if progress is not None:
                     progress["current_file"] = path.name
 
@@ -524,10 +490,6 @@ def scan_project(project_id: int, root: Path,
 
     finally:
         _kill_workers(pool)
-        try:
-            main_conn.close()
-        except Exception:
-            pass
 
     # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
     def _fts_optimize():
