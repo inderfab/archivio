@@ -128,8 +128,11 @@ async def retry_errors(request: Request):
     """Setzt alle error-Dokumente auf 'pending' — beim nächsten Scan neu verarbeitet."""
     conn = connection.get_connection()
     with conn:
+        placeholders = ",".join("?" * len(_TEXT_EXTRACTABLE))
         count = conn.execute(
-            "UPDATE documents SET extraction_status = 'pending' WHERE extraction_status = 'error'"
+            f"UPDATE documents SET extraction_status = 'pending'"
+            f" WHERE extraction_status = 'error' AND extension IN ({placeholders})",
+            _TEXT_EXTRACTABLE,
         ).rowcount
     docs = _problem_documents(conn)
     conn.close()
@@ -278,6 +281,7 @@ async def start_scan(request: Request, project_id: int):
         "processed":    0,
         "new":          0,
         "skipped":      0,
+        "listed":       0,
         "errors":       0,
         "current_file":   "",
         "current_folder": "",
@@ -369,6 +373,7 @@ async def scan_progress_banner(request: Request):
         "percent":      percent,
         "new":          s.get("new", 0),
         "skipped":      s.get("skipped", 0),
+        "listed":       s.get("listed", 0),
         "errors":       s.get("errors", 0),
         "current_file":   s.get("current_file", ""),
         "current_folder": s.get("current_folder", ""),
@@ -1139,18 +1144,27 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     return results
 
 
+_TEXT_EXTRACTABLE = (
+    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".xlsm",
+    ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
+)
+
 def _problem_documents(conn) -> list[dict]:
-    """Gibt alle nicht vollständig verarbeiteten Dokumente zurück mit wahrscheinlichem Grund."""
+    """Gibt Dokumente zurück bei denen die Textextraktion unerwartet scheiterte.
+    Nur Formate die Text enthalten sollten (PDF, Word, Mail …) — Bilder und
+    CAD-Dateien werden bewusst nicht ausgelesen und zählen nicht als Fehler."""
     result = []
 
-    # 1. error / unsupported
-    rows = conn.execute("""
+    # Nur Text-Formate mit echtem Extraktionsfehler
+    placeholders = ",".join("?" * len(_TEXT_EXTRACTABLE))
+    rows = conn.execute(f"""
         SELECT d.filename, d.extension, d.filesize, dp.path, d.extraction_status
         FROM documents d
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-        WHERE d.extraction_status IN ('error', 'unsupported')
+        WHERE d.extraction_status = 'error'
+          AND d.extension IN ({placeholders})
         ORDER BY d.extension, d.filename
-    """).fetchall()
+    """, _TEXT_EXTRACTABLE).fetchall()
 
     for row in rows:
         result.append({

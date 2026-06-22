@@ -311,6 +311,7 @@ def scan_project(project_id: int, root: Path,
         progress["processed"] = 0
         progress["new"]       = 0
         progress["skipped"]   = 0
+        progress["listed"]    = 0
         progress["errors"]    = 0
 
     _start_memory_watchdog()  # einmalig starten (noop wenn bereits läuft)
@@ -428,6 +429,7 @@ def scan_project(project_id: int, root: Path,
                     progress["processed"] += 1
                     if result == "new":       progress["new"] += 1
                     elif result == "skipped": progress["skipped"] += 1
+                    elif result == "listed":  progress["listed"] += 1
                     else:                     progress["errors"] += 1
 
                 # WAL-Checkpoint alle 100 Dateien
@@ -512,7 +514,7 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     if ext in _LIST_ONLY_EXTENSIONS:
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
+        return "listed"
 
     size_mb = stat.st_size / (1024 * 1024)
 
@@ -522,7 +524,7 @@ def _process_file(conn, project_id: int, path: Path) -> str:
                     size_mb, _MAX_PDF_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
+        return "listed"
 
     # Grössencheck: Formate die alles in RAM laden
     if ext in _SIZE_LIMITED_EXTENSIONS and size_mb > _MAX_EXTRACT_MB:
@@ -530,16 +532,23 @@ def _process_file(conn, project_id: int, path: Path) -> str:
                     size_mb, _MAX_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
-        return "new"
+        return "listed"
 
-    _extract_and_store(conn, doc_id, path)
+    extract_status = _extract_and_store(conn, doc_id, path)
+    # "error" nur wenn Text erwartet wurde aber Extraktion scheiterte;
+    # "unsupported" (falsches Format im supported-Set) zählt als "kein Text"
+    if extract_status == "error":
+        return "error"
+    if extract_status == "unsupported":
+        return "listed"
     return "new"
 
 
 _EXTRACT_TIMEOUT = 30
 
 
-def _extract_and_store(conn, doc_id: int, path: Path):
+def _extract_and_store(conn, doc_id: int, path: Path) -> str:
+    """Extrahiert Text und speichert ihn. Gibt 'ok', 'unsupported' oder 'error' zurück."""
     if extractors._IN_WORKER_PROCESS:
         # Im Worker-Prozess: direkt aufrufen — der Pool-Timeout (_TASK_TIMEOUT) ist
         # die Sicherheitsgrenze, kein Thread nötig.
@@ -599,6 +608,7 @@ def _extract_and_store(conn, doc_id: int, path: Path):
             pass
     # Kein Embedding im Worker — läuft nach dem Scan als separater Schritt
     # (verhindert dass ein langsamer Ollama-Call den ganzen Scan blockiert)
+    return status
 
 
 def _iso(ts: float) -> str:
