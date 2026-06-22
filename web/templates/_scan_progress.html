@@ -3,13 +3,13 @@
     <span class="spb-icon">{% if status == "running" %}⟳{% elif status == "done" %}✓{% else %}⚠{% endif %}</span>
     <span class="spb-title">
       {% if status == "running" %}
-        Scan: {{ current_folder or project_name }}
+        {{ project_root or project_name }}
       {% elif status == "done" %}Scan abgeschlossen — {{ project_name }}
       {% else %}Scan-Fehler — {{ project_name }}
       {% endif %}
     </span>
     {% if status == "running" and project_id %}
-    <button class="btn btn-cancel" style="margin-left: auto;"
+    <button class="btn btn-cancel" style="margin-left: auto; flex-shrink: 0;"
             hx-post="/dashboard/projects/{{ project_id }}/scan/cancel"
             hx-target="#scan-progress-banner" hx-swap="innerHTML">Abbrechen</button>
     {% endif %}
@@ -21,10 +21,7 @@
   {% if status == "running" and processed == 0 and total == 0 %}
     <div class="spb-phase">Ordner wird durchsucht…</div>
   {% elif total > 0 %}
-    <div class="spb-bar-wrap">
-      <div class="spb-bar-fill" style="width: {{ percent }}%"></div>
-    </div>
-    <div class="spb-counts">{{ processed }} / {{ total }} Dateien &nbsp;&nbsp; {{ percent }}%</div>
+    <div class="spb-counts">{{ processed }} / {{ total }} Dateien</div>
     {% if status == "running" %}
       {% if processed >= total and total > 0 %}
         <div class="spb-current" style="color: var(--text-3);">Abschluss läuft… (Datenbank, Embedding)</div>
