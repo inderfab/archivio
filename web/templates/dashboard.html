@@ -239,28 +239,38 @@
       '</div>';
   }
 
+  function _jsonPost(url, body) {
+    return fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(body)
+    });
+  }
+
   async function batchIgnore(projectId) {
     var paths = [...(window._browseMultiSel[projectId] || [])];
-    var fd = new FormData(); fd.append('project_id', projectId);
-    paths.forEach(function(p) { fd.append('paths', p); });
-    var r = await fetch('/dashboard/batch-ignore', { method: 'POST', body: fd });
-    if (r.ok) { paths.forEach(function(p) { updateBrowseEntry(p, true); }); clearBrowseSelection(projectId); document.getElementById('detail-panel-' + projectId).style.display = 'none'; }
+    var r = await _jsonPost('/dashboard/batch-ignore', { project_id: projectId, paths: paths });
+    if (r.ok) {
+      paths.forEach(function(p) { updateBrowseEntry(p, true); });
+      clearBrowseSelection(projectId);
+      document.getElementById('detail-panel-' + projectId).style.display = 'none';
+    } else { alert('Fehler beim Ignorieren (' + r.status + ')'); }
   }
 
   async function batchUnignore(projectId) {
     var paths = [...(window._browseMultiSel[projectId] || [])];
-    var fd = new FormData(); fd.append('project_id', projectId);
-    paths.forEach(function(p) { fd.append('paths', p); });
-    var r = await fetch('/dashboard/batch-unignore', { method: 'POST', body: fd });
-    if (r.ok) { paths.forEach(function(p) { updateBrowseEntry(p, false); }); clearBrowseSelection(projectId); document.getElementById('detail-panel-' + projectId).style.display = 'none'; }
+    var r = await _jsonPost('/dashboard/batch-unignore', { project_id: projectId, paths: paths });
+    if (r.ok) {
+      paths.forEach(function(p) { updateBrowseEntry(p, false); });
+      clearBrowseSelection(projectId);
+      document.getElementById('detail-panel-' + projectId).style.display = 'none';
+    } else { alert('Fehler beim Aufheben (' + r.status + ')'); }
   }
 
   async function batchMakeProjects(projectId) {
     var paths = [...(window._browseMultiSel[projectId] || [])];
-    var fd = new FormData(); fd.append('project_id', projectId);
-    paths.forEach(function(p) { fd.append('paths', p); });
-    var r = await fetch('/dashboard/batch-make-projects', { method: 'POST', body: fd });
-    if (!r.ok) return;
+    var r = await _jsonPost('/dashboard/batch-make-projects', { project_id: projectId, paths: paths });
+    if (!r.ok) { alert('Fehler beim Erstellen der Projekte (' + r.status + ')'); return; }
     paths.forEach(function(p) {
       var entry = document.querySelector('.browse-entry[data-path="' + p.replace(/"/g, '\\"') + '"]');
       if (!entry) return;

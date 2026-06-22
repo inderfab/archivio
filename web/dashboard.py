@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
 from config import settings
 from db import connection
@@ -155,7 +156,6 @@ async def download_helper():
         zip_path = dist_dir / fname
         if zip_path.exists():
             return FileResponse(zip_path, media_type="application/zip", filename=fname)
-    from fastapi.responses import JSONResponse
     return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
 
 
@@ -164,7 +164,6 @@ async def download_server():
     _, version = _server_info()
     zip_path = _DIST / f"archivio-server-{version}.zip"
     if not zip_path.exists():
-        from fastapi.responses import JSONResponse
         return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
     return FileResponse(
         zip_path,
@@ -254,21 +253,23 @@ def _delete_project_bg(project_id: int) -> None:
     """Löscht Projekt + alle Dokumente im Hintergrund-Thread."""
     try:
         conn = connection.get_connection()
+        # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
+        doc_ids = [r[0] for r in conn.execute(
+            "SELECT id FROM documents WHERE project_id=?", (project_id,)
+        ).fetchall()]
+        for doc_id in doc_ids:
+            try:
+                conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
+            except Exception:
+                pass
         with conn:
-            # FTS-Einträge vorab in einem Bulk-Delete entfernen, damit der
-            # per-Row-Trigger (AFTER DELETE ON document_content) weniger tun muss.
-            conn.execute(
-                "DELETE FROM documents_fts WHERE rowid IN "
-                "(SELECT id FROM documents WHERE project_id=?)",
-                (project_id,),
-            )
             conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         conn.close()
         _deletions[project_id] = "done"
-        log.info("Projekt %s aus DB gelöscht", project_id)
+        log.info("Projekt %s aus DB gelöscht (%d Dokumente)", project_id, len(doc_ids))
     except Exception as exc:
         log.error("Fehler beim Löschen von Projekt %s: %s", project_id, exc)
-        _deletions[project_id] = "error"
+        _deletions[project_id] = "error:" + str(exc)
 
 
 def _delete_loading_html(project_id: int) -> str:
@@ -296,10 +297,20 @@ async def delete_project(project_id: int):
 
 @router.get("/projects/{project_id}/delete-status", response_class=HTMLResponse)
 async def delete_project_status(request: Request, project_id: int):
-    """Polling-Endpunkt: liefert Loading-State oder fertige Projektliste."""
+    """Polling-Endpunkt: liefert Loading-State, Fehler oder fertige Projektliste."""
     status = _deletions.get(project_id, "done")
     if status == "running":
         return HTMLResponse(_delete_loading_html(project_id))
+    if status.startswith("error:"):
+        err = status[6:]
+        _deletions.pop(project_id, None)
+        return HTMLResponse(
+            f'<div style="padding:12px 16px; color:#b91c1c; font-size:13px;'
+            f' border:1px solid #fca5a5; border-radius:8px; margin-bottom:8px;">'
+            f'⚠ Fehler beim Löschen: {err}<br>'
+            f'<small>Falls ein Scan läuft, bitte diesen zuerst stoppen und erneut versuchen.</small>'
+            f'</div>'
+        )
     _deletions.pop(project_id, None)
     conn = connection.get_connection()
     groups = _project_groups(conn)
@@ -837,38 +848,43 @@ async def unignore_path(
 
 # ── Batch-Aktionen (Mehrfachauswahl) ─────────────────────────────────────────
 
+class _BatchPaths(BaseModel):
+    project_id: int
+    paths: list[str]
+
+
 @router.post("/batch-ignore")
-async def batch_ignore(project_id: int = Form(...), paths: list[str] = Form(...)):
+async def batch_ignore(data: _BatchPaths):
     conn = connection.get_connection()
     with conn:
-        for path in paths:
+        for path in data.paths:
             conn.execute(
                 "INSERT OR IGNORE INTO ignored_paths (project_id, path) VALUES (?,?)",
-                (project_id, path),
+                (data.project_id, path),
             )
     conn.close()
-    return JSONResponse({"ok": True, "count": len(paths)})
+    return JSONResponse({"ok": True, "count": len(data.paths)})
 
 
 @router.post("/batch-unignore")
-async def batch_unignore(project_id: int = Form(...), paths: list[str] = Form(...)):
+async def batch_unignore(data: _BatchPaths):
     conn = connection.get_connection()
     with conn:
-        for path in paths:
+        for path in data.paths:
             conn.execute(
                 "DELETE FROM ignored_paths WHERE project_id=? AND path=?",
-                (project_id, path),
+                (data.project_id, path),
             )
     conn.close()
-    return JSONResponse({"ok": True, "count": len(paths)})
+    return JSONResponse({"ok": True, "count": len(data.paths)})
 
 
 @router.post("/batch-make-projects")
-async def batch_make_projects(project_id: int = Form(...), paths: list[str] = Form(...)):
+async def batch_make_projects(data: _BatchPaths):
     conn = connection.get_connection()
     created = 0
     with conn:
-        for path in paths:
+        for path in data.paths:
             name = Path(path).name
             if not conn.execute("SELECT 1 FROM projects WHERE path=?", (path,)).fetchone():
                 conn.execute(
