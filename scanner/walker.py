@@ -170,14 +170,13 @@ _LIST_ONLY_EXTENSIONS = {
     # Adobe / Design
     ".ai", ".psd", ".indd",
     # Archiv / Sonstiges
-    ".zip", ".rar", ".7z", ".gz",
-    ".xml",
+    ".rar", ".7z", ".gz",
     # Disk-Images
     ".dmg", ".iso", ".sparsebundle",
 }
 
 # Einträge die vom Dateisystem fälschlicherweise als Ordner gemeldet werden (macOS/NAS)
-_FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle"}
+_FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle", ".pkg"}
 
 # Formate die komplett in RAM geladen werden → Grössencheck
 _SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
