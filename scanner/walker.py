@@ -172,7 +172,12 @@ _LIST_ONLY_EXTENSIONS = {
     # Archiv / Sonstiges
     ".zip", ".rar", ".7z", ".gz",
     ".xml",
+    # Disk-Images
+    ".dmg", ".iso", ".sparsebundle",
 }
+
+# Einträge die vom Dateisystem fälschlicherweise als Ordner gemeldet werden (macOS/NAS)
+_FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle"}
 
 # Formate die komplett in RAM geladen werden → Grössencheck
 _SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
@@ -366,6 +371,7 @@ def scan_project(project_id: int, root: Path,
                 if not d.startswith('.')
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
+                and Path(d).suffix.lower() not in _FAKE_DIR_SUFFIXES
             ]
 
             # Verarbeitbare Dateien dieses Ordners (Extension-Filter, kein stat())
