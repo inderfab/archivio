@@ -181,17 +181,98 @@
   });
 
   function selectEntry(el, projectId, path) {
-    document.querySelectorAll('.browse-entry').forEach(function(e) {
-      e.classList.remove('selected');
-    });
+    clearBrowseSelection(projectId);
+    document.querySelectorAll('.browse-entry').forEach(function(e) { e.classList.remove('selected'); });
     el.classList.add('selected');
     var detailPanel = document.getElementById('detail-panel-' + projectId);
     detailPanel.style.display = 'block';
     htmx.ajax('GET',
-      '/dashboard/detail?path=' + encodeURIComponent(path) +
-      '&project_id=' + projectId,
+      '/dashboard/detail?path=' + encodeURIComponent(path) + '&project_id=' + projectId,
       { target: '#detail-panel-' + projectId, swap: 'innerHTML' }
     );
+  }
+
+  // ── Multi-Selektion ───────────────────────────────────────────────────────
+  window._browseMultiSel = {};
+
+  function toggleBrowseCheck(event, checkbox, projectId, path) {
+    event.stopPropagation();
+    if (!window._browseMultiSel[projectId]) window._browseMultiSel[projectId] = new Set();
+    var sel = window._browseMultiSel[projectId];
+    var entry = checkbox.closest('.browse-entry');
+    // Single-select muss weg wenn Checkbox genutzt wird
+    document.querySelectorAll('.browse-entry.selected').forEach(function(e) { e.classList.remove('selected'); });
+    if (checkbox.checked) { sel.add(path); entry.classList.add('multi-selected'); }
+    else                  { sel.delete(path); entry.classList.remove('multi-selected'); }
+    _updateMultiPanel(projectId);
+  }
+
+  function clearBrowseSelection(projectId) {
+    if (window._browseMultiSel[projectId]) window._browseMultiSel[projectId].clear();
+    document.querySelectorAll('.browse-entry.multi-selected').forEach(function(el) {
+      el.classList.remove('multi-selected');
+      var cb = el.querySelector('.browse-check');
+      if (cb) cb.checked = false;
+    });
+  }
+
+  function _updateMultiPanel(projectId) {
+    var sel = window._browseMultiSel[projectId] || new Set();
+    var panel = document.getElementById('detail-panel-' + projectId);
+    if (sel.size === 0) { panel.style.display = 'none'; return; }
+    panel.style.display = 'block';
+    if (sel.size === 1) {
+      var path = [...sel][0];
+      htmx.ajax('GET',
+        '/dashboard/detail?path=' + encodeURIComponent(path) + '&project_id=' + projectId,
+        { target: '#detail-panel-' + projectId, swap: 'innerHTML' }
+      );
+      return;
+    }
+    panel.innerHTML =
+      '<div style="padding:14px;">' +
+      '<div style="font-size:13px; font-weight:600; margin-bottom:14px;">' + sel.size + ' Ordner ausgewählt</div>' +
+      '<button class="btn btn-primary" style="width:100%; margin-bottom:6px;" onclick="batchMakeProjects(' + projectId + ')">Als eigene Projekte erstellen</button>' +
+      '<button class="btn btn-danger" style="width:100%; margin-bottom:6px;" onclick="batchIgnore(' + projectId + ')">Alle ignorieren</button>' +
+      '<button class="btn" style="width:100%; margin-bottom:14px;" onclick="batchUnignore(' + projectId + ')">Ignorierung aufheben</button>' +
+      '<button class="btn" style="width:100%; color:var(--text-3); font-size:12px;" onclick="clearBrowseSelection(' + projectId + '); document.getElementById(\'detail-panel-\' + ' + projectId + ').style.display=\'none\';">Auswahl aufheben</button>' +
+      '</div>';
+  }
+
+  async function batchIgnore(projectId) {
+    var paths = [...(window._browseMultiSel[projectId] || [])];
+    var fd = new FormData(); fd.append('project_id', projectId);
+    paths.forEach(function(p) { fd.append('paths', p); });
+    var r = await fetch('/dashboard/batch-ignore', { method: 'POST', body: fd });
+    if (r.ok) { paths.forEach(function(p) { updateBrowseEntry(p, true); }); clearBrowseSelection(projectId); document.getElementById('detail-panel-' + projectId).style.display = 'none'; }
+  }
+
+  async function batchUnignore(projectId) {
+    var paths = [...(window._browseMultiSel[projectId] || [])];
+    var fd = new FormData(); fd.append('project_id', projectId);
+    paths.forEach(function(p) { fd.append('paths', p); });
+    var r = await fetch('/dashboard/batch-unignore', { method: 'POST', body: fd });
+    if (r.ok) { paths.forEach(function(p) { updateBrowseEntry(p, false); }); clearBrowseSelection(projectId); document.getElementById('detail-panel-' + projectId).style.display = 'none'; }
+  }
+
+  async function batchMakeProjects(projectId) {
+    var paths = [...(window._browseMultiSel[projectId] || [])];
+    var fd = new FormData(); fd.append('project_id', projectId);
+    paths.forEach(function(p) { fd.append('paths', p); });
+    var r = await fetch('/dashboard/batch-make-projects', { method: 'POST', body: fd });
+    if (!r.ok) return;
+    paths.forEach(function(p) {
+      var entry = document.querySelector('.browse-entry[data-path="' + p.replace(/"/g, '\\"') + '"]');
+      if (!entry) return;
+      entry.classList.add('browse-is-project');
+      var old = entry.querySelector('.browse-project-badge,.browse-subproject-badge,.browse-arrow,.browse-tag');
+      if (old) old.remove();
+      var badge = document.createElement('span'); badge.className = 'browse-project-badge'; badge.textContent = '◆';
+      entry.appendChild(badge);
+    });
+    clearBrowseSelection(projectId);
+    document.getElementById('detail-panel-' + projectId).style.display = 'none';
+    document.body.dispatchEvent(new CustomEvent('archivio:projectListChanged'));
   }
 </script>
 {% endblock %}

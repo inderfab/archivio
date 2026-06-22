@@ -787,6 +787,51 @@ async def unignore_path(
     return resp
 
 
+# ── Batch-Aktionen (Mehrfachauswahl) ─────────────────────────────────────────
+
+@router.post("/batch-ignore")
+async def batch_ignore(project_id: int = Form(...), paths: list[str] = Form(...)):
+    conn = connection.get_connection()
+    with conn:
+        for path in paths:
+            conn.execute(
+                "INSERT OR IGNORE INTO ignored_paths (project_id, path) VALUES (?,?)",
+                (project_id, path),
+            )
+    conn.close()
+    return JSONResponse({"ok": True, "count": len(paths)})
+
+
+@router.post("/batch-unignore")
+async def batch_unignore(project_id: int = Form(...), paths: list[str] = Form(...)):
+    conn = connection.get_connection()
+    with conn:
+        for path in paths:
+            conn.execute(
+                "DELETE FROM ignored_paths WHERE project_id=? AND path=?",
+                (project_id, path),
+            )
+    conn.close()
+    return JSONResponse({"ok": True, "count": len(paths)})
+
+
+@router.post("/batch-make-projects")
+async def batch_make_projects(project_id: int = Form(...), paths: list[str] = Form(...)):
+    conn = connection.get_connection()
+    created = 0
+    with conn:
+        for path in paths:
+            name = Path(path).name
+            if not conn.execute("SELECT 1 FROM projects WHERE path=?", (path,)).fetchone():
+                conn.execute(
+                    "INSERT INTO projects (name, path, active) VALUES (?,?,1)",
+                    (name, path),
+                )
+                created += 1
+    conn.close()
+    return JSONResponse({"ok": True, "created": created})
+
+
 # ── Unterordner als eigene Projekte ──────────────────────────────────────────
 
 def _load_subfolders(conn, parent_project_id: int, parent_path: str) -> list[dict]:

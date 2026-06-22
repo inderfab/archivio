@@ -569,14 +569,18 @@
     .browse-col:last-child { border-right: none; }
     .browse-entry {
       display: flex; align-items: center; gap: 6px;
-      padding: 7px 12px; font-size: 13px; cursor: pointer;
-      border: none; background: none; width: 100%; text-align: left;
-      color: var(--text); font-family: inherit;
+      padding: 7px 12px; font-size: 13px;
+      width: 100%; color: var(--text);
     }
+    .browse-check { flex-shrink: 0; cursor: pointer; width: 14px; height: 14px; }
+    .browse-name  { flex: 1; min-width: 0; overflow: hidden; text-overflow: ellipsis;
+                    white-space: nowrap; cursor: pointer; text-align: left; }
+    .browse-name:hover { color: #1d4ed8; }
     .browse-entry:hover { background: var(--bg-2); }
-    .browse-entry.selected { background: #eff6ff; color: #1d4ed8; }
-    .browse-entry.ignored   { background: #fee2e2; color: #991b1b; }
-    .browse-entry.excluded  { background: #fee2e2; color: #991b1b; }
+    .browse-entry.selected     { background: #eff6ff; color: #1d4ed8; }
+    .browse-entry.multi-selected { background: #dbeafe; outline: 2px solid #93c5fd; outline-offset: -2px; }
+    .browse-entry.ignored      { background: #fee2e2; color: #991b1b; }
+    .browse-entry.excluded     { background: #fee2e2; color: #991b1b; }
     .browse-entry.browse-is-project  { background: #dcfce7; }
     .browse-entry.browse-has-subproject { background: #f0fdf4; }
     .browse-entry.browse-is-project:hover  { background: #bbf7d0; }
