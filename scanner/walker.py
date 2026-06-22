@@ -170,9 +170,13 @@ _LIST_ONLY_EXTENSIONS = {
     # Adobe / Design
     ".ai", ".psd", ".indd",
     # Archiv / Sonstiges
-    ".zip", ".rar", ".7z", ".gz",
-    ".xml",
+    ".rar", ".7z", ".gz",
+    # Disk-Images
+    ".dmg", ".iso", ".sparsebundle",
 }
+
+# Einträge die vom Dateisystem fälschlicherweise als Ordner gemeldet werden (macOS/NAS)
+_FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle", ".pkg"}
 
 # Formate die komplett in RAM geladen werden → Grössencheck
 _SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
@@ -297,6 +301,16 @@ def scan_project(project_id: int, root: Path,
     """
     supported = _supported_extensions()
     excluded  = _excluded_folders()
+
+    # Vom Benutzer via UI ignorierte Unterordner (ignored_paths-Tabelle)
+    _ic = connection.get_connection()
+    ignored_paths: set[str] = {
+        row[0] for row in _ic.execute(
+            "SELECT path FROM ignored_paths WHERE project_id=?", (project_id,)
+        )
+    }
+    _ic.close()
+
     tasks_per_worker = max(3, int(settings.get("scanner.tasks_per_worker", 5)))
     num_workers      = max(1, min(4, int(settings.get("scanner.num_workers", 1))))
 
@@ -353,15 +367,10 @@ def scan_project(project_id: int, root: Path,
     )
     _track_pool(pool)
 
-    # Erste Ebene zählen — ein einziger listdir()-Aufruf, sofort fertig
-    top_dirs        = _first_level_dirs(root, excluded)
-    total_top       = max(1, len(top_dirs))
-    top_per_folder  = 100.0 / total_top
-    # Monotoner Counter: steigt nur, springt nie rückwärts (os.walk != alphabetisch)
-    seen_top_dirs   = set()   # bereits besuchte Top-Level-Ordner
-    top_count       = 0       # wie viele Top-Level-Ordner bisher betreten
-    top_base        = 0.0     # Prozent-Basis des aktuellen Top-Level-Ordners
-    total_processed = 0       # kumulativ für WAL-Checkpoint
+    # Kumulative Zähler über den gesamten Scan — kein Reset pro Ordner
+    global_total     = 0  # Dateien in allen bisher entdeckten Ordnern zusammen
+    global_processed = 0  # Bisher fertig verarbeitete Dateien
+    total_processed  = 0  # Für WAL-Checkpoint
 
     found_any = False
     try:
@@ -371,40 +380,31 @@ def scan_project(project_id: int, root: Path,
                 if not d.startswith('.')
                 and not any(excl in unicodedata.normalize('NFC', d.lower())
                             for excl in excluded)
+                and Path(d).suffix.lower() not in _FAKE_DIR_SUFFIXES
+                and str(Path(dirpath) / d) not in ignored_paths
             ]
 
-            # Welchem Top-Level-Ordner gehört dieser Pfad?
-            try:
-                rel = Path(dirpath).relative_to(root)
-                top_dir = (root / rel.parts[0]) if rel.parts else None
-            except ValueError:
-                top_dir = None
-            if top_dir is not None and top_dir not in seen_top_dirs:
-                seen_top_dirs.add(top_dir)
-                top_count += 1
-                top_base = (top_count - 1) * top_per_folder
-                if progress is not None:
-                    progress["percent"] = min(99, int(top_base))
-
-            # Verarbeitbare Dateien dieses Ordners — os.walk hat sie bereits im Speicher
+            # Verarbeitbare Dateien dieses Ordners (Extension-Filter, kein stat())
             dir_processable = [
                 f for f in filenames
                 if not f.startswith('.')
                 and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
             ]
 
+            global_total += len(dir_processable)
+
             if progress is not None:
                 progress["current_folder"] = Path(dirpath).name
-                if dir_processable:
-                    progress["total"]     = len(dir_processable)
-                    progress["processed"] = 0
+                progress["current_dir"]    = str(dirpath)
+                progress["total"]          = global_total
+                progress["processed"]      = global_processed
 
             if not dir_processable:
                 continue
 
             found_any = True
 
-            for i, filename in enumerate(dir_processable):
+            for filename in dir_processable:
                 path = Path(dirpath) / filename
 
                 if cancel_flag and cancel_flag.get("cancel"):
@@ -420,15 +420,18 @@ def scan_project(project_id: int, root: Path,
                     _pressure_waits += 1
                 if _pressure_waits >= 6:
                     log.warning("Speicherdruck hält an — %s übersprungen", path.name)
+                    global_processed += 1
+                    total_processed  += 1
                     if progress is not None:
-                        progress["processed"] += 1
+                        progress["processed"] = global_processed
                         if path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
                             progress["listed"] += 1
                         else:
                             progress["errors"] += 1
-                    total_processed += 1
+                        progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
                     continue
 
+                # ── Worker-Verarbeitung ──────────────────────────────────────────────
                 if progress is not None:
                     progress["current_file"] = path.name
 
@@ -446,7 +449,7 @@ def scan_project(project_id: int, root: Path,
                         result = ar.get(timeout=_POLL_INTERVAL)
                     except multiprocessing.TimeoutError:
                         elapsed  = time.monotonic() - start
-                        rss      = _total_workers_rss_gb()   # ALLE PIDs, nicht nur pool._pool
+                        rss      = _total_workers_rss_gb()
                         pressure = _system_under_pressure()
 
                         if rss > _MAX_WORKER_RSS:
@@ -480,15 +483,17 @@ def scan_project(project_id: int, root: Path,
                 if result == "error" and path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
                     result = "listed"
 
-                total_processed += 1
+                global_processed += 1
+                total_processed  += 1
                 if progress is not None:
-                    progress["processed"] += 1
-                    if result == "new":       progress["new"] += 1
+                    progress["processed"] = global_processed
+                    if result == "new":       progress["new"]     += 1
                     elif result == "skipped": progress["skipped"] += 1
-                    elif result == "listed":  progress["listed"] += 1
-                    else:                     progress["errors"] += 1
+                    elif result == "listed":  progress["listed"]  += 1
+                    else:                     progress["errors"]  += 1
+                    progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
 
-                # WAL-Checkpoint alle 100 Dateien (kumulativ, nicht per Ordner)
+                # WAL-Checkpoint alle 100 Dateien
                 if total_processed % 100 == 0:
                     try:
                         _wal_conn = connection.get_connection()

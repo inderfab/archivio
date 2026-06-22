@@ -12,7 +12,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
+from pydantic import BaseModel
 
 from config import settings
 from db import connection
@@ -28,6 +29,8 @@ _scans: dict[int, dict] = {}
 _cancel_flags: dict[int, dict] = {}
 # Mail-Scan-Status
 _mail_scan: dict = {}
+# Lösch-Status {project_id: "running"|"done"|"error"}
+_deletions: dict[int, str] = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
 _scan_lock        = threading.Semaphore(1)
 _embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
@@ -153,7 +156,6 @@ async def download_helper():
         zip_path = dist_dir / fname
         if zip_path.exists():
             return FileResponse(zip_path, media_type="application/zip", filename=fname)
-    from fastapi.responses import JSONResponse
     return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
 
 
@@ -162,7 +164,6 @@ async def download_server():
     _, version = _server_info()
     zip_path = _DIST / f"archivio-server-{version}.zip"
     if not zip_path.exists():
-        from fastapi.responses import JSONResponse
         return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
     return FileResponse(
         zip_path,
@@ -248,12 +249,75 @@ async def deactivate_project(request: Request, project_id: int):
     })
 
 
+def _delete_project_bg(project_id: int) -> None:
+    """Löscht Projekt + alle Dokumente im Hintergrund-Thread."""
+    try:
+        conn = connection.get_connection()
+        with conn:
+            # mail_scan_config hat kein ON DELETE CASCADE — Mailbox mitlöschen
+            conn.execute(
+                "DELETE FROM mail_scan_config WHERE project_id=?",
+                (project_id,),
+            )
+            # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
+            doc_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM documents WHERE project_id=?", (project_id,)
+            ).fetchall()]
+            for doc_id in doc_ids:
+                try:
+                    conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
+                except Exception:
+                    pass
+            conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
+        conn.close()
+        _deletions[project_id] = "done"
+        log.info("Projekt %s aus DB gelöscht (%d Dokumente)", project_id, len(doc_ids))
+    except Exception as exc:
+        log.error("Fehler beim Löschen von Projekt %s: %s", project_id, exc)
+        _deletions[project_id] = "error:" + str(exc)
+
+
+def _delete_loading_html(project_id: int) -> str:
+    return (
+        f'<div style="padding:12px 16px; color:var(--text-3); font-size:13px;'
+        f' border:1px solid var(--border); border-radius:8px; margin-bottom:8px;"'
+        f' hx-get="/dashboard/projects/{project_id}/delete-status"'
+        f' hx-trigger="every 2s"'
+        f' hx-target="#project-list"'
+        f' hx-swap="innerHTML">'
+        f'⟳ Wird aus Datenbank entfernt…</div>'
+    )
+
+
 @router.post("/projects/{project_id}/delete", response_class=HTMLResponse)
-async def delete_project(request: Request, project_id: int):
-    """Projekt und alle Dokumente aus DB entfernen."""
+async def delete_project(project_id: int):
+    """Startet Löschung im Hintergrund, gibt sofort Loading-State zurück."""
+    if _deletions.get(project_id) != "running":
+        _deletions[project_id] = "running"
+        threading.Thread(
+            target=_delete_project_bg, args=(project_id,), daemon=True
+        ).start()
+    return HTMLResponse(_delete_loading_html(project_id))
+
+
+@router.get("/projects/{project_id}/delete-status", response_class=HTMLResponse)
+async def delete_project_status(request: Request, project_id: int):
+    """Polling-Endpunkt: liefert Loading-State, Fehler oder fertige Projektliste."""
+    status = _deletions.get(project_id, "done")
+    if status == "running":
+        return HTMLResponse(_delete_loading_html(project_id))
+    if status.startswith("error:"):
+        err = status[6:]
+        _deletions.pop(project_id, None)
+        return HTMLResponse(
+            f'<div style="padding:12px 16px; color:#b91c1c; font-size:13px;'
+            f' border:1px solid #fca5a5; border-radius:8px; margin-bottom:8px;">'
+            f'⚠ Fehler beim Löschen: {err}<br>'
+            f'<small>Falls ein Scan läuft, bitte diesen zuerst stoppen und erneut versuchen.</small>'
+            f'</div>'
+        )
+    _deletions.pop(project_id, None)
     conn = connection.get_connection()
-    with conn:
-        conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
     groups = _project_groups(conn)
     stats  = _global_stats(conn)
     conn.close()
@@ -277,6 +341,7 @@ async def start_scan(request: Request, project_id: int):
         "status":       "running",
         "phase":        "collecting",
         "project_name": row["name"],
+        "project_root": row["path"],
         "total":        0,
         "processed":    0,
         "new":          0,
@@ -369,15 +434,16 @@ async def scan_progress_banner(request: Request):
         "status":       s.get("status"),
         "phase":        s.get("phase", ""),
         "project_name": s.get("project_name", ""),
+        "project_root": s.get("project_root", ""),
         "total":        total,
         "processed":    processed,
-        "percent":      percent,
         "new":          s.get("new", 0),
         "skipped":      s.get("skipped", 0),
         "listed":       s.get("listed", 0),
         "errors":       s.get("errors", 0),
         "current_file":   s.get("current_file", ""),
         "current_folder": s.get("current_folder", ""),
+        "current_dir":    s.get("current_dir", ""),
         "error":          s.get("error", ""),
         "project_id":     pid,
     })
@@ -783,6 +849,56 @@ async def unignore_path(
     resp = await folder_detail(request, path=path, project_id=project_id)
     resp.headers["HX-Trigger"] = json.dumps({"archivio:browseEntryChanged": {"path": path, "ignored": False}})
     return resp
+
+
+# ── Batch-Aktionen (Mehrfachauswahl) ─────────────────────────────────────────
+
+class _BatchPaths(BaseModel):
+    project_id: int
+    paths: list[str]
+
+
+@router.post("/batch-ignore")
+async def batch_ignore(data: _BatchPaths):
+    conn = connection.get_connection()
+    with conn:
+        for path in data.paths:
+            conn.execute(
+                "INSERT OR IGNORE INTO ignored_paths (project_id, path) VALUES (?,?)",
+                (data.project_id, path),
+            )
+    conn.close()
+    return JSONResponse({"ok": True, "count": len(data.paths)})
+
+
+@router.post("/batch-unignore")
+async def batch_unignore(data: _BatchPaths):
+    conn = connection.get_connection()
+    with conn:
+        for path in data.paths:
+            conn.execute(
+                "DELETE FROM ignored_paths WHERE project_id=? AND path=?",
+                (data.project_id, path),
+            )
+    conn.close()
+    return JSONResponse({"ok": True, "count": len(data.paths)})
+
+
+@router.post("/batch-make-projects")
+async def batch_make_projects(data: _BatchPaths):
+    conn = connection.get_connection()
+    created = 0
+    with conn:
+        for path in data.paths:
+            name = Path(path).name
+            if not conn.execute("SELECT 1 FROM projects WHERE path=?", (path,)).fetchone():
+                conn.execute(
+                    "INSERT INTO projects (name, path, active) VALUES (?,?,1)",
+                    (name, path),
+                )
+                created += 1
+    conn.close()
+    return JSONResponse({"ok": True, "created": created})
 
 
 # ── Unterordner als eigene Projekte ──────────────────────────────────────────
