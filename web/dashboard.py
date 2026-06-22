@@ -253,16 +253,21 @@ def _delete_project_bg(project_id: int) -> None:
     """Löscht Projekt + alle Dokumente im Hintergrund-Thread."""
     try:
         conn = connection.get_connection()
-        # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
-        doc_ids = [r[0] for r in conn.execute(
-            "SELECT id FROM documents WHERE project_id=?", (project_id,)
-        ).fetchall()]
-        for doc_id in doc_ids:
-            try:
-                conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
-            except Exception:
-                pass
         with conn:
+            # mail_scan_configs hat kein ON DELETE CASCADE → vorher entkoppeln
+            conn.execute(
+                "UPDATE mail_scan_configs SET project_id=NULL WHERE project_id=?",
+                (project_id,),
+            )
+            # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
+            doc_ids = [r[0] for r in conn.execute(
+                "SELECT id FROM documents WHERE project_id=?", (project_id,)
+            ).fetchall()]
+            for doc_id in doc_ids:
+                try:
+                    conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
+                except Exception:
+                    pass
             conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         conn.close()
         _deletions[project_id] = "done"
