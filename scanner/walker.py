@@ -384,11 +384,11 @@ def scan_project(project_id: int, root: Path,
                 and str(Path(dirpath) / d) not in ignored_paths
             ]
 
-            # Verarbeitbare Dateien dieses Ordners (Extension-Filter, kein stat())
+            # Alle nicht-versteckten Dateien — unbekannte Formate werden in
+            # _process_file als list-only (Dateiname) registriert
             dir_processable = [
                 f for f in filenames
                 if not f.startswith('.')
-                and (Path(dirpath) / f).suffix.lower() in (supported | _LIST_ONLY_EXTENSIONS)
             ]
 
             global_total += len(dir_processable)
@@ -479,8 +479,8 @@ def scan_project(project_id: int, root: Path,
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
 
-                # Bilder/Videos/3D: "error" → "listed" (Text wurde nie erwartet)
-                if result == "error" and path.suffix.lower() in _LIST_ONLY_EXTENSIONS:
+                # Bilder/Videos/3D/unbekannte Formate: "error" → "listed"
+                if result == "error" and path.suffix.lower() not in supported:
                     result = "listed"
 
                 global_processed += 1
@@ -548,6 +548,28 @@ def _process_file(conn, project_id: int, path: Path) -> str:
     # List-Only-Formate (Bilder, Video, 3D, …): Datei NICHT lesen.
     # Metadaten-Hash aus Pfad+Grösse+mtime — kein Datei-I/O, sofort fertig.
     if ext in _LIST_ONLY_EXTENSIONS:
+        import hashlib as _hl
+        file_hash = "m:" + _hl.sha256(
+            f"{path}:{stat.st_size}:{mtime_iso}".encode()
+        ).hexdigest()
+        data = {
+            "project_id":  project_id,
+            "hash":        file_hash,
+            "filename":    path.name,
+            "extension":   ext,
+            "filesize":    stat.st_size,
+            "modified_at": mtime_iso,
+            "source_type": "filesystem",
+        }
+        with conn:
+            doc_id = queries.upsert_document(conn, data)
+            queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "listed"
+
+    # Unbekanntes Format — nicht in supported-Extensions und nicht in _LIST_ONLY:
+    # nur als Dateiname registrieren, kein Datei-I/O.
+    if ext not in supported:
         import hashlib as _hl
         file_hash = "m:" + _hl.sha256(
             f"{path}:{stat.st_size}:{mtime_iso}".encode()
