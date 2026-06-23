@@ -11,7 +11,7 @@ CREATE TABLE IF NOT EXISTS projects (
 );
 
 -- Jede Datei, eindeutig über SHA256-Hash
--- extraction_status: pending | ok | error | unsupported
+-- extraction_status: pending | ok | error | unsupported | listed
 -- source_type: filesystem | email | archive
 CREATE TABLE IF NOT EXISTS documents (
     id                 INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -23,7 +23,7 @@ CREATE TABLE IF NOT EXISTS documents (
     modified_at        TEXT,
     indexed_at         TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
     extraction_status  TEXT    NOT NULL DEFAULT 'pending'
-                           CHECK (extraction_status IN ('pending', 'ok', 'error', 'unsupported')),
+                           CHECK (extraction_status IN ('pending', 'ok', 'error', 'unsupported', 'listed')),
     source_type        TEXT    NOT NULL DEFAULT 'filesystem'
                            CHECK (source_type IN ('filesystem', 'email', 'archive')),
     metadata           TEXT    NOT NULL DEFAULT '{}'

@@ -532,6 +532,7 @@ def _process_file(conn, project_id: int, path: Path) -> str:
 
     ext       = path.suffix.lower()
     mtime_iso = _iso(stat.st_mtime)
+    supported = _supported_extensions()
 
     # Schnellpfad: Metadaten unverändert → überspringen (inkl. error/unsupported)
     fast = conn.execute("""

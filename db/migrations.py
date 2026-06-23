@@ -20,6 +20,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "004_add_chunks", _m004)
     _apply(conn, "005_chunk_doc_index", _m005)
     _apply(conn, "006_mails_mailbox_name", _m006)
+    _apply(conn, "007_extraction_status_listed", _m007)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -159,6 +160,48 @@ def _m006(conn: sqlite3.Connection):
     except Exception as e:
         if "duplicate column" not in str(e).lower():
             raise
+
+
+def _m007(conn: sqlite3.Connection):
+    """extraction_status: zusätzlichen Wert 'listed' erlauben.
+
+    Bisher kannte die CHECK-Constraint nur ('pending','ok','error','unsupported').
+    Der Scanner schreibt für List-Only-Dateien (Bilder, Video, grosse PDFs,
+    unbekannte Formate) aber 'listed' — das schlug an der Constraint fehl, die
+    gesamte Transaktion (Dokument + Pfad) wurde zurückgerollt und die Datei
+    landete nie in der DB. SQLite kann CHECK-Constraints nicht per ALTER ändern;
+    daher wird die gespeicherte Tabellen-DDL über writable_schema gepatcht.
+    """
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type='table' AND name='documents'"
+    ).fetchone()
+    if not row or not row[0]:
+        return
+    sql = row[0]
+    if "'listed'" in sql:
+        return  # bereits aktualisiert
+
+    import re
+    new_sql = re.sub(
+        r"CHECK\s*\(\s*extraction_status\s+IN\s*\(([^)]*)\)\s*\)",
+        lambda m: "CHECK (extraction_status IN (" + m.group(1).strip() + ", 'listed'))",
+        sql, count=1,
+    )
+    if new_sql == sql or "'listed'" not in new_sql \
+            or not new_sql.lstrip().upper().startswith("CREATE TABLE"):
+        log.warning("m007: CHECK-Constraint nicht gefunden/ungültig — übersprungen")
+        return
+
+    conn.execute("PRAGMA writable_schema = ON")
+    try:
+        conn.execute(
+            "UPDATE sqlite_master SET sql = ? WHERE type='table' AND name='documents'",
+            (new_sql,),
+        )
+        conn.commit()
+    finally:
+        conn.execute("PRAGMA writable_schema = OFF")
+    log.info("m007: extraction_status erlaubt jetzt 'listed'")
 
 
 def _m003(conn: sqlite3.Connection):
