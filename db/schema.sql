@@ -109,6 +109,15 @@ AFTER DELETE ON document_content BEGIN
     FROM documents d WHERE d.id = old.document_id;
 END;
 
+-- Trigger: FTS-Eintrag entfernen wenn das Dokument selbst gelöscht wird.
+-- Ohne diesen Trigger blieb bei Dokumenten ohne document_content-Zeile
+-- (Bilder, Fehler, pending) ein verwaister documents_fts-Eintrag zurück
+-- → veraltete Dateinamen-Treffer in der Suche.
+CREATE TRIGGER IF NOT EXISTS documents_fts_doc_delete
+AFTER DELETE ON documents BEGIN
+    DELETE FROM documents_fts WHERE rowid = old.id;
+END;
+
 -- Vom Dashboard ignorierte Pfade (werden beim Scan übersprungen)
 CREATE TABLE IF NOT EXISTS ignored_paths (
     id         INTEGER PRIMARY KEY AUTOINCREMENT,
