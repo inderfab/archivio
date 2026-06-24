@@ -49,7 +49,9 @@ from web.api import router as api_router
 # ── Scheduler ─────────────────────────────────────────────────────────────────
 
 def _scheduler_loop():
+    log = logging.getLogger("scheduler")
     triggered_today: str | None = None
+    log.info("Scheduler-Loop gestartet")
     while True:
         try:
             from config import settings
@@ -63,13 +65,16 @@ def _scheduler_loop():
                 diff = abs((now - target).total_seconds())
                 if diff < 120 and triggered_today != today:
                     triggered_today = today
+                    port = settings.get("server.port", 8000)
+                    log.info("Geplanter Scan um %s wird ausgelöst (Port %s)", scan_time, port)
                     try:
                         import requests as _req
-                        _req.post("http://127.0.0.1:8000/api/scan/all", timeout=5)
-                    except Exception:
-                        pass
-        except Exception:
-            pass
+                        r = _req.post(f"http://127.0.0.1:{port}/api/scan/all", timeout=10)
+                        log.info("Geplanter Scan gestartet: HTTP %s %s", r.status_code, r.text[:200])
+                    except Exception as exc:
+                        log.error("Geplanter Scan fehlgeschlagen: %s", exc)
+        except Exception as exc:
+            log.error("Scheduler-Fehler: %s", exc)
         time.sleep(60)
 
 

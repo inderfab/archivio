@@ -22,6 +22,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "006_mails_mailbox_name", _m006)
     _apply(conn, "007_extraction_status_listed", _m007)
     _apply(conn, "008_fts_doc_delete_trigger", _m008)
+    _apply(conn, "009_projects_last_scanned_at", _m009)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -241,3 +242,16 @@ def _m008(conn: sqlite3.Connection):
         END
     """)
     conn.commit()
+
+
+def _m009(conn: sqlite3.Connection):
+    """projects.last_scanned_at — Zeitpunkt des letzten Scans (auch wenn nur
+    übersprungen wurde). MAX(indexed_at) der Dokumente ist dafür ungeeignet, weil
+    es bei Skip-only-Scans unverändert bleibt → Nutzer denkt fälschlich, es sei
+    nicht gescannt worden."""
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN last_scanned_at TEXT")
+        conn.commit()
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise

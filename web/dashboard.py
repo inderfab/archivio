@@ -1234,15 +1234,17 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         (db["id"],),
                     ).fetchall()
                     results.append({
-                        "name":        db["name"],
-                        "path":        path,
-                        "in_db":       True,
-                        "id":          db["id"],
-                        "active":      bool(db["active"]),
-                        "doc_count":   count,
-                        "last_scan":   _fmt_iso_date(last_scan),
-                        "scan_status": _scans.get(db["id"], {}).get("status"),
-                        "mailboxes":   [dict(m) for m in mailboxes],
+                        "name":          db["name"],
+                        "path":          path,
+                        "in_db":         True,
+                        "id":            db["id"],
+                        "active":        bool(db["active"]),
+                        "doc_count":     count,
+                        "last_scan":     _fmt_iso_date(last_scan),
+                        "last_scanned":  _fmt_iso_datetime(db["last_scanned_at"]
+                                                           if "last_scanned_at" in db.keys() else None),
+                        "scan_status":   _scans.get(db["id"], {}).get("status"),
+                        "mailboxes":     [dict(m) for m in mailboxes],
                     })
                 else:
                     results.append({
@@ -1445,6 +1447,13 @@ def _run_scan(project_id: int, path: str):
             count = conn.execute(
                 "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
             ).fetchone()[0]
+            # Zeitpunkt des Scans persistent festhalten — auch bei Skip-only-Scans,
+            # bei denen sich MAX(indexed_at) nicht ändert.
+            with conn:
+                conn.execute(
+                    "UPDATE projects SET last_scanned_at=? WHERE id=?",
+                    (progress["finished_at"], project_id),
+                )
             conn.close()
             progress["count"] = count
         except Exception:
@@ -1531,6 +1540,17 @@ def _fmt_iso_date(iso: str | None) -> str | None:
         return iso[:10]
 
 
+def _fmt_iso_datetime(iso: str | None) -> str | None:
+    """Wie _fmt_iso_date, aber mit Uhrzeit (lokal). Für 'zuletzt gescannt'."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return _fmt_iso_date(iso)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1569,4 +1589,10 @@ def _scan_badge(project_id: int, status: str) -> str:
         error = _scans.get(project_id, {}).get("error", "")
         title = f' title="{error}"' if error else ""
         return f'<span class="scan-badge error"{title}>Fehler beim Scan</span>'
-    return ""
+    # Unbekannt/idle: keinen leeren Slot hinterlassen — wieder den Scan-Button zeigen,
+    # damit die Zeile bedienbar bleibt (Polling stoppt automatisch, da kein hx-trigger).
+    return (
+        f'<form hx-post="/dashboard/projects/{project_id}/scan" hx-swap="outerHTML" '
+        f'hx-target="find button[type=submit]" style="display:contents;">'
+        f'<button type="submit" class="btn btn-primary">Jetzt scannen</button></form>'
+    )

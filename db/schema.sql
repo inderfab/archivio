@@ -3,11 +3,12 @@ PRAGMA foreign_keys = ON;
 
 -- Projekte des Architekturbüros
 CREATE TABLE IF NOT EXISTS projects (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    path       TEXT    NOT NULL UNIQUE,
-    active     INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    path            TEXT    NOT NULL UNIQUE,
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_scanned_at TEXT
 );
 
 -- Jede Datei, eindeutig über SHA256-Hash
