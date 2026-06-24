@@ -36,6 +36,19 @@ def test_unsupported_extension_listed(tmp_db, sample_files):
     assert len(hit) == 1
 
 
+def test_junk_files_not_indexed(tmp_db, sample_files):
+    project_id = queries.insert_project(tmp_db, "Test", str(sample_files))
+    tmp_db.commit()
+    scan_project(project_id, sample_files)
+
+    names = [r["filename"] for r in
+             tmp_db.execute("SELECT filename FROM documents").fetchall()]
+    for junk in ("Thumbs.db", "~$bericht.docx", "backup.txt~", "session.lock"):
+        assert junk not in names, f"Müll-Datei '{junk}' wurde indexiert"
+    # echte Dateien sind weiterhin da
+    assert "plan.txt" in names
+
+
 def test_modified_file_repoints_path(tmp_db, sample_files):
     """Ändert sich der Inhalt, entsteht ein neues Dokument (neuer Hash). Der Pfad
     muss umgehängt und die verwaiste alte Version entfernt werden."""

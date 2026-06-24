@@ -178,6 +178,33 @@ _LIST_ONLY_EXTENSIONS = {
 # Einträge die vom Dateisystem fälschlicherweise als Ordner gemeldet werden (macOS/NAS)
 _FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle", ".pkg"}
 
+# ── Müll-/Systemdateien die nicht in die Suche gehören ────────────────────────
+# System-Thumbnails, Office-/Editor-Sperrdateien, Temp-/Download-Fragmente.
+_JUNK_FILENAMES = {
+    "thumbs.db", "ehthumbs.db", "desktop.ini", "icon\r", ".ds_store",
+    ".localized", "$recycle.bin",
+}
+_JUNK_EXTENSIONS = {
+    ".lock", ".tmp", ".temp", ".part", ".partial", ".crdownload",
+    ".swp", ".swo", ".bak",
+}
+
+
+def _is_junk_file(name: str) -> bool:
+    """True für Dateien die nie in die Suche sollen."""
+    if name.startswith('.'):        # versteckte Dateien (.DS_Store, ._resourceforks, …)
+        return True
+    if name.startswith('~$'):       # Office-Sperr-/Temp-Dateien (~$bericht.docx)
+        return True
+    if name.endswith('~'):          # Editor-Backups (datei.txt~)
+        return True
+    low = name.lower()
+    if low in _JUNK_FILENAMES:
+        return True
+    if Path(name).suffix.lower() in _JUNK_EXTENSIONS:
+        return True
+    return False
+
 # Formate die komplett in RAM geladen werden → Grössencheck
 _SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
 _MAX_EXTRACT_MB = 30  # Dateien > 30 MB werden nur registriert, nicht extrahiert
@@ -393,12 +420,9 @@ def scan_project(project_id: int, root: Path,
                 and str(Path(dirpath) / d) not in ignored_paths
             ]
 
-            # Alle nicht-versteckten Dateien — unbekannte Formate werden in
+            # Alle Dateien ausser Müll/Systemdateien — unbekannte Formate werden in
             # _process_file als list-only (Dateiname) registriert
-            dir_processable = [
-                f for f in filenames
-                if not f.startswith('.')
-            ]
+            dir_processable = [f for f in filenames if not _is_junk_file(f)]
 
             global_total += len(dir_processable)
 

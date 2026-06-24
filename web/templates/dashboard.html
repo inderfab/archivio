@@ -119,6 +119,10 @@
       .then(d => {
         if (d.ok) {
           btn.textContent = '✓ ' + d.projects_started + ' Projekt(e) + Mails werden gescannt';
+          // Projektliste sofort neu laden, damit jede laufende Zeile ihr
+          // pollendes Status-Badge bekommt (wechselt selbständig auf „fertig").
+          htmx.ajax('GET', '/dashboard/projects/list',
+                    { target: '#project-list', swap: 'innerHTML' });
           setTimeout(function() {
             btn.disabled = false;
             btn.textContent = '⟳ Alle aktiven Projekte jetzt scannen';

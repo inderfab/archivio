@@ -826,38 +826,48 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
 
 
 def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
-    """Findet Ordner deren Name die Suchbegriffe enthält (aus document_paths)."""
+    """Findet Ordner deren Name die Suchbegriffe enthält (aus document_paths).
+
+    Optimiert: Vorfilterung in SQL (Pfad muss alle Suchwörter enthalten) statt
+    alle document_paths in den Speicher zu laden. folder.exists() (NAS-Stat) wird
+    nur noch für die wenigen namentlich passenden Treffer aufgerufen, nicht für
+    jeden Elternordner jedes Pfades.
+    """
     words = [w.lower() for w in q.split() if len(w) > 1]
     if not words:
         return []
     try:
+        # Grobfilter in SQL: nur Pfade die ALLE Suchwörter irgendwo enthalten —
+        # notwendige Bedingung dafür, dass ein Ordnername alle Wörter enthält.
         sql = """
-            SELECT DISTINCT dp.path, p.name AS project_name, p.id AS project_id
+            SELECT DISTINCT dp.path, p.name AS project_name
             FROM document_paths dp
             JOIN documents d ON d.id = dp.document_id
             JOIN projects p ON p.id = d.project_id
             WHERE 1=1
         """
-        params = []
+        params: list = []
+        for w in words:
+            sql += " AND lower(dp.path) LIKE ?"
+            params.append(f"%{w}%")
         if project_id:
             try:
                 sql += " AND d.project_id = ?"
                 params.append(int(project_id))
             except ValueError:
                 pass
+        sql += " LIMIT 2000"
         rows = conn.execute(sql, params).fetchall()
 
         seen_dirs: set[str] = set()
         results = []
         for row in rows:
-            file_path = Path(row["path"])
-            for folder in list(file_path.parents):
+            for folder in Path(row["path"]).parents:
                 folder_str = str(folder)
                 if folder_str in seen_dirs:
                     continue
                 seen_dirs.add(folder_str)
-                folder_lower = folder.name.lower()
-                if all(w in folder_lower for w in words) and folder.exists():
+                if all(w in folder.name.lower() for w in words) and folder.exists():
                     results.append({
                         "path":         folder_str,
                         "name":         folder.name,

@@ -49,7 +49,7 @@ async def status():
 async def scan_all():
     conn     = connection.get_connection()
     projects = conn.execute(
-        "SELECT id, path FROM projects WHERE active=1"
+        "SELECT id, name, path FROM projects WHERE active=1"
     ).fetchall()
     conn.close()
 
@@ -57,7 +57,24 @@ async def scan_all():
     for p in projects:
         if _scans.get(p["id"], {}).get("status") == "running":
             continue
-        _scans[p["id"]] = {"status": "running", "started_at": _now()}
+        # Vollständiger Zustand wie beim Einzel-Scan — sonst fehlen dem Banner
+        # Projektname/-pfad und den Zählern die Startwerte.
+        _scans[p["id"]] = {
+            "status":       "running",
+            "phase":        "collecting",
+            "project_name": p["name"],
+            "project_root": p["path"],
+            "total":        0,
+            "processed":    0,
+            "new":          0,
+            "skipped":      0,
+            "listed":       0,
+            "errors":       0,
+            "current_file":   "",
+            "current_folder": "",
+            "started_at":     _now(),
+        }
+        _cancel_flags[p["id"]] = {"cancel": False}
         threading.Thread(
             target=_run_scan, args=(p["id"], p["path"]), daemon=True
         ).start()

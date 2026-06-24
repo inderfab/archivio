@@ -42,6 +42,11 @@ def sample_files(tmp_path) -> Path:
     (root / "plan.txt").write_text("Grundriss Erdgeschoss\nWohnfläche 120qm", encoding="utf-8")
     (root / "notes.txt").write_text("# Besprechung\nProjekt läuft gut.", encoding="utf-8")
     (root / "binary.xyz").write_bytes(b"\x00\x01\x02")
+    # Müll-/Systemdateien — sollen NICHT indexiert werden
+    (root / "Thumbs.db").write_bytes(b"junk")
+    (root / "~$bericht.docx").write_bytes(b"lock")
+    (root / "backup.txt~").write_text("alt", encoding="utf-8")
+    (root / "session.lock").write_bytes(b"")
     # Ausgeschlossene Ordner
     for folder in ("Planstande", "Upload", "Archiv"):
         d = root / folder
