@@ -34,6 +34,7 @@ _deletions: dict[int, str] = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
 _scan_lock        = threading.Semaphore(1)
 _embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
+_fts_opt_lock      = threading.Lock()   # max. 1 FTS-Optimize-Thread gleichzeitig
 
 _EMBED_BATCH_DOCS  = 5    # Dokumente pro Batch, dann GC + Pause
 _EMBED_BATCH_PAUSE = 3.0  # Sekunden Pause zwischen Batches (normal)
@@ -1458,12 +1459,38 @@ def _run_scan(project_id: int, path: str):
             progress["count"] = count
         except Exception:
             pass
+        # FTS-Optimize koordiniert anstoßen (läuft erst wenn kein Scan mehr aktiv)
+        threading.Thread(target=_run_fts_optimize, daemon=True).start()
         # Embedding nach dem Scan automatisch starten (falls Ollama läuft)
         threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
     finally:
         _scan_lock.release()
+
+
+def _run_fts_optimize():
+    """Stösst FTS5-optimize an — koaleszierend und serialisiert mit Scans.
+
+    Mehrere Scan-Abschlüsse (z.B. bei "Alle scannen") lösen dies aus, aber nur
+    EIN Optimize läuft gleichzeitig (_fts_opt_lock). Es wartet via _scan_lock bis
+    kein Scan aktiv ist, sodass es nie mit Inserts eines laufenden Scans
+    konkurriert (sonst: database is locked → verlorene Dokumente). Während des
+    Wartens laufende Scans haben so Vorrang; das Optimize läuft, wenn es ruhig ist.
+    """
+    if not _fts_opt_lock.acquire(blocking=False):
+        return  # bereits eingeplant/aktiv — ein Lauf genügt für alle Änderungen
+    try:
+        from scanner.walker import optimize_fts
+        _scan_lock.acquire()   # wartet bis kein Scan läuft
+        try:
+            optimize_fts()
+        finally:
+            _scan_lock.release()
+    except Exception as exc:
+        log.debug("FTS-Optimize übersprungen: %s", exc)
+    finally:
+        _fts_opt_lock.release()
 
 
 def _run_post_scan_embedding():

@@ -572,19 +572,32 @@ def scan_project(project_id: int, root: Path,
         except Exception:
             pass
 
-    # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
-    def _fts_optimize():
-        try:
-            import sqlite3 as _sqlite3
-            _db_path = str(connection._resolve_path())
-            c = _sqlite3.connect(_db_path, timeout=30, isolation_level=None)
-            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
-            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
-            c.close()
-            log.info("FTS5 optimize abgeschlossen")
-        except Exception as exc:
-            log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
-    threading.Thread(target=_fts_optimize, daemon=True, name="fts-optimize").start()
+    # FTS5-Automerge wieder aktivieren (billig). Das teure optimize() wird NICHT
+    # hier angestossen — es hielte eine Schreibsperre, die bei "Alle scannen" die
+    # Inserts des nächsten Projekts blockiert (database is locked → 0 Dokumente).
+    # Der Aufrufer (_run_scan) startet optimize koordiniert unter dem Scan-Lock.
+    try:
+        import sqlite3 as _sqlite3
+        _db_path = str(connection._resolve_path())
+        c = _sqlite3.connect(_db_path, timeout=30, isolation_level=None)
+        c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
+        c.close()
+    except Exception as exc:
+        log.warning("FTS5 automerge-Reset fehlgeschlagen: %s", exc)
+
+
+def optimize_fts() -> None:
+    """Führt FTS5-optimize aus (teurer Segment-Merge). Muss serialisiert mit
+    Scans laufen — der Aufrufer stellt das über den Scan-Lock sicher."""
+    try:
+        import sqlite3 as _sqlite3
+        _db_path = str(connection._resolve_path())
+        c = _sqlite3.connect(_db_path, timeout=60, isolation_level=None)
+        c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
+        c.close()
+        log.info("FTS5 optimize abgeschlossen")
+    except Exception as exc:
+        log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
 
 
 def _process_file(conn, project_id: int, path: Path) -> str:

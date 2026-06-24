@@ -56,6 +56,46 @@ def _local_version() -> str:
         return _load_config().get("version", "1.0.0")
 
 
+# Throttle-Zustand für Update-Benachrichtigungen — im nutzer-schreibbaren Verzeichnis
+# (das App-Bundle selbst ist schreibgeschützt).
+STATE_PATH = Path.home() / ".archivio" / "helper_state.json"
+_UPDATE_NOTIFY_INTERVAL = 7 * 24 * 3600   # max. 1 Benachrichtigung pro Woche
+
+
+def _load_state() -> dict:
+    try:
+        return json.loads(STATE_PATH.read_text())
+    except Exception:
+        return {}
+
+
+def _save_state(state: dict):
+    try:
+        STATE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        STATE_PATH.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    except Exception as e:
+        log.error("State save failed: %s", e)
+
+
+def _should_notify_update(version: str) -> bool:
+    """True wenn eine Update-Benachrichtigung gezeigt werden soll: bei neuer
+    Version sofort, sonst höchstens einmal pro Woche."""
+    import time
+    state = _load_state()
+    if state.get("last_notified_version") != version:
+        return True
+    last = state.get("last_update_notify", 0)
+    return (time.time() - last) >= _UPDATE_NOTIFY_INTERVAL
+
+
+def _mark_update_notified(version: str):
+    import time
+    state = _load_state()
+    state["last_notified_version"] = version
+    state["last_update_notify"]    = time.time()
+    _save_state(state)
+
+
 # ── Datei öffnen ──────────────────────────────────────────────────────────────
 
 def _open_path(path: str):
@@ -304,11 +344,14 @@ class ArchivioHelper(rumps.App):
             version, url = result
             self._pending_update = (version, url)
             self._update_item.title = f"🟡  Update: v{version} verfügbar"
-            rumps.notification(
-                "Archivio Helper",
-                f"Update verfügbar: Version {version}",
-                "Im Menü auf «Update verfügbar» klicken.",
-            )
+            # Benachrichtigung höchstens 1x/Woche (Menüpunkt bleibt sichtbar gelb)
+            if _should_notify_update(version):
+                rumps.notification(
+                    "Archivio Helper",
+                    f"Update verfügbar: Version {version}",
+                    "Im Menü auf «Update verfügbar» klicken.",
+                )
+                _mark_update_notified(version)
             log.info("Update verfügbar: %s", version)
         else:
             self._pending_update = None
