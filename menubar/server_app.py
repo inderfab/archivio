@@ -414,9 +414,13 @@ def _server_memory_watchdog():
             if resume_scan:
                 if _wait_for_server():
                     try:
-                        requests.post("http://127.0.0.1:8000/api/scan", timeout=5)
-                        log.info("Scan nach Neustart automatisch fortgesetzt")
-                        _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
+                        # /api/scan/all — NICHT /api/scan (existiert nicht → 404).
+                        r = requests.post("http://127.0.0.1:8000/api/scan/all", timeout=10)
+                        if r.status_code == 200:
+                            log.info("Scan nach Neustart automatisch fortgesetzt: %s", r.text[:200])
+                            _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
+                        else:
+                            log.warning("Scan-Resume HTTP %s: %s", r.status_code, r.text[:200])
                     except Exception as exc:
                         log.warning("Scan-Resume fehlgeschlagen: %s", exc)
                 else:
