@@ -53,11 +53,16 @@
         {% elif p.scan_status == 'error' %}
           <span class="scan-badge error">Fehler</span>
         {% else %}
+          {% if p.last_scanned %}
+            <span class="scan-badge done" title="Zuletzt gescannt: {{ p.last_scanned }}"
+                  style="margin-right:8px;">✓ gescannt</span>
+          {% endif %}
           <form hx-post="/dashboard/projects/{{ p.id }}/scan"
                 hx-swap="outerHTML"
                 hx-target="find button[type=submit]"
                 style="display:contents;">
-            <button type="submit" class="btn btn-primary">Jetzt scannen</button>
+            <button type="submit" class="btn {{ 'btn' if p.last_scanned else 'btn-primary' }}">
+              {{ 'Neu scannen' if p.last_scanned else 'Jetzt scannen' }}</button>
           </form>
         {% endif %}
 

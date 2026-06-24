@@ -1616,10 +1616,27 @@ def _scan_badge(project_id: int, status: str) -> str:
         error = _scans.get(project_id, {}).get("error", "")
         title = f' title="{error}"' if error else ""
         return f'<span class="scan-badge error"{title}>Fehler beim Scan</span>'
-    # Unbekannt/idle: keinen leeren Slot hinterlassen — wieder den Scan-Button zeigen,
-    # damit die Zeile bedienbar bleibt (Polling stoppt automatisch, da kein hx-trigger).
-    return (
+    # Unbekannt/idle (z.B. nach Server-Neustart, _scans ist In-Memory): durablen
+    # Status aus der DB ziehen, damit ein bereits gescanntes Projekt nicht
+    # faelschlich als "nie gescannt" erscheint.
+    scan_btn = (
         f'<form hx-post="/dashboard/projects/{project_id}/scan" hx-swap="outerHTML" '
         f'hx-target="find button[type=submit]" style="display:contents;">'
         f'<button type="submit" class="btn btn-primary">Jetzt scannen</button></form>'
     )
+    try:
+        conn = connection.get_connection()
+        row  = conn.execute(
+            "SELECT last_scanned_at FROM projects WHERE id=?", (project_id,)
+        ).fetchone()
+        conn.close()
+        last = row["last_scanned_at"] if row else None
+    except Exception:
+        last = None
+    if last:
+        when = _fmt_iso_datetime(last)
+        return (
+            f'<span class="scan-badge done" title="Zuletzt gescannt: {when}">✓ gescannt</span>'
+            f'<span style="margin-left:8px;">{scan_btn}</span>'
+        )
+    return scan_btn
