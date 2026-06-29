@@ -22,13 +22,39 @@ def upsert_document(conn: sqlite3.Connection, data: dict[str, Any]) -> int:
 
 
 def upsert_path(conn: sqlite3.Connection, document_id: int, path: str, is_primary: bool):
+    """Verknüpft einen Pfad mit einem Dokument.
+
+    Wichtig bei GEÄNDERTEN Dateien: ändert sich der Inhalt, entsteht ein neues
+    Dokument (neuer Hash). Der Pfad muss dann vom alten auf das neue Dokument
+    umgehängt werden — sonst zeigt der Pfad weiter auf die veraltete Version und
+    das neue Dokument bleibt ohne Pfad (verwaist, in der Suche nicht öffenbar).
+    Frühere Version nutzte INSERT OR IGNORE und hängte nie um.
+    """
+    prev = conn.execute(
+        "SELECT document_id FROM document_paths WHERE path = ?", (path,)
+    ).fetchone()
+
     conn.execute(
         """
-        INSERT OR IGNORE INTO document_paths (document_id, path, is_primary)
+        INSERT INTO document_paths (document_id, path, is_primary)
         VALUES (?, ?, ?)
+        ON CONFLICT(path) DO UPDATE SET
+            document_id = excluded.document_id,
+            is_primary  = excluded.is_primary
         """,
         (document_id, path, int(is_primary)),
     )
+
+    # Alte Dokument-Version aufräumen, wenn ihr letzter Pfad gerade umgehängt wurde.
+    # Dokumente die noch andere Pfade haben (echte Duplikate) bleiben erhalten.
+    if prev and prev["document_id"] != document_id:
+        old_id = prev["document_id"]
+        still_referenced = conn.execute(
+            "SELECT 1 FROM document_paths WHERE document_id = ? LIMIT 1", (old_id,)
+        ).fetchone()
+        if not still_referenced:
+            # CASCADE entfernt content/chunks; Trigger documents_fts_doc_delete den FTS-Eintrag
+            conn.execute("DELETE FROM documents WHERE id = ?", (old_id,))
 
 
 def set_extraction_status(conn: sqlite3.Connection, document_id: int, status: str):

@@ -3,11 +3,12 @@ PRAGMA foreign_keys = ON;
 
 -- Projekte des Architekturbüros
 CREATE TABLE IF NOT EXISTS projects (
-    id         INTEGER PRIMARY KEY AUTOINCREMENT,
-    name       TEXT    NOT NULL,
-    path       TEXT    NOT NULL UNIQUE,
-    active     INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
-    created_at TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+    id              INTEGER PRIMARY KEY AUTOINCREMENT,
+    name            TEXT    NOT NULL,
+    path            TEXT    NOT NULL UNIQUE,
+    active          INTEGER NOT NULL DEFAULT 1 CHECK (active IN (0, 1)),
+    created_at      TEXT    NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+    last_scanned_at TEXT
 );
 
 -- Jede Datei, eindeutig über SHA256-Hash
@@ -107,6 +108,15 @@ AFTER DELETE ON document_content BEGIN
     INSERT INTO documents_fts(rowid, filename, content)
     SELECT old.document_id, d.filename, ''
     FROM documents d WHERE d.id = old.document_id;
+END;
+
+-- Trigger: FTS-Eintrag entfernen wenn das Dokument selbst gelöscht wird.
+-- Ohne diesen Trigger blieb bei Dokumenten ohne document_content-Zeile
+-- (Bilder, Fehler, pending) ein verwaister documents_fts-Eintrag zurück
+-- → veraltete Dateinamen-Treffer in der Suche.
+CREATE TRIGGER IF NOT EXISTS documents_fts_doc_delete
+AFTER DELETE ON documents BEGIN
+    DELETE FROM documents_fts WHERE rowid = old.id;
 END;
 
 -- Vom Dashboard ignorierte Pfade (werden beim Scan übersprungen)

@@ -26,7 +26,8 @@
       {% if p.active %}
         <div class="project-meta">
           {{ p.doc_count }} Dokumente
-          {% if p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+          {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
+          {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
         </div>
       {% else %}
         <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
@@ -48,15 +49,20 @@
                     hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>
           </span>
         {% elif p.scan_status == 'done' %}
-          <span class="scan-badge done">✓ fertig</span>
+          <span class="scan-badge done">✓ {{ p.doc_count }} Dok.</span>
         {% elif p.scan_status == 'error' %}
           <span class="scan-badge error">Fehler</span>
         {% else %}
+          {% if p.last_scanned %}
+            <span class="scan-badge done" title="Zuletzt gescannt: {{ p.last_scanned }}"
+                  style="margin-right:8px;">✓ gescannt</span>
+          {% endif %}
           <form hx-post="/dashboard/projects/{{ p.id }}/scan"
                 hx-swap="outerHTML"
                 hx-target="find button[type=submit]"
                 style="display:contents;">
-            <button type="submit" class="btn btn-primary">Jetzt scannen</button>
+            <button type="submit" class="btn {{ 'btn' if p.last_scanned else 'btn-primary' }}">
+              {{ 'Neu scannen' if p.last_scanned else 'Jetzt scannen' }}</button>
           </form>
         {% endif %}
 

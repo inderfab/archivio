@@ -178,6 +178,33 @@ _LIST_ONLY_EXTENSIONS = {
 # Einträge die vom Dateisystem fälschlicherweise als Ordner gemeldet werden (macOS/NAS)
 _FAKE_DIR_SUFFIXES = {".dmg", ".iso", ".sparsebundle", ".app", ".bundle", ".pkg"}
 
+# ── Müll-/Systemdateien die nicht in die Suche gehören ────────────────────────
+# System-Thumbnails, Office-/Editor-Sperrdateien, Temp-/Download-Fragmente.
+_JUNK_FILENAMES = {
+    "thumbs.db", "ehthumbs.db", "desktop.ini", "icon\r", ".ds_store",
+    ".localized", "$recycle.bin",
+}
+_JUNK_EXTENSIONS = {
+    ".lock", ".tmp", ".temp", ".part", ".partial", ".crdownload",
+    ".swp", ".swo", ".bak",
+}
+
+
+def _is_junk_file(name: str) -> bool:
+    """True für Dateien die nie in die Suche sollen."""
+    if name.startswith('.'):        # versteckte Dateien (.DS_Store, ._resourceforks, …)
+        return True
+    if name.startswith('~$'):       # Office-Sperr-/Temp-Dateien (~$bericht.docx)
+        return True
+    if name.endswith('~'):          # Editor-Backups (datei.txt~)
+        return True
+    low = name.lower()
+    if low in _JUNK_FILENAMES:
+        return True
+    if Path(name).suffix.lower() in _JUNK_EXTENSIONS:
+        return True
+    return False
+
 # Formate die komplett in RAM geladen werden → Grössencheck
 _SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
 _MAX_EXTRACT_MB = 30  # Dateien > 30 MB werden nur registriert, nicht extrahiert
@@ -372,6 +399,15 @@ def scan_project(project_id: int, root: Path,
     global_processed = 0  # Bisher fertig verarbeitete Dateien
     total_processed  = 0  # Für WAL-Checkpoint
 
+    # Lese-Verbindung nur für den Skip-Check unveränderter Dateien.
+    # Sicherheit: nur SELECTs → Python-sqlite3 beginnt KEINE implizite Transaktion
+    # (das passiert nur bei INSERT/UPDATE/DELETE). Es wird also kein WAL-Snapshot
+    # gehalten; jeder SELECT sieht den zuletzt committeten Stand. Für die
+    # Skip-Entscheidung genügt ohnehin der DB-Stand vor dem Scan: unveränderte
+    # Dateien matchen (Pfad+Grösse+mtime), neue/geänderte nicht — bei leerer DB
+    # (Erstscan) matcht nichts, also keine False-Positives.
+    skip_conn = connection.get_connection()
+
     found_any = False
     try:
         for dirpath, dirnames, filenames in os.walk(root):
@@ -384,12 +420,9 @@ def scan_project(project_id: int, root: Path,
                 and str(Path(dirpath) / d) not in ignored_paths
             ]
 
-            # Alle nicht-versteckten Dateien — unbekannte Formate werden in
+            # Alle Dateien ausser Müll/Systemdateien — unbekannte Formate werden in
             # _process_file als list-only (Dateiname) registriert
-            dir_processable = [
-                f for f in filenames
-                if not f.startswith('.')
-            ]
+            dir_processable = [f for f in filenames if not _is_junk_file(f)]
 
             global_total += len(dir_processable)
 
@@ -431,7 +464,34 @@ def scan_project(project_id: int, root: Path,
                         progress["percent"] = min(99, int(global_processed / max(1, global_total) * 100))
                     continue
 
-                # ── Worker-Verarbeitung ──────────────────────────────────────────────
+                # ── Schnellpfad: unveränderte Datei im Hauptprozess überspringen ──────
+                # Kein Worker, kein IPC, keine neue DB-Verbindung, kein gc.collect —
+                # nur ein stat() + eine indexierte SELECT. Das ist der Grossteil der
+                # Dateien bei einem Re-Scan und muss blitzschnell sein.
+                try:
+                    _st      = path.stat()
+                    _mtime_q = _iso(_st.st_mtime)
+                    _hit = skip_conn.execute(
+                        "SELECT 1 FROM document_paths dp "
+                        "JOIN documents d ON d.id = dp.document_id "
+                        "WHERE dp.path = ? AND d.filesize = ? AND d.modified_at = ? "
+                        "AND d.extraction_status IN ('ok','listed','error','unsupported') "
+                        "LIMIT 1",
+                        (str(path), _st.st_size, _mtime_q),
+                    ).fetchone()
+                except OSError:
+                    _hit = None
+
+                if _hit:
+                    global_processed += 1
+                    total_processed  += 1
+                    if progress is not None:
+                        progress["processed"] = global_processed
+                        progress["skipped"]  += 1
+                        progress["percent"]   = min(99, int(global_processed / max(1, global_total) * 100))
+                    continue
+
+                # ── Worker-Verarbeitung (neue oder geänderte Dateien) ─────────────────
                 if progress is not None:
                     progress["current_file"] = path.name
 
@@ -507,20 +567,37 @@ def scan_project(project_id: int, root: Path,
 
     finally:
         _kill_workers(pool)
-
-    # FTS5-Automerge reaktivieren und einmaliges Optimize anstoßen (Hintergrund-Thread)
-    def _fts_optimize():
         try:
-            import sqlite3 as _sqlite3
-            _db_path = str(connection._resolve_path())
-            c = _sqlite3.connect(_db_path, timeout=30, isolation_level=None)
-            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
-            c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
-            c.close()
-            log.info("FTS5 optimize abgeschlossen")
-        except Exception as exc:
-            log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
-    threading.Thread(target=_fts_optimize, daemon=True, name="fts-optimize").start()
+            skip_conn.close()
+        except Exception:
+            pass
+
+    # FTS5-Automerge wieder aktivieren (billig). Das teure optimize() wird NICHT
+    # hier angestossen — es hielte eine Schreibsperre, die bei "Alle scannen" die
+    # Inserts des nächsten Projekts blockiert (database is locked → 0 Dokumente).
+    # Der Aufrufer (_run_scan) startet optimize koordiniert unter dem Scan-Lock.
+    try:
+        import sqlite3 as _sqlite3
+        _db_path = str(connection._resolve_path())
+        c = _sqlite3.connect(_db_path, timeout=30, isolation_level=None)
+        c.execute("INSERT INTO documents_fts(documents_fts) VALUES('automerge=8')")
+        c.close()
+    except Exception as exc:
+        log.warning("FTS5 automerge-Reset fehlgeschlagen: %s", exc)
+
+
+def optimize_fts() -> None:
+    """Führt FTS5-optimize aus (teurer Segment-Merge). Muss serialisiert mit
+    Scans laufen — der Aufrufer stellt das über den Scan-Lock sicher."""
+    try:
+        import sqlite3 as _sqlite3
+        _db_path = str(connection._resolve_path())
+        c = _sqlite3.connect(_db_path, timeout=60, isolation_level=None)
+        c.execute("INSERT INTO documents_fts(documents_fts) VALUES('optimize')")
+        c.close()
+        log.info("FTS5 optimize abgeschlossen")
+    except Exception as exc:
+        log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
 
 
 def _process_file(conn, project_id: int, path: Path) -> str:

@@ -312,9 +312,56 @@ fi
 xattr -cr /Applications/Archivio\ Server.app 2>/dev/null || true
 
 if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+  USER_UID=$(id -u "$CURRENT_USER")
+  LA_DIR="/Users/$CURRENT_USER/Library/LaunchAgents"
+  PLIST="$LA_DIR/io.archivio.server.plist"
+  LOG_DIR="/Users/$CURRENT_USER/.archivio/logs"
+  sudo -u "$CURRENT_USER" mkdir -p "$LA_DIR" "$LOG_DIR"
+
+  # LaunchAgent: hält die App auf OS-Ebene am Leben (respawn bei Crash/Kill).
+  # KeepAlive=SuccessfulExit:false → bei sauberem Beenden (Quit/Update) KEIN
+  # respawn, nur bei Absturz/Kill. RunAtLoad startet sie beim Login.
+  cat > "$PLIST" <<'PLISTEOF'
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <key>Label</key>
+  <string>io.archivio.server</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Applications/Archivio Server.app/Contents/MacOS/Archivio Server</string>
+  </array>
+  <key>RunAtLoad</key>
+  <true/>
+  <key>KeepAlive</key>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ProcessType</key>
+  <string>Interactive</string>
+  <key>StandardErrorPath</key>
+  <string>LOGDIRPLACEHOLDER/launchd-server.log</string>
+  <key>StandardOutPath</key>
+  <string>LOGDIRPLACEHOLDER/launchd-server.log</string>
+</dict>
+</plist>
+PLISTEOF
+  # Log-Pfad einsetzen (heredoc oben ist quoted, daher Platzhalter ersetzen)
+  sed -i '' "s#LOGDIRPLACEHOLDER#$LOG_DIR#g" "$PLIST"
+  chown "$CURRENT_USER" "$PLIST"
+
+  # Altes Login-Item entfernen — Autostart läuft jetzt über launchd
   sudo -u "$CURRENT_USER" osascript -e \
-    'tell application "System Events" to make new login item at end with properties {path:"/Applications/Archivio Server.app", hidden:true}' || true
-  sudo -u "$CURRENT_USER" open -a "Archivio Server" || true
+    'tell application "System Events" to delete (every login item whose name is "Archivio Server")' 2>/dev/null || true
+
+  # Alten Agent entladen, neuen laden (startet die App via RunAtLoad)
+  sudo -u "$CURRENT_USER" launchctl bootout "gui/$USER_UID/io.archivio.server" 2>/dev/null || true
+  if ! sudo -u "$CURRENT_USER" launchctl bootstrap "gui/$USER_UID" "$PLIST" 2>/dev/null; then
+    sudo -u "$CURRENT_USER" launchctl load "$PLIST" 2>/dev/null \
+      || sudo -u "$CURRENT_USER" open -a "Archivio Server" 2>/dev/null || true
+  fi
 fi
 exit 0
 POSTINSTALL

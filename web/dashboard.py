@@ -34,6 +34,7 @@ _deletions: dict[int, str] = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
 _scan_lock        = threading.Semaphore(1)
 _embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
+_fts_opt_lock      = threading.Lock()   # max. 1 FTS-Optimize-Thread gleichzeitig
 
 _EMBED_BATCH_DOCS  = 5    # Dokumente pro Batch, dann GC + Pause
 _EMBED_BATCH_PAUSE = 3.0  # Sekunden Pause zwischen Batches (normal)
@@ -1234,15 +1235,17 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         (db["id"],),
                     ).fetchall()
                     results.append({
-                        "name":        db["name"],
-                        "path":        path,
-                        "in_db":       True,
-                        "id":          db["id"],
-                        "active":      bool(db["active"]),
-                        "doc_count":   count,
-                        "last_scan":   _fmt_iso_date(last_scan),
-                        "scan_status": _scans.get(db["id"], {}).get("status"),
-                        "mailboxes":   [dict(m) for m in mailboxes],
+                        "name":          db["name"],
+                        "path":          path,
+                        "in_db":         True,
+                        "id":            db["id"],
+                        "active":        bool(db["active"]),
+                        "doc_count":     count,
+                        "last_scan":     _fmt_iso_date(last_scan),
+                        "last_scanned":  _fmt_iso_datetime(db["last_scanned_at"]
+                                                           if "last_scanned_at" in db.keys() else None),
+                        "scan_status":   _scans.get(db["id"], {}).get("status"),
+                        "mailboxes":     [dict(m) for m in mailboxes],
                     })
                 else:
                     results.append({
@@ -1445,16 +1448,49 @@ def _run_scan(project_id: int, path: str):
             count = conn.execute(
                 "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
             ).fetchone()[0]
+            # Zeitpunkt des Scans persistent festhalten — auch bei Skip-only-Scans,
+            # bei denen sich MAX(indexed_at) nicht ändert.
+            with conn:
+                conn.execute(
+                    "UPDATE projects SET last_scanned_at=? WHERE id=?",
+                    (progress["finished_at"], project_id),
+                )
             conn.close()
             progress["count"] = count
         except Exception:
             pass
+        # FTS-Optimize koordiniert anstoßen (läuft erst wenn kein Scan mehr aktiv)
+        threading.Thread(target=_run_fts_optimize, daemon=True).start()
         # Embedding nach dem Scan automatisch starten (falls Ollama läuft)
         threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
     finally:
         _scan_lock.release()
+
+
+def _run_fts_optimize():
+    """Stösst FTS5-optimize an — koaleszierend und serialisiert mit Scans.
+
+    Mehrere Scan-Abschlüsse (z.B. bei "Alle scannen") lösen dies aus, aber nur
+    EIN Optimize läuft gleichzeitig (_fts_opt_lock). Es wartet via _scan_lock bis
+    kein Scan aktiv ist, sodass es nie mit Inserts eines laufenden Scans
+    konkurriert (sonst: database is locked → verlorene Dokumente). Während des
+    Wartens laufende Scans haben so Vorrang; das Optimize läuft, wenn es ruhig ist.
+    """
+    if not _fts_opt_lock.acquire(blocking=False):
+        return  # bereits eingeplant/aktiv — ein Lauf genügt für alle Änderungen
+    try:
+        from scanner.walker import optimize_fts
+        _scan_lock.acquire()   # wartet bis kein Scan läuft
+        try:
+            optimize_fts()
+        finally:
+            _scan_lock.release()
+    except Exception as exc:
+        log.debug("FTS-Optimize übersprungen: %s", exc)
+    finally:
+        _fts_opt_lock.release()
 
 
 def _run_post_scan_embedding():
@@ -1531,6 +1567,17 @@ def _fmt_iso_date(iso: str | None) -> str | None:
         return iso[:10]
 
 
+def _fmt_iso_datetime(iso: str | None) -> str | None:
+    """Wie _fmt_iso_date, aber mit Uhrzeit (lokal). Für 'zuletzt gescannt'."""
+    if not iso:
+        return None
+    try:
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+        return dt.strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return _fmt_iso_date(iso)
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
@@ -1569,4 +1616,27 @@ def _scan_badge(project_id: int, status: str) -> str:
         error = _scans.get(project_id, {}).get("error", "")
         title = f' title="{error}"' if error else ""
         return f'<span class="scan-badge error"{title}>Fehler beim Scan</span>'
-    return ""
+    # Unbekannt/idle (z.B. nach Server-Neustart, _scans ist In-Memory): durablen
+    # Status aus der DB ziehen, damit ein bereits gescanntes Projekt nicht
+    # faelschlich als "nie gescannt" erscheint.
+    scan_btn = (
+        f'<form hx-post="/dashboard/projects/{project_id}/scan" hx-swap="outerHTML" '
+        f'hx-target="find button[type=submit]" style="display:contents;">'
+        f'<button type="submit" class="btn btn-primary">Jetzt scannen</button></form>'
+    )
+    try:
+        conn = connection.get_connection()
+        row  = conn.execute(
+            "SELECT last_scanned_at FROM projects WHERE id=?", (project_id,)
+        ).fetchone()
+        conn.close()
+        last = row["last_scanned_at"] if row else None
+    except Exception:
+        last = None
+    if last:
+        when = _fmt_iso_datetime(last)
+        return (
+            f'<span class="scan-badge done" title="Zuletzt gescannt: {when}">✓ gescannt</span>'
+            f'<span style="margin-left:8px;">{scan_btn}</span>'
+        )
+    return scan_btn

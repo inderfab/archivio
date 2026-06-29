@@ -21,6 +21,8 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "005_chunk_doc_index", _m005)
     _apply(conn, "006_mails_mailbox_name", _m006)
     _apply(conn, "007_extraction_status_listed", _m007)
+    _apply(conn, "008_fts_doc_delete_trigger", _m008)
+    _apply(conn, "009_projects_last_scanned_at", _m009)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -224,3 +226,32 @@ def _m003(conn: sqlite3.Connection):
             if "duplicate column" not in str(e).lower():
                 raise
     conn.commit()
+
+
+def _m008(conn: sqlite3.Connection):
+    """FTS-Eintrag entfernen wenn das Dokument selbst gelöscht wird.
+
+    Bisher fehlte ein AFTER DELETE ON documents-Trigger. Bei Dokumenten ohne
+    document_content-Zeile (Bilder, Fehler, pending) blieb beim Löschen ein
+    verwaister documents_fts-Eintrag zurück → veraltete Dateinamen-Treffer.
+    """
+    conn.execute("""
+        CREATE TRIGGER IF NOT EXISTS documents_fts_doc_delete
+        AFTER DELETE ON documents BEGIN
+            DELETE FROM documents_fts WHERE rowid = old.id;
+        END
+    """)
+    conn.commit()
+
+
+def _m009(conn: sqlite3.Connection):
+    """projects.last_scanned_at — Zeitpunkt des letzten Scans (auch wenn nur
+    übersprungen wurde). MAX(indexed_at) der Dokumente ist dafür ungeeignet, weil
+    es bei Skip-only-Scans unverändert bleibt → Nutzer denkt fälschlich, es sei
+    nicht gescannt worden."""
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN last_scanned_at TEXT")
+        conn.commit()
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
