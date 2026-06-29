@@ -380,51 +380,90 @@ def _wait_for_server(timeout: int = 40) -> bool:
     return False
 
 
+def _server_responds(timeout: float = 5) -> bool:
+    """Schneller Health-Check: antwortet der Server auf HTTP?"""
+    try:
+        return requests.get("http://127.0.0.1:8000/api/status", timeout=timeout).status_code == 200
+    except Exception:
+        return False
+
+
+def _restart_server(resume_scan: bool, reason: str = "") -> bool:
+    """Stoppt (hart, inkl. Port-Freigabe) und startet den Server neu, wartet bis
+    er antwortet, und setzt optional den Scan fort. Gibt True zurück wenn der
+    Server danach erreichbar ist."""
+    _stop_server()
+    time.sleep(5)
+    _start_server()
+    if not _wait_for_server():
+        log.error("Server nach Neustart nicht erreichbar (%s)", reason or "?")
+        _notify("⚠ Archivio-Server-Neustart fehlgeschlagen — neuer Versuch folgt")
+        return False
+    log.info("Server nach Neustart erreichbar (%s)", reason or "?")
+    if resume_scan:
+        try:
+            # /api/scan/all — NICHT /api/scan (existiert nicht → 404).
+            r = requests.post("http://127.0.0.1:8000/api/scan/all", timeout=10)
+            if r.status_code == 200:
+                log.info("Scan nach Neustart automatisch fortgesetzt: %s", r.text[:200])
+                _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
+            else:
+                log.warning("Scan-Resume HTTP %s: %s", r.status_code, r.text[:200])
+        except Exception as exc:
+            log.warning("Scan-Resume fehlgeschlagen: %s", exc)
+    return True
+
+
 def _server_memory_watchdog():
-    """Überwacht den uvicorn-Prozess alle 15s.
-    Wenn RSS > 20 GB: prüft ob Scan läuft, stoppt Server, startet neu,
-    und setzt den Scan automatisch fort.
+    """Überwacht den Server alle 15s auf DREI Arten:
+      1. Prozess tot           → sofort neu starten (Crash, fehlgeschlagener
+                                  Neustart, vom OS gekillt). Ohne das blieb der
+                                  Server nach einem misslungenen Neustart tagelang
+                                  tot, weil die Schleife nur bei RAM-Ueberschreitung
+                                  aktiv wurde.
+      2. Prozess lebt, haengt  → nach 4 erfolglosen Health-Checks (60s) neu starten
+                                  (vermeidet Fehlalarme bei kurzer Last).
+      3. RSS > Limit           → kontrollierter Neustart mit Scan-Fortsetzung.
     """
     try:
         import psutil
     except ImportError:
-        log.warning("psutil nicht verfügbar — Server-RAM-Watchdog deaktiviert")
+        log.warning("psutil nicht verfügbar — Server-Watchdog deaktiviert")
         return
 
+    unresponsive = 0
     while True:
         time.sleep(15)
         try:
-            if not (_server_proc and _server_proc.poll() is None):
+            alive = bool(_server_proc and _server_proc.poll() is None)
+
+            # 1) Prozess tot → sofort neu starten
+            if not alive:
+                log.warning("Server-Prozess nicht aktiv — Neustart")
+                _notify("Archivio-Server war nicht aktiv — wird neu gestartet")
+                _restart_server(resume_scan=True, reason="Prozess tot")
+                unresponsive = 0
                 continue
+
+            # 2) Prozess lebt, antwortet aber nicht (erst nach mehreren Fehlversuchen)
+            if not _server_responds():
+                unresponsive += 1
+                log.warning("Server antwortet nicht (%d/4)", unresponsive)
+                if unresponsive >= 4:
+                    log.warning("Server haengt — Neustart")
+                    _restart_server(resume_scan=True, reason="haengt")
+                    unresponsive = 0
+                continue
+            unresponsive = 0
+
+            # 3) RAM-Grenze
             rss_gb = psutil.Process(_server_proc.pid).memory_info().rss / (1024 ** 3)
-            if rss_gb <= _SERVER_RAM_LIMIT_GB:
-                continue
-
-            log.warning(
-                "Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
-                rss_gb, _SERVER_RAM_LIMIT_GB,
-            )
-            resume_scan = _scan_was_running()
-            _notify(f"Neustart (RAM: {rss_gb:.0f} GB) — Scan wird{'  fortgesetzt' if resume_scan else ' gestoppt'}")
-
-            _stop_server()
-            time.sleep(5)
-            _start_server()
-
-            if resume_scan:
-                if _wait_for_server():
-                    try:
-                        # /api/scan/all — NICHT /api/scan (existiert nicht → 404).
-                        r = requests.post("http://127.0.0.1:8000/api/scan/all", timeout=10)
-                        if r.status_code == 200:
-                            log.info("Scan nach Neustart automatisch fortgesetzt: %s", r.text[:200])
-                            _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
-                        else:
-                            log.warning("Scan-Resume HTTP %s: %s", r.status_code, r.text[:200])
-                    except Exception as exc:
-                        log.warning("Scan-Resume fehlgeschlagen: %s", exc)
-                else:
-                    log.warning("Server nach Neustart nicht erreichbar — Scan nicht fortgesetzt")
+            if rss_gb > _SERVER_RAM_LIMIT_GB:
+                log.warning("Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
+                            rss_gb, _SERVER_RAM_LIMIT_GB)
+                resume_scan = _scan_was_running()
+                _notify(f"Neustart (RAM: {rss_gb:.0f} GB)")
+                _restart_server(resume_scan=resume_scan, reason=f"RAM {rss_gb:.0f} GB")
         except Exception as exc:
             log.warning("Server-Watchdog: %s", exc)
 
