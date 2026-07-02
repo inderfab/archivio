@@ -110,7 +110,7 @@
           <span style="font-size:11px; color:var(--text-3);">{{ c.mail_count }} Mails</span>
         {% endif %}
         {% if c.last_scanned_at %}
-          <span style="font-size:11px; color:var(--text-3);">{{ c.last_scanned_at | fmt_date }}</span>
+          <span style="font-size:11px; color:var(--text-3);" title="Zuletzt gescannt">🕐 {{ c.last_scanned_at | fmt_datetime }}</span>
         {% endif %}
       </div>
 
