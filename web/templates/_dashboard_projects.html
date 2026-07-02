@@ -20,24 +20,24 @@
       </button>
     </form>
 
-    {# Projektinfo #}
+    {% if not p.active %}
+    {# Kompakt: nur Name (nicht aktiv/nicht gescannt) #}
+    <div class="project-name" style="flex:1; min-width:0;">{{ p.name }}</div>
+    {% else %}
+    {# Projektinfo (aktiv) — volle Darstellung #}
     <div style="flex:1; min-width:0;">
       <div class="project-name">{{ p.name }}</div>
-      {% if p.active %}
-        <div class="project-meta">
-          {{ p.doc_count }} Dokumente
-          {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
-          {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
-        </div>
-      {% else %}
-        <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
-      {% endif %}
+      <div class="project-meta">
+        {{ p.doc_count }} Dokumente
+        {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
+        {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+      </div>
       <div class="project-path">{{ p.path }}</div>
     </div>
 
     {# Aktionen #}
     <div class="project-actions">
-      {% if p.active and p.in_db %}
+      {% if p.in_db %}
 
         <span class="scan-cell" id="scan-cell-{{ p.id }}"
               {% if p.scan_status == 'running' %}hx-get="/dashboard/projects/{{ p.id }}/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
@@ -72,6 +72,7 @@
 
       {% endif %}
     </div>
+    {% endif %}
 
   </div>
 

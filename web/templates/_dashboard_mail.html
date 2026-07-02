@@ -1,6 +1,8 @@
 <div id="mail-section"
      {% if scan_status == 'running' %}hx-get="/dashboard/mail/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 
+  <div class="section-title" style="padding-top:28px; margin-bottom:16px;">Mail-Integration</div>
+
   {# Aktions-Leiste #}
   <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
     <button class="btn"
@@ -50,7 +52,11 @@
           </button>
         </form>
 
-        {# Info: Name · Anzahl/zuletzt gescannt · Projekt-Zuordnung #}
+        {% if not c.active %}
+        {# Kompakt: nur Name (nicht aktiv) #}
+        <div class="project-name" style="flex:1; min-width:0;">✉ {{ c.mailbox_name }}</div>
+        {% else %}
+        {# Aktiv — volle Darstellung: Name · Anzahl/zuletzt gescannt · Projekt-Zuordnung #}
         <div style="flex:1; min-width:0;">
           <div class="project-name">✉ {{ c.mailbox_name }}</div>
           <div class="project-meta">
@@ -80,7 +86,7 @@
           </div>
         </div>
 
-        {# Aktionen: Freshness-Badge + immer 'Jetzt/Neu scannen' #}
+        {# Aktionen: Freshness-Badge + 'Jetzt/Neu scannen' (nur aktiv + zugewiesen) #}
         <div class="project-actions">
           {% if scan_status == 'running' %}
             <span class="scan-badge running">Scannt…</span>
@@ -102,6 +108,7 @@
             {% endif %}
           {% endif %}
         </div>
+        {% endif %}
 
       </div>
     </div>
