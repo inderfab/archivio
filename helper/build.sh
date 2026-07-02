@@ -5,7 +5,9 @@ set -e
 DIST="dist"
 APP_NAME="Archivio Helper"
 APP="$DIST/$APP_NAME.app"
-VERSION=$(cat VERSION)
+# Eigene Helper-Version (entkoppelt von der Server-VERSION). Der Helper wird nur
+# bei echten Aenderungen neu nummeriert; die Server-VERSION zaehlt unabhaengig hoch.
+VERSION=$(cat helper/VERSION 2>/dev/null || cat VERSION)
 
 mkdir -p "$DIST"
 
@@ -57,7 +59,7 @@ cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
 cp helper/icon.png            "$APP/Contents/Resources/"
 cp archivio.icns              "$APP/Contents/Resources/"
-cp VERSION                    "$APP/Contents/Resources/"
+printf '%s' "$VERSION"      > "$APP/Contents/Resources/VERSION"
 
 # Info.plist
 cat > "$APP/Contents/Info.plist" <<PLIST

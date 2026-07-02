@@ -38,13 +38,22 @@ _fts_opt_lock      = threading.Lock()   # max. 1 FTS-Optimize-Thread gleichzeiti
 
 _EMBED_BATCH_DOCS  = 5    # Dokumente pro Batch, dann GC + Pause
 _EMBED_BATCH_PAUSE = 3.0  # Sekunden Pause zwischen Batches (normal)
-_EMBED_RAM_PAUSE   = 90   # Sekunden Pause wenn RAM > 80%
+_EMBED_RAM_PAUSE   = 90   # Sekunden Pause wenn RAM-Grenze erreicht
+# Prozess-RSS-Obergrenze fuer das Embedding — MUSS unter der Watchdog-Grenze
+# (server_app.py _SERVER_RAM_LIMIT_GB = 20 GB) liegen, sonst treibt das Embedding
+# den Server in den Neustart, bevor es sich selbst drosselt (frueherer Neustart-Loop).
+_EMBED_MAX_RSS_GB  = 15.0
 
 
 def _embedding_ram_ok() -> bool:
+    """False wenn das Embedding pausieren soll — misst den EIGENEN Prozess-RSS
+    (nicht system-weites RAM%, das die 20-GB-Prozessgrenze nie rechtzeitig sieht)."""
     try:
-        import psutil
-        return psutil.virtual_memory().percent < 80
+        import psutil, os as _os
+        rss_gb = psutil.Process(_os.getpid()).memory_info().rss / (1024 ** 3)
+        if rss_gb > _EMBED_MAX_RSS_GB:
+            return False
+        return psutil.virtual_memory().percent < 85
     except Exception:
         return True
 
@@ -255,24 +264,35 @@ def _delete_project_bg(project_id: int) -> None:
     try:
         conn = connection.get_connection()
         with conn:
-            # mail_scan_config hat kein ON DELETE CASCADE — Mailbox mitlöschen
-            conn.execute(
-                "DELETE FROM mail_scan_config WHERE project_id=?",
-                (project_id,),
-            )
-            # FTS-Einträge einzeln löschen (FTS5 unterstützt keine Subquery-WHERE)
-            doc_ids = [r[0] for r in conn.execute(
-                "SELECT id FROM documents WHERE project_id=?", (project_id,)
+            # Mails der verknüpften Postfächer explizit löschen: ihr project_id kann
+            # NULL/abweichend sein (Postfach wurde evtl. vor der Verknüpfung gescannt),
+            # wird also NICHT vom Projekt-CASCADE erfasst. Verknüpfung über mailbox_name.
+            mailbox_names = [r[0] for r in conn.execute(
+                "SELECT mailbox_name FROM mail_scan_config WHERE project_id=?", (project_id,)
             ).fetchall()]
-            for doc_id in doc_ids:
-                try:
-                    conn.execute("DELETE FROM documents_fts WHERE rowid=?", (doc_id,))
-                except Exception:
-                    pass
+            mail_docs = 0
+            for mb in mailbox_names:
+                ids = [r[0] for r in conn.execute(
+                    "SELECT document_id FROM mails WHERE mailbox_name=?", (mb,)
+                ).fetchall()]
+                for did in ids:
+                    conn.execute("DELETE FROM documents WHERE id=?", (did,))
+                mail_docs += len(ids)
+
+            # Anzahl Projekt-Dateien (für Log); werden per CASCADE mitgelöscht
+            file_docs = conn.execute(
+                "SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)
+            ).fetchone()[0]
+
+            # mail_scan_config hat kein ON DELETE CASCADE — Postfach mitlöschen
+            conn.execute("DELETE FROM mail_scan_config WHERE project_id=?", (project_id,))
+            # Projekt löschen → CASCADE entfernt Projekt-Dokumente (Dateien),
+            # Trigger documents_fts_doc_delete räumt die FTS-Einträge auf.
             conn.execute("DELETE FROM projects WHERE id=?", (project_id,))
         conn.close()
         _deletions[project_id] = "done"
-        log.info("Projekt %s aus DB gelöscht (%d Dokumente)", project_id, len(doc_ids))
+        log.info("Projekt %s aus DB gelöscht (%d Dateien, %d Mails)",
+                 project_id, file_docs, mail_docs)
     except Exception as exc:
         log.error("Fehler beim Löschen von Projekt %s: %s", project_id, exc)
         _deletions[project_id] = "error:" + str(exc)
@@ -374,7 +394,8 @@ async def cancel_scan(project_id: int):
     s = _scans.get(project_id, {})
     if s.get("status") == "running":
         s["status"] = "cancelled"
-    return HTMLResponse("")
+    # Ganze Zelle zurückgeben (Ziel #scan-cell-…), damit der Scan-Button bleibt
+    return HTMLResponse(_scan_cell(project_id, "cancelled"))
 
 
 @router.get("/projects/{project_id}/scan-progress")
@@ -521,22 +542,8 @@ async def mail_refresh(request: Request):
     return await mail_dashboard(request)
 
 
-@router.post("/mail/toggle", response_class=HTMLResponse)
-async def mail_toggle(
-    request:      Request,
-    mailbox_name: str = Form(...),
-    context:      str = Form(""),
-):
-    conn = connection.get_connection()
-    row  = conn.execute(
-        "SELECT active FROM mail_scan_config WHERE mailbox_name=?", (mailbox_name,)
-    ).fetchone()
-    if row:
-        with conn:
-            conn.execute(
-                "UPDATE mail_scan_config SET active=? WHERE mailbox_name=?",
-                (0 if row["active"] else 1, mailbox_name),
-            )
+async def _mail_section_response(request: Request, conn, context: str):
+    """Liefert je nach Kontext die aktualisierte Projektliste oder den Mail-Bereich."""
     if context == "project":
         groups = _project_groups(conn)
         stats  = _global_stats(conn)
@@ -546,6 +553,74 @@ async def mail_toggle(
         })
     conn.close()
     return await mail_dashboard(request)
+
+
+@router.post("/mail/toggle", response_class=HTMLResponse)
+async def mail_toggle(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    conn = connection.get_connection()
+    row  = conn.execute(
+        "SELECT active, mail_count FROM mail_scan_config WHERE mailbox_name=?", (mailbox_name,)
+    ).fetchone()
+    if not row:
+        return await _mail_section_response(request, conn, context)
+
+    # Deaktivieren → Rückfrage, ob die Mails aus der DB gelöscht werden sollen
+    if row["active"]:
+        conn.close()
+        return templates.TemplateResponse("_dashboard_mail_confirm_remove.html", {
+            "request":      request,
+            "mailbox_name": mailbox_name,
+            "mail_count":   row["mail_count"] or 0,
+            "context":      context,
+        })
+
+    # Aktivieren → einfach einschalten
+    with conn:
+        conn.execute(
+            "UPDATE mail_scan_config SET active=1 WHERE mailbox_name=?", (mailbox_name,)
+        )
+    return await _mail_section_response(request, conn, context)
+
+
+@router.post("/mail/deactivate", response_class=HTMLResponse)
+async def mail_deactivate(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    """Postfach deaktivieren, Mails behalten."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE mail_scan_config SET active=0 WHERE mailbox_name=?", (mailbox_name,)
+        )
+    return await _mail_section_response(request, conn, context)
+
+
+@router.post("/mail/delete", response_class=HTMLResponse)
+async def mail_delete(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    """Postfach deaktivieren UND alle seine Mails aus der DB löschen."""
+    conn = connection.get_connection()
+    with conn:
+        # documents-Delete cascadet auf mails/content/chunks; Trigger räumt FTS.
+        conn.execute(
+            "DELETE FROM documents WHERE id IN "
+            "(SELECT document_id FROM mails WHERE mailbox_name=?)", (mailbox_name,)
+        )
+        conn.execute(
+            "UPDATE mail_scan_config SET active=0, mail_count=0 WHERE mailbox_name=?",
+            (mailbox_name,)
+        )
+    log.info("Postfach '%s' deaktiviert und Mails gelöscht", mailbox_name)
+    return await _mail_section_response(request, conn, context)
 
 
 @router.post("/mail/assign-project", response_class=HTMLResponse)
@@ -1234,18 +1309,21 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         "SELECT * FROM mail_scan_config WHERE project_id=?",
                         (db["id"],),
                     ).fetchall()
+                    _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
+                    _fresh_label, _fresh_class = _scan_freshness(_last_iso)
                     results.append({
-                        "name":          db["name"],
-                        "path":          path,
-                        "in_db":         True,
-                        "id":            db["id"],
-                        "active":        bool(db["active"]),
-                        "doc_count":     count,
-                        "last_scan":     _fmt_iso_date(last_scan),
-                        "last_scanned":  _fmt_iso_datetime(db["last_scanned_at"]
-                                                           if "last_scanned_at" in db.keys() else None),
-                        "scan_status":   _scans.get(db["id"], {}).get("status"),
-                        "mailboxes":     [dict(m) for m in mailboxes],
+                        "name":            db["name"],
+                        "path":            path,
+                        "in_db":           True,
+                        "id":              db["id"],
+                        "active":          bool(db["active"]),
+                        "doc_count":       count,
+                        "last_scan":       _fmt_iso_date(last_scan),
+                        "last_scanned":    _fmt_iso_datetime(_last_iso),
+                        "scan_fresh_label": _fresh_label,
+                        "scan_fresh_class": _fresh_class,
+                        "scan_status":     _scans.get(db["id"], {}).get("status"),
+                        "mailboxes":       [dict(m) for m in mailboxes],
                     })
                 else:
                     results.append({
@@ -1409,7 +1487,35 @@ def _run_mail_scan():
         _mail_scan["error"]  = str(exc)
 
 
-def _run_scan(project_id: int, path: str):
+def _scan_project_mailboxes(project_id: int) -> None:
+    """Scannt die mit dem Projekt verknüpften AKTIVEN Postfächer (IMAP).
+    Fehler werden geloggt, beeinträchtigen den Datei-Scan-Status nicht."""
+    conn = connection.get_connection()
+    mbs  = conn.execute(
+        "SELECT mailbox_name FROM mail_scan_config WHERE project_id=? AND active=1",
+        (project_id,),
+    ).fetchall()
+    conn.close()
+    if not mbs:
+        return
+    from scanner.mail_scanner import connect_imap, scan_mailbox
+    client = connect_imap()
+    try:
+        for r in mbs:
+            try:
+                stats = scan_mailbox(client, r["mailbox_name"], project_id)
+                log.info("Projekt %s Postfach '%s': %s", project_id, r["mailbox_name"], stats)
+            except Exception as exc:
+                log.warning("Postfach '%s' (Projekt %s) fehlgeschlagen: %s",
+                            r["mailbox_name"], project_id, exc)
+    finally:
+        try:
+            client.logout()
+        except Exception:
+            pass
+
+
+def _run_scan(project_id: int, path: str, scan_mail: bool = True):
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
 
@@ -1441,6 +1547,15 @@ def _run_scan(project_id: int, path: str):
         if cancel_flag.get("cancel"):
             progress.update({"status": "cancelled", "finished_at": _now()})
             return
+        # Verknüpfte Postfächer als Teil des Projekt-Scans mitscannen (Einzel-Scan).
+        # Bei "Alle scannen" übernimmt der globale Mail-Scan (scan_mail=False),
+        # damit Postfächer nicht doppelt gescannt werden.
+        if scan_mail:
+            progress["phase"] = "mail"
+            try:
+                _scan_project_mailboxes(project_id)
+            except Exception as exc:
+                log.warning("Mail-Scan für Projekt %s übersprungen: %s", project_id, exc)
         # Status sofort setzen — Banner verschwindet ohne auf den DB-Count zu warten
         progress.update({"status": "done", "finished_at": _now()})
         try:
@@ -1493,6 +1608,17 @@ def _run_fts_optimize():
         _fts_opt_lock.release()
 
 
+def _any_scan_active() -> bool:
+    """True wenn irgendein Projekt-Scan (laufend ODER in der Warteschlange) oder
+    ein Mail-Scan aktiv ist. Damit wartet das Embedding, bis der GANZE
+    'Alle scannen'-Batch durch ist — nicht nur der aktuell laufende Scan."""
+    if any(s.get("status") == "running" for s in _scans.values()):
+        return True
+    if _mail_scan.get("status") == "running":
+        return True
+    return False
+
+
 def _run_post_scan_embedding():
     """Embeddings in kleinen Batches berechnen.
     Nur ein Thread gleichzeitig — bei scan_all startet jedes Projekt einen Thread,
@@ -1504,13 +1630,12 @@ def _run_post_scan_embedding():
         from scanner.embedder import is_ollama_running, embed_document_chunks
 
         while True:
-            # Nicht mit aktivem Scan konkurrieren
-            _free = _scan_lock.acquire(blocking=False)
-            if not _free:
-                log.debug("Embedding wartet — Scan aktiv")
+            # Erst wenn der GANZE Scan-Batch (inkl. Warteschlange + Mails) fertig
+            # ist — Embedding ist RAM-intensiv und darf den Scan nicht ausbremsen.
+            if _any_scan_active():
+                log.debug("Embedding wartet — Scan-Batch aktiv")
                 time.sleep(30)
                 continue
-            _scan_lock.release()  # sofort wieder freigeben, nur Prüfung
 
             if not is_ollama_running():
                 break
@@ -1578,11 +1703,36 @@ def _fmt_iso_datetime(iso: str | None) -> str | None:
         return _fmt_iso_date(iso)
 
 
+_SCAN_FRESH_DAYS = 2  # bis zu 2 Tage gilt als "frisch" (grün)
+
+
+def _scan_freshness(iso: str | None) -> tuple[str | None, str]:
+    """Gibt (Label, CSS-Klasse) für den Scan-Status zurück.
+    Grün wenn kürzlich gescannt, sonst amber mit Altersangabe."""
+    if not iso:
+        return (None, "")
+    try:
+        dt       = datetime.fromisoformat(iso.replace("Z", "+00:00"))
+        age_days = (datetime.now(timezone.utc) - dt).total_seconds() / 86400
+    except Exception:
+        return ("✓ gescannt", "done")
+    if age_days < _SCAN_FRESH_DAYS:
+        return ("✓ gescannt", "done")
+    days = max(1, int(age_days))
+    return (f"gescannt vor {days} Tg.", "warn")
+
+
 def _now() -> str:
     return datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
 
 
-def _scan_badge(project_id: int, status: str) -> str:
+def _scan_cell(project_id: int, status: str) -> str:
+    """Rendert die komplette Scan-Zelle eines Projekts (Status-Badge + Aktion) mit
+    stabiler ID. Alle Aktionen (Scan starten, Abbrechen, Polling) ersetzen die
+    ganze Zelle per outerHTML — so gibt es nie doppelte Badges, und der
+    Scan-Button ist in jedem Zustand (ausser 'läuft') verfügbar."""
+    cid  = f"scan-cell-{project_id}"
+
     if status == "running":
         scan      = _scans.get(project_id, {})
         processed = scan.get("processed", 0)
@@ -1591,39 +1741,17 @@ def _scan_badge(project_id: int, status: str) -> str:
         progress  = f" {processed}/{total}" if total else ""
         label     = f"Scan: {folder}{progress}" if folder else f"Scannt…{progress}"
         return (
-            f'<span class="scan-running-wrap" '
+            f'<span class="scan-cell" id="{cid}" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '
             f'hx-trigger="every 3s" hx-swap="outerHTML">'
             f'<span class="scan-badge running">{label}</span>'
             f'<button class="btn btn-cancel" style="margin-left:6px;" '
             f'hx-post="/dashboard/projects/{project_id}/scan/cancel" '
-            f'hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>'
+            f'hx-target="#{cid}" hx-swap="outerHTML">Abbrechen</button>'
             f'</span>'
         )
-    if status == "cancelled":
-        processed = _scans.get(project_id, {}).get("processed", 0)
-        return f'<span class="scan-badge error">⏹ Abgebrochen ({processed} verarbeitet)</span>'
-    if status == "done":
-        count = _scans.get(project_id, {}).get("count", "?")
-        if count == 0 or count == "0":
-            return (
-                f'<span class="scan-badge error" title="0 Dokumente gefunden — '
-                f'Dateitypen, Pfad und macOS-Zugriffsrechte prüfen (Vollzugriff auf Festplatte).">'
-                f'⚠ 0 Dok. gefunden</span>'
-            )
-        return f'<span class="scan-badge done">✓ {count} Dok.</span>'
-    if status == "error":
-        error = _scans.get(project_id, {}).get("error", "")
-        title = f' title="{error}"' if error else ""
-        return f'<span class="scan-badge error"{title}>Fehler beim Scan</span>'
-    # Unbekannt/idle (z.B. nach Server-Neustart, _scans ist In-Memory): durablen
-    # Status aus der DB ziehen, damit ein bereits gescanntes Projekt nicht
-    # faelschlich als "nie gescannt" erscheint.
-    scan_btn = (
-        f'<form hx-post="/dashboard/projects/{project_id}/scan" hx-swap="outerHTML" '
-        f'hx-target="find button[type=submit]" style="display:contents;">'
-        f'<button type="submit" class="btn btn-primary">Jetzt scannen</button></form>'
-    )
+
+    # last_scanned_at für Button-Label + Freshness aus DB (überlebt Neustart)
     try:
         conn = connection.get_connection()
         row  = conn.execute(
@@ -1633,10 +1761,43 @@ def _scan_badge(project_id: int, status: str) -> str:
         last = row["last_scanned_at"] if row else None
     except Exception:
         last = None
-    if last:
-        when = _fmt_iso_datetime(last)
-        return (
-            f'<span class="scan-badge done" title="Zuletzt gescannt: {when}">✓ gescannt</span>'
-            f'<span style="margin-left:8px;">{scan_btn}</span>'
-        )
-    return scan_btn
+
+    scan_btn = (
+        f'<form hx-post="/dashboard/projects/{project_id}/scan" '
+        f'hx-target="#{cid}" hx-swap="outerHTML" style="display:contents;">'
+        f'<button type="submit" class="btn {"btn" if last else "btn-primary"}">'
+        f'{"Neu scannen" if last else "Jetzt scannen"}</button></form>'
+    )
+
+    if status == "cancelled":
+        processed = _scans.get(project_id, {}).get("processed", 0)
+        badge = (f'<span class="scan-badge error" style="margin-right:8px;">'
+                 f'⏹ Abgebrochen ({processed} verarbeitet)</span>')
+    elif status == "done":
+        count = _scans.get(project_id, {}).get("count", "?")
+        if count == 0 or count == "0":
+            badge = ('<span class="scan-badge error" style="margin-right:8px;" '
+                     'title="0 Dokumente gefunden — Dateitypen, Pfad und macOS-Zugriffsrechte '
+                     'prüfen (Vollzugriff auf Festplatte).">⚠ 0 Dok. gefunden</span>')
+        else:
+            badge = f'<span class="scan-badge done" style="margin-right:8px;">✓ {count} Dok.</span>'
+    elif status == "error":
+        error = _scans.get(project_id, {}).get("error", "")
+        title = f' title="{error}"' if error else ""
+        badge = f'<span class="scan-badge error"{title} style="margin-right:8px;">Fehler beim Scan</span>'
+    else:
+        # idle: durable Freshness-Badge (altersabhängig eingefärbt), sonst nichts
+        label, cls = _scan_freshness(last)
+        if label:
+            when  = _fmt_iso_datetime(last)
+            badge = (f'<span class="scan-badge {cls}" title="Zuletzt gescannt: {when}" '
+                     f'style="margin-right:8px;">{label}</span>')
+        else:
+            badge = ""
+
+    return f'<span class="scan-cell" id="{cid}">{badge}{scan_btn}</span>'
+
+
+# Rückwärtskompatibler Alias — überall wo bisher _scan_badge genutzt wurde
+def _scan_badge(project_id: int, status: str) -> str:
+    return _scan_cell(project_id, status)
