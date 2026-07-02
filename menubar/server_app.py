@@ -356,17 +356,15 @@ def _notify(message: str):
 _SERVER_RAM_LIMIT_GB = 20.0  # uvicorn-Prozess-RAM-Limit (ohne Worker-Prozesse)
 
 
-def _scan_was_running() -> bool:
-    """True wenn gerade ein Projekt- oder Mail-Scan läuft."""
+def _scan_state() -> tuple[bool, bool]:
+    """Gibt (projekt_scan_laeuft, mail_scan_laeuft) zurück."""
     try:
         state = requests.get("http://127.0.0.1:8000/api/scan/state", timeout=3).json()
-        if any(s.get("status") == "running" for s in state.get("scans", {}).values()):
-            return True
-        if state.get("mail_scan", {}).get("status") == "running":
-            return True
+        proj = any(s.get("status") == "running" for s in state.get("scans", {}).values())
+        mail = state.get("mail_scan", {}).get("status") == "running"
+        return proj, mail
     except Exception:
-        pass
-    return False
+        return False, False
 
 
 def _wait_for_server(timeout: int = 40) -> bool:
@@ -388,10 +386,16 @@ def _server_responds(timeout: float = 5) -> bool:
         return False
 
 
-def _restart_server(resume_scan: bool, reason: str = "") -> bool:
+def _restart_server(resume_projects: bool = False, resume_mail: bool = False,
+                    reason: str = "") -> bool:
     """Stoppt (hart, inkl. Port-Freigabe) und startet den Server neu, wartet bis
-    er antwortet, und setzt optional den Scan fort. Gibt True zurück wenn der
-    Server danach erreichbar ist."""
+    er antwortet, und setzt den RICHTIGEN Scan-Typ fort. Gibt True zurück wenn der
+    Server danach erreichbar ist.
+
+    Wichtig: Lief nur ein MAIL-Scan, wird auch nur der Mail-Scan fortgesetzt —
+    NICHT /api/scan/all (das würde alle Projekte scannen, obwohl der Nutzer nur
+    Postfächer gescannt hat).
+    """
     _stop_server()
     time.sleep(5)
     _start_server()
@@ -400,17 +404,20 @@ def _restart_server(resume_scan: bool, reason: str = "") -> bool:
         _notify("⚠ Archivio-Server-Neustart fehlgeschlagen — neuer Versuch folgt")
         return False
     log.info("Server nach Neustart erreichbar (%s)", reason or "?")
-    if resume_scan:
-        try:
-            # /api/scan/all — NICHT /api/scan (existiert nicht → 404).
+
+    try:
+        if resume_projects:
+            # /api/scan/all deckt Projekte UND Postfächer ab
             r = requests.post("http://127.0.0.1:8000/api/scan/all", timeout=10)
-            if r.status_code == 200:
-                log.info("Scan nach Neustart automatisch fortgesetzt: %s", r.text[:200])
-                _notify("Scan läuft weiter — bereits verarbeitete Dateien werden übersprungen")
-            else:
-                log.warning("Scan-Resume HTTP %s: %s", r.status_code, r.text[:200])
-        except Exception as exc:
-            log.warning("Scan-Resume fehlgeschlagen: %s", exc)
+            log.info("Projekt-Scan nach Neustart fortgesetzt: HTTP %s", r.status_code)
+            _notify("Scan läuft weiter — bereits Verarbeitetes wird übersprungen")
+        elif resume_mail:
+            # Nur der Mail-Scan lief → nur diesen fortsetzen
+            r = requests.post("http://127.0.0.1:8000/dashboard/mail/scan", timeout=10)
+            log.info("Mail-Scan nach Neustart fortgesetzt: HTTP %s", r.status_code)
+            _notify("Mail-Scan läuft weiter")
+    except Exception as exc:
+        log.warning("Scan-Resume fehlgeschlagen: %s", exc)
     return True
 
 
@@ -432,16 +439,18 @@ def _server_memory_watchdog():
         return
 
     unresponsive = 0
+    last_proj = last_mail = False   # zuletzt bekannter Scan-Stand (für Resume nach Crash)
     while True:
         time.sleep(15)
         try:
             alive = bool(_server_proc and _server_proc.poll() is None)
 
-            # 1) Prozess tot → sofort neu starten
+            # 1) Prozess tot → sofort neu starten (Resume gemäß letztem bekannten Stand)
             if not alive:
                 log.warning("Server-Prozess nicht aktiv — Neustart")
                 _notify("Archivio-Server war nicht aktiv — wird neu gestartet")
-                _restart_server(resume_scan=True, reason="Prozess tot")
+                _restart_server(resume_projects=last_proj, resume_mail=last_mail,
+                                reason="Prozess tot")
                 unresponsive = 0
                 continue
 
@@ -451,19 +460,24 @@ def _server_memory_watchdog():
                 log.warning("Server antwortet nicht (%d/4)", unresponsive)
                 if unresponsive >= 4:
                     log.warning("Server haengt — Neustart")
-                    _restart_server(resume_scan=True, reason="haengt")
+                    _restart_server(resume_projects=last_proj, resume_mail=last_mail,
+                                    reason="haengt")
                     unresponsive = 0
                 continue
             unresponsive = 0
 
-            # 3) RAM-Grenze
+            # Aktuellen Scan-Stand merken (für Resume, falls gleich ein Neustart nötig wird)
+            last_proj, last_mail = _scan_state()
+
+            # 3) RAM-Grenze → typgerecht fortsetzen (nur Mail wenn nur Mail lief!)
             rss_gb = psutil.Process(_server_proc.pid).memory_info().rss / (1024 ** 3)
             if rss_gb > _SERVER_RAM_LIMIT_GB:
-                log.warning("Server-RAM %.1f GB > %.1f GB — automatischer Neustart",
-                            rss_gb, _SERVER_RAM_LIMIT_GB)
-                resume_scan = _scan_was_running()
+                log.warning("Server-RAM %.1f GB > %.1f GB — automatischer Neustart "
+                            "(Projekt-Scan=%s, Mail-Scan=%s)",
+                            rss_gb, _SERVER_RAM_LIMIT_GB, last_proj, last_mail)
                 _notify(f"Neustart (RAM: {rss_gb:.0f} GB)")
-                _restart_server(resume_scan=resume_scan, reason=f"RAM {rss_gb:.0f} GB")
+                _restart_server(resume_projects=last_proj, resume_mail=last_mail,
+                                reason=f"RAM {rss_gb:.0f} GB")
         except Exception as exc:
             log.warning("Server-Watchdog: %s", exc)
 
