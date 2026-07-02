@@ -444,6 +444,37 @@ async def scan_progress_banner(request: Request):
                 active = (pid, s)
 
     if active is None:
+        # Kein Projekt-Scan → ggf. Mail-Scan im selben grossen Banner zeigen
+        ms = _mail_scan
+        ms_status = ms.get("status")
+        ms_active = ms_status == "running" or (
+            ms_status in ("done", "error") and _elapsed_seconds(ms.get("finished_at", "")) < 8
+        )
+        if ms_active:
+            resp = templates.TemplateResponse("_scan_progress.html", {
+                "request":        request,
+                "status":         ms_status,
+                "phase":          "",
+                "project_name":   "Mail-Scan",
+                "project_root":   "Mail-Scan",
+                "current_dir":    ("📬 " + ms.get("current_mailbox", "")) if ms.get("current_mailbox") else "📬 Mail-Scan",
+                "total":          ms.get("total", 0),
+                "processed":      ms.get("processed", 0),
+                "new":            ms.get("new", ms.get("total_new", 0)) or 0,
+                "skipped":        ms.get("skipped", 0),
+                "listed":         0,
+                "errors":         ms.get("errors", 0),
+                "current_file":   ms.get("current_mailbox", ""),
+                "current_folder": "",
+                "error":          ms.get("error", ""),
+                "project_id":     None,   # kein Abbrechen-Button für Mail
+                "unit":           "Mails",
+                "searching_label": "Postfächer werden vorbereitet…",
+            })
+            if ms_status in ("done", "error"):
+                import json as _json
+                resp.headers["HX-Trigger"] = _json.dumps({"archivio:scanComplete": True})
+            return resp
         return HTMLResponse("")
 
     pid, s    = active
@@ -500,9 +531,16 @@ async def mail_dashboard(request: Request):
         "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
     ).fetchall()
     conn.close()
+    cfg_list = []
+    for r in configs:
+        d = dict(r)
+        _lbl, _cls = _scan_freshness(d.get("last_scanned_at"))
+        d["scan_fresh_label"] = _lbl
+        d["scan_fresh_class"] = _cls
+        cfg_list.append(d)
     return templates.TemplateResponse("_dashboard_mail.html", {
         "request":      request,
-        "configs":      [dict(r) for r in configs],
+        "configs":      cfg_list,
         "projects":     [dict(r) for r in projects],
         "scan_status":  _mail_scan.get("status"),
         "scan_new":     _mail_scan.get("total_new"),
@@ -670,6 +708,22 @@ async def mail_scan_start(request: Request):
     _mail_scan["started_at"] = _now()
     threading.Thread(target=_run_mail_scan, daemon=True).start()
     return await mail_dashboard(request)
+
+
+@router.post("/mail/scan-one", response_class=HTMLResponse)
+async def mail_scan_one(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    """Scannt genau EIN Postfach (per-Postfach 'Jetzt scannen'-Button)."""
+    if _mail_scan.get("status") != "running":
+        _mail_scan.clear()
+        _mail_scan["status"]     = "running"
+        _mail_scan["started_at"] = _now()
+        threading.Thread(target=_run_mail_scan,
+                         kwargs={"only_mailbox": mailbox_name}, daemon=True).start()
+    return await _mail_section_response(request, connection.get_connection(), context)
 
 
 @router.get("/mail/scan-status", response_class=HTMLResponse)
@@ -1433,14 +1487,23 @@ def _has_subdirs(path: str) -> bool:
         return False
 
 
-def _run_mail_scan():
+def _run_mail_scan(only_mailbox: str | None = None):
+    """Scannt aktive Postfächer. only_mailbox: nur dieses eine (für den
+    per-Postfach 'Jetzt scannen'-Button). Reihenfolge stale-first (am längsten
+    nicht gescannte zuerst) — wie bei den Projekten."""
     from scanner.mail_scanner import connect_imap, scan_mailbox
     try:
         client = connect_imap()
         conn   = connection.get_connection()
-        active = conn.execute(
-            "SELECT * FROM mail_scan_config WHERE active=1"
-        ).fetchall()
+        if only_mailbox:
+            active = conn.execute(
+                "SELECT * FROM mail_scan_config WHERE mailbox_name=?", (only_mailbox,)
+            ).fetchall()
+        else:
+            # stale-first: NULL (nie gescannt) zuerst, dann älteste
+            active = conn.execute(
+                "SELECT * FROM mail_scan_config WHERE active=1 ORDER BY last_scanned_at ASC"
+            ).fetchall()
         conn.close()
 
         if not active:
@@ -1449,19 +1512,27 @@ def _run_mail_scan():
             _mail_scan["finished_at"] = _now()
             _mail_scan["warning"]     = "Keine aktiven Postfächer — bitte Postfach aktivieren."
             _mail_scan.pop("detail", None)
+            _mail_scan.pop("current_mailbox", None)
             return
 
-        total_new = 0
+        total_new = skipped_total = errors_total = 0
         mailbox_details = []
         for row in active:
+            _mail_scan["current_mailbox"] = row["mailbox_name"]
             if row["project_id"] is None:
                 log.warning("Postfach '%s' hat kein Projekt — übersprungen", row["mailbox_name"])
                 mailbox_details.append(f"{row['mailbox_name']}: kein Projekt")
                 continue
             try:
-                stats      = scan_mailbox(client, row["mailbox_name"], row["project_id"],
-                                          progress=_mail_scan)
-                total_new += stats["new"]
+                stats = scan_mailbox(client, row["mailbox_name"], row["project_id"],
+                                     progress=_mail_scan)
+                total_new     += stats["new"]
+                skipped_total += stats["skipped"]
+                errors_total  += stats["errors"]
+                # Live-Zähler fürs Banner
+                _mail_scan["new"]     = total_new
+                _mail_scan["skipped"] = skipped_total
+                _mail_scan["errors"]  = errors_total
                 log.info("Postfach '%s': %s", row["mailbox_name"], stats)
                 short = row["mailbox_name"].split("/")[-1]
                 mailbox_details.append(
@@ -1482,9 +1553,11 @@ def _run_mail_scan():
         _mail_scan["finished_at"] = _now()
         _mail_scan["detail"]      = " · ".join(mailbox_details) if mailbox_details else None
         _mail_scan.pop("warning", None)
+        _mail_scan.pop("current_mailbox", None)
     except Exception as exc:
         _mail_scan["status"] = "error"
         _mail_scan["error"]  = str(exc)
+        _mail_scan.pop("current_mailbox", None)
 
 
 def _scan_project_mailboxes(project_id: int) -> None:

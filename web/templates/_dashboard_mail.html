@@ -1,38 +1,8 @@
-<div id="mail-section">
-
-  <div class="section-title" style="padding-top:28px; margin-bottom:16px;">Mail-Integration</div>
-
-  {# Status-Banner #}
-  {% if scan_status == 'running' %}
-    <div class="scan-badge running"
-         style="display:inline-block; margin-bottom:4px;"
-         hx-get="/dashboard/mail/scan-status"
-         hx-trigger="every 3s"
-         hx-target="#mail-section"
-         hx-swap="outerHTML">Scannt Mails…</div>
-  {% elif scan_status == 'done' %}
-    {% if scan_warning %}
-      <div class="scan-badge warn" style="display:inline-block; margin-bottom:4px;">⚠ {{ scan_warning }}</div>
-    {% else %}
-      <div class="scan-badge done" style="display:inline-block; margin-bottom:4px;">
-        ✓ Scan abgeschlossen — {{ scan_new }} neue Mail{{ 's' if scan_new != 1 else '' }}
-      </div>
-    {% endif %}
-    {% if scan_detail %}
-      <div style="font-size:11px; color:var(--text-3); margin-bottom:12px;">{{ scan_detail }}</div>
-    {% else %}
-      <div style="margin-bottom:12px;"></div>
-    {% endif %}
-  {% elif scan_status == 'error' %}
-    <div class="scan-badge error" style="display:inline-block; margin-bottom:12px;">
-      Fehler: {{ scan_error }}
-    </div>
-  {% else %}
-    <div style="margin-bottom:12px;"></div>
-  {% endif %}
+<div id="mail-section"
+     {% if scan_status == 'running' %}hx-get="/dashboard/mail/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 
   {# Aktions-Leiste #}
-  <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap;">
+  <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
     <button class="btn"
             hx-get="/dashboard/mail/refresh"
             hx-target="#mail-section"
@@ -50,73 +20,92 @@
       </button>
     </form>
     {% endif %}
+    {% if scan_status == 'running' %}
+      <span class="scan-badge running">Scannt Mails…</span>
+    {% elif scan_status == 'done' and scan_warning %}
+      <span class="scan-badge warn">⚠ {{ scan_warning }}</span>
+    {% elif scan_status == 'error' %}
+      <span class="scan-badge error">Fehler: {{ scan_error }}</span>
+    {% endif %}
   </div>
 
-  {# Postfach-Liste #}
+  {# Postfach-Liste — gleiche Zeilen-Struktur wie Projekte #}
   {% if not configs %}
   <div style="font-size:13px; color:var(--text-3);">
     Noch keine Postfächer konfiguriert — klicke auf «Postfächer aktualisieren».
   </div>
   {% else %}
-  <div style="border:1px solid var(--border); border-radius:var(--radius); overflow:hidden;">
     {% for c in configs %}
-    <div style="display:flex; align-items:center; gap:10px; padding:8px 14px;
-                border-bottom:{% if not loop.last %}1px solid var(--border){% else %}none{% endif %};
-                background:var(--bg);">
+    <div class="project-entry">
+      <div class="project-row">
 
-      {# Toggle #}
-      <form hx-post="/dashboard/mail/toggle"
-            hx-target="#mail-section"
-            hx-swap="outerHTML"
-            style="display:contents;">
-        <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
-        <button type="submit"
-                class="project-toggle {{ 'on' if c.active else '' }}"
-                style="width:28px; height:16px; flex-shrink:0;"
-                title="{{ 'Deaktivieren' if c.active else 'Aktivieren' }}">
-        </button>
-      </form>
-
-      {# Name + Projekt-Zuweisung #}
-      <div style="flex:1; min-width:0; display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <span style="font-size:13px; color:var(--text-1);">✉ {{ c.mailbox_name }}</span>
-        <form hx-post="/dashboard/mail/assign-project"
-              hx-target="#mail-section"
-              hx-swap="outerHTML"
+        {# Toggle #}
+        <form hx-post="/dashboard/mail/toggle"
+              hx-target="#mail-section" hx-swap="outerHTML"
               style="display:contents;">
           <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
-          <select name="project_id"
-                  hx-post="/dashboard/mail/assign-project"
-                  hx-target="#mail-section"
-                  hx-swap="outerHTML"
-                  hx-trigger="change"
-                  hx-include="closest form"
-                  style="font-size:11px; padding:2px 6px; border-radius:4px;
-                         border:1px solid var(--border); background:var(--bg);
-                         color:{% if c.project_id %}var(--text-1){% else %}var(--text-3){% endif %};
-                         max-width:200px;">
-            <option value="">— Projekt wählen —</option>
-            <option value="new">+ Als eigenes Projekt speichern</option>
-            {% for p in projects %}
-              <option value="{{ p.id }}" {% if p.id == c.project_id %}selected{% endif %}>{{ p.name }}</option>
-            {% endfor %}
-          </select>
+          <button type="submit"
+                  class="project-toggle {{ 'on' if c.active else '' }}"
+                  title="{{ 'Mail-Scan deaktivieren' if c.active else 'Mail-Scan aktivieren' }}">
+          </button>
         </form>
-      </div>
 
-      {# Statistik #}
-      <div style="display:flex; gap:10px; align-items:center; flex-shrink:0;">
-        {% if c.mail_count %}
-          <span style="font-size:11px; color:var(--text-3);">{{ c.mail_count }} Mails</span>
-        {% endif %}
-        {% if c.last_scanned_at %}
-          <span style="font-size:11px; color:var(--text-3);" title="Zuletzt gescannt">🕐 {{ c.last_scanned_at | fmt_datetime }}</span>
-        {% endif %}
-      </div>
+        {# Info: Name · Anzahl/zuletzt gescannt · Projekt-Zuordnung #}
+        <div style="flex:1; min-width:0;">
+          <div class="project-name">✉ {{ c.mailbox_name }}</div>
+          <div class="project-meta">
+            {{ c.mail_count or 0 }} Mails
+            {% if c.last_scanned_at %} · Zuletzt gescannt: {{ c.last_scanned_at | fmt_datetime }}{% endif %}
+          </div>
+          <div class="project-path" style="display:flex; align-items:center; gap:6px;">
+            <form hx-post="/dashboard/mail/assign-project"
+                  hx-target="#mail-section" hx-swap="outerHTML"
+                  style="display:contents;">
+              <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+              <select name="project_id"
+                      hx-post="/dashboard/mail/assign-project"
+                      hx-target="#mail-section" hx-swap="outerHTML"
+                      hx-trigger="change" hx-include="closest form"
+                      style="font-size:11px; padding:2px 6px; border-radius:4px;
+                             border:1px solid var(--border); background:var(--bg);
+                             color:{% if c.project_id %}var(--text-1){% else %}var(--text-3){% endif %};
+                             max-width:260px;">
+                <option value="">— Projekt wählen —</option>
+                <option value="new">+ Als eigenes Projekt speichern</option>
+                {% for p in projects %}
+                  <option value="{{ p.id }}" {% if p.id == c.project_id %}selected{% endif %}>{{ p.name }}</option>
+                {% endfor %}
+              </select>
+            </form>
+          </div>
+        </div>
 
+        {# Aktionen: Freshness-Badge + immer 'Jetzt/Neu scannen' #}
+        <div class="project-actions">
+          {% if scan_status == 'running' %}
+            <span class="scan-badge running">Scannt…</span>
+          {% else %}
+            {% if c.scan_fresh_label %}
+              <span class="scan-badge {{ c.scan_fresh_class }}"
+                    title="Zuletzt gescannt: {{ c.last_scanned_at | fmt_datetime }}"
+                    style="margin-right:8px;">{{ c.scan_fresh_label }}</span>
+            {% endif %}
+            {% if c.project_id %}
+            <form hx-post="/dashboard/mail/scan-one"
+                  hx-target="#mail-section" hx-swap="outerHTML"
+                  style="display:contents;">
+              <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+              <input type="hidden" name="context" value="mail">
+              <button type="submit" class="btn {{ 'btn' if c.last_scanned_at else 'btn-primary' }}">
+                {{ 'Neu scannen' if c.last_scanned_at else 'Jetzt scannen' }}</button>
+            </form>
+            {% endif %}
+          {% endif %}
+        </div>
+
+      </div>
     </div>
     {% endfor %}
-  </div>
   {% endif %}
 
 </div>
