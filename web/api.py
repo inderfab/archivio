@@ -17,12 +17,16 @@ from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _cancel
 router = APIRouter(prefix="/api")
 
 _VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+_HELPER_VERSION_FILE = Path(__file__).parent.parent / "HELPER_VERSION"
 
 
 @router.get("/version")
 async def version():
     v = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
-    return JSONResponse({"version": v})
+    # Helper-Version separat — der Helper vergleicht dagegen, nicht gegen die
+    # Server-Version. So loest ein Server-Update kein Helper-Update aus.
+    hv = _HELPER_VERSION_FILE.read_text().strip() if _HELPER_VERSION_FILE.exists() else v
+    return JSONResponse({"version": v, "helper_version": hv})
 
 
 @router.get("/status")
@@ -48,8 +52,12 @@ async def status():
 @router.post("/scan/all")
 async def scan_all():
     conn     = connection.get_connection()
+    # Stale-first: am laengsten nicht gescannte Projekte zuerst (NULL = nie
+    # gescannt sortiert in SQLite ASC ganz nach vorne). So kommt nach einem
+    # RAM-Neustart der Batch mit den NOCH offenen Projekten weiter, statt immer
+    # wieder bei denselben (grossen) Projekten von vorne zu beginnen.
     projects = conn.execute(
-        "SELECT id, name, path FROM projects WHERE active=1"
+        "SELECT id, name, path FROM projects WHERE active=1 ORDER BY last_scanned_at ASC"
     ).fetchall()
     conn.close()
 
@@ -75,8 +83,9 @@ async def scan_all():
             "started_at":     _now(),
         }
         _cancel_flags[p["id"]] = {"cancel": False}
+        # scan_mail=False: verknüpfte Postfächer deckt der globale Mail-Scan unten ab
         threading.Thread(
-            target=_run_scan, args=(p["id"], p["path"]), daemon=True
+            target=_run_scan, args=(p["id"], p["path"]), kwargs={"scan_mail": False}, daemon=True
         ).start()
         started += 1
 
@@ -274,7 +283,8 @@ async def reset_and_rescan():
         if _scans.get(p["id"], {}).get("status") == "running":
             continue
         _scans[p["id"]] = {"status": "running", "started_at": _now()}
-        threading.Thread(target=_run_scan, args=(p["id"], p["path"]), daemon=True).start()
+        threading.Thread(target=_run_scan, args=(p["id"], p["path"]),
+                         kwargs={"scan_mail": False}, daemon=True).start()
 
     return JSONResponse({
         "ok": True,

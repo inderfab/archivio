@@ -1,0 +1,31 @@
+{% if context == 'project' %}
+  {% set tgt = '#project-list' %}{% set sw = 'innerHTML' %}{% set cancel_url = '/dashboard/projects/list' %}
+{% else %}
+  {% set tgt = 'closest .mail-confirm-wrap' %}{% set sw = 'outerHTML' %}{% set cancel_url = '/dashboard/mail' %}
+{% endif %}
+<div class="mail-confirm-wrap" style="
+    padding: 14px 16px;
+    background: var(--bg-2, #f5f5f5);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    margin: 4px 0;
+">
+  <div style="font-weight:600; margin-bottom:6px;">Postfach «{{ mailbox_name }}» deaktivieren</div>
+  <div style="font-size:12px; color:var(--text-2); margin-bottom:12px;">
+    {% if mail_count %}Dieses Postfach hat <strong>{{ mail_count }} Mails</strong> in der Datenbank.
+    {% endif %}Sollen die Mails aus der Datenbank entfernt werden?
+  </div>
+  <div style="display:flex; gap:8px; flex-wrap:wrap;">
+    <form hx-post="/dashboard/mail/delete" hx-target="{{ tgt }}" hx-swap="{{ sw }}" style="display:contents;">
+      <input type="hidden" name="mailbox_name" value="{{ mailbox_name }}">
+      <input type="hidden" name="context" value="{{ context }}">
+      <button type="submit" class="btn btn-danger">Mails aus DB entfernen</button>
+    </form>
+    <form hx-post="/dashboard/mail/deactivate" hx-target="{{ tgt }}" hx-swap="{{ sw }}" style="display:contents;">
+      <input type="hidden" name="mailbox_name" value="{{ mailbox_name }}">
+      <input type="hidden" name="context" value="{{ context }}">
+      <button type="submit" class="btn">Nur deaktivieren</button>
+    </form>
+    <button class="btn" hx-get="{{ cancel_url }}" hx-target="{{ tgt }}" hx-swap="{{ sw }}">Abbrechen</button>
+  </div>
+</div>

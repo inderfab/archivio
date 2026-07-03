@@ -114,9 +114,14 @@ cp menubar/server_app.py   "$APP/Contents/Resources/archivio_server.py"
 cp menubar/icon.png        "$APP/Contents/Resources/"
 cp archivio.icns           "$APP/Contents/Resources/"
 
+# Helper-Version (entkoppelt von der Server-VERSION) — der Server meldet sie ueber
+# /api/version, damit der Helper nur bei echten Helper-Aenderungen updaten will.
+HELPER_VERSION=$(cat helper/VERSION 2>/dev/null || cat VERSION)
+printf '%s' "$HELPER_VERSION" > "$APP/Contents/Resources/HELPER_VERSION"
+
 # Helper-ZIP ins Bundle (für /dashboard/download/helper)
 mkdir -p "$APP/Contents/Resources/dist"
-cp "dist/archivio-helper-${VERSION}.zip" "$APP/Contents/Resources/dist/"
+cp "dist/archivio-helper-${HELPER_VERSION}.zip" "$APP/Contents/Resources/dist/"
 
 # Python-Umgebungen ins Bundle kopieren und bereinigen
 _install_python_to_bundle() {

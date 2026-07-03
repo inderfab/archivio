@@ -31,6 +31,18 @@ def _fmt_date(iso: str | None) -> str:
         return iso[:10]
 
 
+def _fmt_datetime(iso: str | None) -> str:
+    """Datum + Uhrzeit (lokal). Für 'zuletzt gescannt' — damit ein erneuter Scan
+    am selben Tag sichtbar wird."""
+    if not iso:
+        return "—"
+    try:
+        from datetime import datetime
+        return datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone().strftime("%d.%m.%Y %H:%M")
+    except Exception:
+        return _fmt_date(iso)
+
+
 def _fmt_size(n: int) -> str:
     n = n or 0
     if n < 1024:      return f"{n} B"
@@ -42,6 +54,7 @@ def _urlencode(v: str) -> str:
     return quote(str(v), safe="")
 
 
-templates.env.filters["fmt_date"]  = _fmt_date
-templates.env.filters["fmt_size"]  = _fmt_size
-templates.env.filters["urlencode"] = _urlencode
+templates.env.filters["fmt_date"]     = _fmt_date
+templates.env.filters["fmt_datetime"] = _fmt_datetime
+templates.env.filters["fmt_size"]     = _fmt_size
+templates.env.filters["urlencode"]    = _urlencode

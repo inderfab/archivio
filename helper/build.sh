@@ -1,11 +1,14 @@
 #!/usr/bin/env bash
 # Baut Archivio Helper.app als macOS Bundle und packt sie als ZIP.
+# Enthaelt ein eingebettetes Python (rumps + requests) — kein Xcode/pip beim Nutzer noetig.
 set -e
 
 DIST="dist"
 APP_NAME="Archivio Helper"
 APP="$DIST/$APP_NAME.app"
-VERSION=$(cat VERSION)
+# Eigene Helper-Version (entkoppelt von der Server-VERSION).
+VERSION=$(cat helper/VERSION 2>/dev/null || cat VERSION)
+PYTHON_VERSION="3.13"
 
 mkdir -p "$DIST"
 
@@ -13,40 +16,117 @@ mkdir -p "$DIST"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
+mkdir -p "$APP/Contents/Frameworks"
 
-# Launcher-Script (wird beim Öffnen der App ausgeführt)
+# ── Minimales eingebettetes Python (nur rumps + requests) ───────────────────────
+# Basis-Python wird vom Server-Build (.python-base-*) wiederverwendet, sonst geladen.
+_build_helper_python() {
+    local PBS_ARCH="$1"   # z.B. aarch64-apple-darwin
+    local ARCH_TAG="$2"   # arm64 | x86_64
+    local PY_BASE="$DIST/.python-base-$ARCH_TAG"
+    local PY_HELPER="$DIST/.python-helper-$ARCH_TAG"
+    local STAMP="$DIST/.python-helper-stamp-$ARCH_TAG"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:rumps+requests"
+
+    # Basis-Python sicherstellen
+    if [ "$(cat "$PY_BASE/.version" 2>/dev/null)" != "$PYTHON_VERSION:$PBS_ARCH" ]; then
+        echo "  $ARCH_TAG: Basis-Python herunterladen ($PBS_ARCH)…"
+        rm -rf "$PY_BASE"; mkdir -p "$PY_BASE"
+        local URL
+        URL=$(curl -sLf "https://api.github.com/repos/indygreg/python-build-standalone/releases/latest" \
+            | python3 -c "
+import sys, json
+rel = json.load(sys.stdin); arch = '$PBS_ARCH'; py = '$PYTHON_VERSION'
+for a in rel['assets']:
+    u = a['browser_download_url']
+    if (f'cpython-{py}.' in u and arch in u and 'install_only_stripped' in u
+            and 'freethreaded' not in u and u.endswith('.tar.gz')):
+        print(u); break
+" 2>/dev/null || echo "")
+        if [ -z "$URL" ]; then
+            echo "  ⚠  $ARCH_TAG: python-build-standalone nicht gefunden — übersprungen"
+            return
+        fi
+        curl -L --progress-bar "$URL" | tar -xz -C "$PY_BASE" --strip-components=1
+        echo "$PYTHON_VERSION:$PBS_ARCH" > "$PY_BASE/.version"
+    fi
+
+    # rumps + requests installieren (cachebar)
+    if [ "$(cat "$STAMP" 2>/dev/null)" != "$EXPECTED" ] || [ ! -x "$PY_HELPER/bin/python3" ]; then
+        echo "  $ARCH_TAG: rumps + requests installieren…"
+        rm -rf "$PY_HELPER"; cp -r "$PY_BASE" "$PY_HELPER"
+        local PIP="$PY_HELPER/bin/python3"
+        if [ "$ARCH_TAG" = "x86_64" ] && [ "$(uname -m)" = "arm64" ]; then
+            PIP="arch -x86_64 $PY_HELPER/bin/python3"
+        fi
+        $PIP -m pip install --prefer-binary -q --no-warn-script-location rumps requests
+        echo "$EXPECTED" > "$STAMP"
+    else
+        echo "  $ARCH_TAG: Cache gültig"
+    fi
+
+    # ins Bundle kopieren + bereinigen
+    local DST="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+    cp -r "$PY_HELPER" "$DST"
+    find "$DST" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
+    find "$DST" -name "*.pyc"  -delete 2>/dev/null || true
+    find "$DST" -name "*.dSYM" -type d -exec rm -rf {} + 2>/dev/null || true
+    echo "  $ARCH_TAG: $(du -sh "$DST" | cut -f1)"
+}
+
+echo "→ Helper-Python vorbereiten…"
+_build_helper_python "aarch64-apple-darwin" "arm64"
+_build_helper_python "x86_64-apple-darwin"  "x86_64"
+
+# Ad-hoc Code-Signierung der nativen Bibliotheken (Gatekeeper)
+if command -v codesign &>/dev/null; then
+    for ARCH_TAG in arm64 x86_64; do
+        PF="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+        [ -d "$PF" ] || continue
+        find "$PF" \( -name "*.so" -o -name "*.dylib" \) -type f | while read -r f; do
+            codesign -s - --force "$f" 2>/dev/null || true
+        done
+        find "$PF/bin" -type f | while read -r f; do
+            codesign -s - --force "$f" 2>/dev/null || true
+        done
+    done
+fi
+
+# ── Launcher: eingebettetes Python bevorzugen, venv nur als Fallback ────────────
 cat > "$APP/Contents/MacOS/Archivio Helper" <<'LAUNCHER'
 #!/usr/bin/env bash
-DIR="$(cd "$(dirname "$0")/../Resources" && pwd)"
+BUNDLE="$(cd "$(dirname "$0")/.." && pwd)"
+DIR="$BUNDLE/Resources"
 LOG="$HOME/Library/Logs/ArchivioHelper.log"
 exec >> "$LOG" 2>&1
 echo "$(date): Archivio Helper starting"
 
-# Python suchen
+# 1. Eingebettetes Python (kein Xcode/pip noetig)
+ARCH=$(uname -m)
+EMBEDDED_PY="$BUNDLE/Frameworks/archivio-python-$ARCH/bin/python3"
+if [ -x "$EMBEDDED_PY" ]; then
+    echo "$(date): Eingebettetes Python ($ARCH): $("$EMBEDDED_PY" --version 2>&1)"
+    exec "$EMBEDDED_PY" "$DIR/archivio_helper.py"
+fi
+
+# 2. Fallback: System-Python + venv (nur wenn kein eingebettetes Python vorhanden)
+echo "$(date): Kein eingebettetes Python fuer $ARCH — Fallback venv"
 PYTHON=""
 for p in /opt/homebrew/bin/python3 /usr/local/bin/python3 /usr/bin/python3; do
   if [ -x "$p" ]; then PYTHON="$p"; break; fi
 done
-
 if [ -z "$PYTHON" ]; then
-  osascript -e 'display alert "Archivio Helper" message "Python 3 nicht gefunden. Bitte Python 3 installieren (z.\,B. via Homebrew: brew install python)." as critical'
+  osascript -e 'display alert "Archivio Helper" message "Python 3 nicht gefunden." as critical'
   echo "$(date): ERROR - python3 not found"
   exit 1
 fi
-echo "$(date): Using $PYTHON"
-
-# Venv + Abhängigkeiten beim ersten Start installieren
 VENV="$DIR/.venv"
 if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Helper"'
-  echo "$(date): Creating venv"
   "$PYTHON" -m venv "$VENV"
-  echo "$(date): Installing dependencies"
   "$VENV/bin/pip" install --upgrade pip
   "$VENV/bin/pip" install rumps requests
-  echo "$(date): Installation complete"
 fi
-
 exec "$VENV/bin/python3" "$DIR/archivio_helper.py"
 LAUNCHER
 chmod +x "$APP/Contents/MacOS/Archivio Helper"
@@ -57,7 +137,7 @@ cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
 cp helper/icon.png            "$APP/Contents/Resources/"
 cp archivio.icns              "$APP/Contents/Resources/"
-cp VERSION                    "$APP/Contents/Resources/"
+printf '%s' "$VERSION"      > "$APP/Contents/Resources/VERSION"
 
 # Info.plist
 cat > "$APP/Contents/Info.plist" <<PLIST
@@ -105,9 +185,15 @@ PLIST
 
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
+# App-Bundle ad-hoc signieren (nach allen Änderungen)
+if command -v codesign &>/dev/null; then
+    codesign -s - --force --deep "$APP" 2>/dev/null || true
+fi
+
 # ── ZIP ────────────────────────────────────────────────────────────────────────
 cd "$DIST"
-zip -r "archivio-helper-${VERSION}.zip" "$APP_NAME.app"
+zip -qr "archivio-helper-${VERSION}.zip" "$APP_NAME.app" \
+    -x "**/__pycache__/*" -x "**/*.pyc"
 cd ..
 
 echo "✓ $DIST/archivio-helper-${VERSION}.zip erstellt"

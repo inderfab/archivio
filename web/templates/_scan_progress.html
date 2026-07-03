@@ -19,9 +19,9 @@
   {% endif %}
 
   {% if status == "running" and processed == 0 and total == 0 %}
-    <div class="spb-phase">Ordner wird durchsucht…</div>
+    <div class="spb-phase">{{ searching_label or "Ordner wird durchsucht…" }}</div>
   {% elif total > 0 %}
-    <div class="spb-counts">{{ processed }} / {{ total }} Dateien</div>
+    <div class="spb-counts">{{ processed }} / {{ total }} {{ unit or "Dateien" }}</div>
     {% if status == "running" %}
       {% if processed >= total and total > 0 %}
         <div class="spb-current" style="color: var(--text-3);">Abschluss läuft… (Datenbank, Embedding)</div>

@@ -20,51 +20,50 @@
       </button>
     </form>
 
-    {# Projektinfo #}
+    {% if not p.active %}
+    {# Kompakt: nur Name (nicht aktiv/nicht gescannt) #}
+    <div class="project-name" style="flex:1; min-width:0;">{{ p.name }}</div>
+    {% else %}
+    {# Projektinfo (aktiv) — volle Darstellung #}
     <div style="flex:1; min-width:0;">
       <div class="project-name">{{ p.name }}</div>
-      {% if p.active %}
-        <div class="project-meta">
-          {{ p.doc_count }} Dokumente
-          {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
-          {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
-        </div>
-      {% else %}
-        <div class="project-meta" style="color:var(--text-3);">nicht gescannt</div>
-      {% endif %}
+      <div class="project-meta">
+        {{ p.doc_count }} Dokumente
+        {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
+        {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+      </div>
       <div class="project-path">{{ p.path }}</div>
     </div>
 
     {# Aktionen #}
     <div class="project-actions">
-      {% if p.active and p.in_db %}
+      {% if p.in_db %}
 
+        <span class="scan-cell" id="scan-cell-{{ p.id }}"
+              {% if p.scan_status == 'running' %}hx-get="/dashboard/projects/{{ p.id }}/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
         {% if p.scan_status == 'running' %}
-          <span class="scan-running-wrap"
-                hx-get="/dashboard/projects/{{ p.id }}/scan-status"
-                hx-trigger="every 3s" hx-swap="outerHTML">
-            <span class="scan-badge running">Scannt…</span>
-            <button class="btn btn-cancel" style="margin-left:6px;"
-                    hx-post="/dashboard/projects/{{ p.id }}/scan/cancel"
-                    hx-swap="outerHTML" hx-target="closest .scan-running-wrap">Abbrechen</button>
-          </span>
-        {% elif p.scan_status == 'done' %}
-          <span class="scan-badge done">✓ {{ p.doc_count }} Dok.</span>
-        {% elif p.scan_status == 'error' %}
-          <span class="scan-badge error">Fehler</span>
+          <span class="scan-badge running">Scannt…</span>
+          <button class="btn btn-cancel" style="margin-left:6px;"
+                  hx-post="/dashboard/projects/{{ p.id }}/scan/cancel"
+                  hx-target="#scan-cell-{{ p.id }}" hx-swap="outerHTML">Abbrechen</button>
         {% else %}
-          {% if p.last_scanned %}
-            <span class="scan-badge done" title="Zuletzt gescannt: {{ p.last_scanned }}"
-                  style="margin-right:8px;">✓ gescannt</span>
+          {# done / error / idle: Status-Badge (falls vorhanden) UND immer der Scan-Button #}
+          {% if p.scan_status == 'done' %}
+            <span class="scan-badge done" style="margin-right:8px;">✓ {{ p.doc_count }} Dok.</span>
+          {% elif p.scan_status == 'error' %}
+            <span class="scan-badge error" style="margin-right:8px;">Fehler</span>
+          {% elif p.scan_fresh_label %}
+            <span class="scan-badge {{ p.scan_fresh_class }}" title="Zuletzt gescannt: {{ p.last_scanned }}"
+                  style="margin-right:8px;">{{ p.scan_fresh_label }}</span>
           {% endif %}
           <form hx-post="/dashboard/projects/{{ p.id }}/scan"
-                hx-swap="outerHTML"
-                hx-target="find button[type=submit]"
+                hx-target="#scan-cell-{{ p.id }}" hx-swap="outerHTML"
                 style="display:contents;">
             <button type="submit" class="btn {{ 'btn' if p.last_scanned else 'btn-primary' }}">
               {{ 'Neu scannen' if p.last_scanned else 'Jetzt scannen' }}</button>
           </form>
         {% endif %}
+        </span>
 
         <button class="btn"
                 onclick="toggleBrowser({{ p.id }}, '{{ p.path | replace("'", "\\'") }}', '{{ p.name | replace("'", "\\'") }}')">
@@ -73,6 +72,7 @@
 
       {% endif %}
     </div>
+    {% endif %}
 
   </div>
 
@@ -108,7 +108,7 @@
         <span style="font-size:11px; color:var(--text-3);">{{ mb.mail_count }} Mails</span>
       {% endif %}
       {% if mb.last_scanned_at %}
-        <span style="font-size:11px; color:var(--text-3);">· {{ mb.last_scanned_at | fmt_date }}</span>
+        <span style="font-size:11px; color:var(--text-3);">· 🕐 {{ mb.last_scanned_at | fmt_datetime }}</span>
       {% endif %}
     </div>
     {% endfor %}

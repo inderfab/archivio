@@ -239,7 +239,10 @@ def _check_update() -> tuple[str, str] | None:
         resp   = requests.get(f"{server}/api/version", timeout=5)
         if resp.status_code != 200:
             return None
-        remote  = resp.json().get("version", "")
+        data    = resp.json()
+        # Gegen die HELPER-Version vergleichen, nicht die Server-Version — sonst
+        # loest jedes Server-Update faelschlich einen Helper-Update-Hinweis aus.
+        remote  = data.get("helper_version") or data.get("version", "")
         current = _local_version()
         if remote and remote != current:
             download_url = f"{server}/dashboard/download/helper"
