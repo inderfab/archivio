@@ -36,6 +36,8 @@ def kill_all_workers() -> None:
         pids = list(_worker_pids)
         _worker_pids.clear()
     for pid in pids:
+        if _worker_status(pid) == "foreign":
+            continue  # PID gehört einem fremden Prozess (Wiederverwendung) — nicht killen
         try:
             os.kill(pid, signal.SIGKILL)
             log.info("kill_all_workers: SIGKILL → PID %d", pid)
@@ -115,6 +117,8 @@ def _start_memory_watchdog() -> None:
                             rss, pressure, pids,
                         )
                     for pid in pids:
+                        if _worker_status(pid) == "foreign":
+                            continue  # fremde PID (Wiederverwendung) — nicht killen
                         try:
                             os.kill(pid, signal.SIGKILL)
                         except ProcessLookupError:
@@ -143,6 +147,10 @@ def _auto_limits() -> tuple[float, int, float]:
     return rss_limit, timeout, min_free
 
 _MAX_WORKER_RSS, _TASK_TIMEOUT, _MIN_FREE_GB = _auto_limits()
+
+# Nach so vielen Timeouts/Speicher-Kills IN FOLGE wird der Scan abgebrochen —
+# verhindert stundenlanges Weiterkriechen bei hängendem/langsamem NAS.
+_MAX_CONSECUTIVE_STALLS = 8
 
 
 def _system_under_pressure() -> bool:
@@ -254,6 +262,8 @@ def _kill_workers(pool) -> None:
         pids.update(_worker_pids)
 
     for pid in pids:
+        if _worker_status(pid) == "foreign":
+            continue  # fremder Prozess mit wiederverwendeter PID — nicht killen
         try:
             os.kill(pid, signal.SIGKILL)
             log.info("SIGKILL → Worker PID %d", pid)
@@ -275,29 +285,51 @@ def _kill_workers(pool) -> None:
     threading.Thread(target=_do_terminate, daemon=True).start()
 
 
-def _total_workers_rss_gb() -> float:
-    """Summe des RSS ALLER bekannten Worker-PIDs — inkl. verwaister Prozesse.
+def _worker_status(pid: int) -> str:
+    """'ours' | 'foreign' | 'dead' | 'unknown'.
+    Schützt vor PID-Wiederverwendung: nur Prozesse, deren Parent DIESER Prozess
+    ist, sind echte Scanner-Worker. Eine wiederverwendete PID (z.B. Ollama, das
+    12 GB belegt) wird sonst faelschlich als Worker gezaehlt/gekillt."""
+    try:
+        import psutil
+    except Exception:
+        return "unknown"
+    try:
+        return "ours" if psutil.Process(pid).ppid() == os.getpid() else "foreign"
+    except psutil.NoSuchProcess:
+        return "dead"
+    except (psutil.AccessDenied, ProcessLookupError):
+        return "foreign"   # existiert, gehört aber nicht uns (kein Zugriff/kein Kind)
+    except Exception:
+        return "unknown"
 
-    Tote PIDs werden automatisch aus dem Register entfernt.
-    Ohne diese Funktion blieb ein 56GB-Zombie aus maxtasksperchild-Rotation
-    unbemerkt, weil pool._pool nur den aktuellen Worker enthält.
+
+def _total_workers_rss_gb() -> float:
+    """Summe des RSS unserer ECHTEN Worker-PIDs (Parent == dieser Prozess).
+
+    Tote und fremde (PID-wiederverwendete) Prozesse werden aus dem Register
+    entfernt. Ohne den Herkunfts-Check zaehlte eine wiederverwendete PID den RSS
+    eines fremden Prozesses (z.B. Ollama) → falsche 12-GB-Messung → jeder Worker
+    wurde sofort gekillt (Dauerschleife statt Fortschritt).
     """
     try:
         import psutil
         total = 0.0
-        dead: set[int] = set()
+        drop: set[int] = set()
         with _worker_pids_lock:
             pids = list(_worker_pids)
         for pid in pids:
-            try:
-                total += psutil.Process(pid).memory_info().rss / (1024 ** 3)
-            except (psutil.NoSuchProcess, ProcessLookupError):
-                dead.add(pid)
-            except Exception:
-                pass
-        if dead:
+            st = _worker_status(pid)
+            if st == "ours":
+                try:
+                    total += psutil.Process(pid).memory_info().rss / (1024 ** 3)
+                except Exception:
+                    pass
+            elif st in ("dead", "foreign"):
+                drop.add(pid)   # nicht (mehr) unser Worker → aus Register nehmen
+        if drop:
             with _worker_pids_lock:
-                _worker_pids.difference_update(dead)
+                _worker_pids.difference_update(drop)
         return total
     except Exception:
         return 0.0
@@ -395,9 +427,10 @@ def scan_project(project_id: int, root: Path,
     _track_pool(pool)
 
     # Kumulative Zähler über den gesamten Scan — kein Reset pro Ordner
-    global_total     = 0  # Dateien in allen bisher entdeckten Ordnern zusammen
-    global_processed = 0  # Bisher fertig verarbeitete Dateien
-    total_processed  = 0  # Für WAL-Checkpoint
+    global_total       = 0  # Dateien in allen bisher entdeckten Ordnern zusammen
+    global_processed   = 0  # Bisher fertig verarbeitete Dateien
+    total_processed    = 0  # Für WAL-Checkpoint
+    consecutive_stalls = 0  # Timeouts/Speicher-Kills in Folge → Abbruch-Schutz
 
     # Lese-Verbindung nur für den Skip-Check unveränderter Dateien.
     # Sicherheit: nur SELECTs → Python-sqlite3 beginnt KEINE implizite Transaktion
@@ -504,6 +537,7 @@ def scan_project(project_id: int, root: Path,
                 file_timeout = _TASK_TIMEOUT if path.suffix.lower() == ".pdf" else min(_TASK_TIMEOUT, 120)
 
                 # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
+                stalled = False   # True bei Timeout/Speicher-Kill (NAS/RAM-Symptom)
                 while result is None:
                     try:
                         result = ar.get(timeout=_POLL_INTERVAL)
@@ -519,14 +553,14 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"
+                            result = "error"; stalled = True
                         elif pressure:
                             log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
                             _kill_workers(pool)
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"
+                            result = "error"; stalled = True
                         elif elapsed > file_timeout:
                             log.warning("Datei-Timeout (%ds): %s — SIGKILL",
                                         file_timeout, path.name)
@@ -534,10 +568,25 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"
+                            result = "error"; stalled = True
                     except Exception as exc:
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
                         result = "error"
+
+                # Notbremse: zu viele Timeouts/Speicher-Kills in Folge → NAS hängt
+                # wahrscheinlich; Scan sauber abbrechen statt stundenlang weiterzukriechen.
+                if stalled:
+                    consecutive_stalls += 1
+                else:
+                    consecutive_stalls = 0
+                if consecutive_stalls >= _MAX_CONSECUTIVE_STALLS:
+                    msg = (f"{consecutive_stalls} Dateien in Folge fehlgeschlagen "
+                           f"(Timeout/Speicher) — Scan abgebrochen. Bitte NAS-Verbindung prüfen.")
+                    log.error(msg)
+                    if progress is not None:
+                        progress["phase"] = "error"
+                        progress["error"] = msg
+                    return
 
                 # Bilder/Videos/3D/unbekannte Formate: "error" → "listed"
                 if result == "error" and path.suffix.lower() not in supported:

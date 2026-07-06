@@ -323,9 +323,11 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   LOG_DIR="/Users/$CURRENT_USER/.archivio/logs"
   sudo -u "$CURRENT_USER" mkdir -p "$LA_DIR" "$LOG_DIR"
 
-  # LaunchAgent: hält die App auf OS-Ebene am Leben (respawn bei Crash/Kill).
-  # KeepAlive=SuccessfulExit:false → bei sauberem Beenden (Quit/Update) KEIN
-  # respawn, nur bei Absturz/Kill. RunAtLoad startet sie beim Login.
+  # LaunchAgent: hält die App IMMER am Leben (KeepAlive=true) — auch nach einem
+  # sauberen Exit 0 (macOS Logout/Ruhezustand/Update). Frueher (SuccessfulExit=false)
+  # blieb der Server nach einem Exit 0 uebers Wochenende tot. ThrottleInterval
+  # verhindert eine Absturz-Schleife. Bewusstes Beenden erfolgt ueber
+  # 'launchctl bootout' im Quit-Menue.
   cat > "$PLIST" <<'PLISTEOF'
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
@@ -340,10 +342,9 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <dict>
-    <key>SuccessfulExit</key>
-    <false/>
-  </dict>
+  <true/>
+  <key>ThrottleInterval</key>
+  <integer>30</integer>
   <key>ProcessType</key>
   <string>Interactive</string>
   <key>StandardErrorPath</key>
@@ -361,8 +362,13 @@ PLISTEOF
   sudo -u "$CURRENT_USER" osascript -e \
     'tell application "System Events" to delete (every login item whose name is "Archivio Server")' 2>/dev/null || true
 
-  # Alten Agent entladen, neuen laden (startet die App via RunAtLoad)
+  # Alten Agent entladen
   sudo -u "$CURRENT_USER" launchctl bootout "gui/$USER_UID/io.archivio.server" 2>/dev/null || true
+  # Evtl. manuell/ausserhalb launchd laufende Instanz beenden, damit danach nur
+  # die launchd-verwaltete (KeepAlive) laeuft — sonst zwei Menueleisten-Icons.
+  pkill -f "Contents/Resources/archivio_server.py" 2>/dev/null || true
+  sleep 1
+  # Neuen Agent laden (RunAtLoad + KeepAlive starten die App)
   if ! sudo -u "$CURRENT_USER" launchctl bootstrap "gui/$USER_UID" "$PLIST" 2>/dev/null; then
     sudo -u "$CURRENT_USER" launchctl load "$PLIST" 2>/dev/null \
       || sudo -u "$CURRENT_USER" open -a "Archivio Server" 2>/dev/null || true

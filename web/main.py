@@ -857,8 +857,18 @@ def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
             params.append(f"%{w}%")
         if project_id:
             try:
-                sql += " AND d.project_id = ?"
-                params.append(int(project_id))
+                pid  = int(project_id)
+                prow = conn.execute("SELECT path FROM projects WHERE id=?", (pid,)).fetchone()
+                if prow and prow["path"] and not str(prow["path"]).startswith("mailbox:"):
+                    # Nur Ordner INNERHALB des Projektpfads. Wichtig wegen
+                    # Hash-Deduplizierung: ein Dokument kann mehrere Pfade in
+                    # verschiedenen Projekten haben (gleiche Datei) — d.project_id
+                    # allein würde fremde Projektordner (Duplikate) durchlassen.
+                    sql += " AND dp.path LIKE ?"
+                    params.append(str(prow["path"]).rstrip("/") + "/%")
+                else:
+                    sql += " AND d.project_id = ?"
+                    params.append(pid)
             except ValueError:
                 pass
         sql += " LIMIT 2000"
