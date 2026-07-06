@@ -671,6 +671,13 @@ class ArchivioServer(rumps.App):
     def quit_app(self, _):
         _stop_server()
         _stop_ollama()
+        # Agent entladen, sonst startet KeepAlive=true die App sofort neu.
+        # bootout beendet zugleich diesen Prozess.
+        try:
+            subprocess.run(["launchctl", "bootout", f"gui/{os.getuid()}/io.archivio.server"],
+                           timeout=5)
+        except Exception:
+            pass
         rumps.quit_application()
 
 
