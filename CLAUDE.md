@@ -1,5 +1,9 @@
 # Archivio — Interne Wissensplattform für Architekturbüro
 
+> 📌 **Vor der Arbeit lesen:** [`PROJEKT_STATUS.md`](PROJEKT_STATUS.md) — vollständiger
+> Übergabe-Kontext (aktuelle Version, Infrastruktur, Build/Release, Zuverlässigkeit,
+> Scanner/Embedding/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte).
+
 ## Stack
 - **Backend**: Python 3.12, FastAPI
 - **Datenbank**: SQLite mit FTS5 (Volltextsuche)
