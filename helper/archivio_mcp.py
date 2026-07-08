@@ -9,11 +9,18 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
+from urllib.parse import quote
 
 import requests
 from mcp.server.fastmcp import FastMCP
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+
+# Lokaler HTTP-Server der Archivio-Helper-Menubar-App (siehe archivio_helper.py).
+# Läuft auf derselben Station wie dieser MCP-Server; öffnet Dateien mit den
+# Rechten des Helpers (Full Disk Access) — der von Claude Desktop gestartete
+# MCP-Subprozess hätte die u.U. nicht.
+HELPER_PORT = 44380
 
 
 def _server_url() -> str:
@@ -22,6 +29,24 @@ def _server_url() -> str:
         return cfg.get("server_url", "http://localhost:8000").rstrip("/")
     except Exception:
         return "http://localhost:8000"
+
+
+def _helper_action(action: str, path: str) -> str:
+    """Ruft /open bzw. /reveal des lokalen Helper-Servers auf und liefert eine
+    menschenlesbare Statusmeldung zurück."""
+    url = f"http://localhost:{HELPER_PORT}/{action}?path={quote(path, safe='')}"
+    try:
+        resp = requests.get(url, timeout=10)
+    except Exception as e:
+        return (
+            f"Archivio Helper nicht erreichbar (localhost:{HELPER_PORT}): {e}. "
+            "Läuft die «Archivio Helper»-App in der Menüleiste?"
+        )
+    if resp.status_code == 200:
+        return None  # Erfolg — Aufrufer formuliert die Meldung
+    if resp.status_code == 404:
+        return f"Datei nicht gefunden: {path}"
+    return f"Helper-Fehler ({resp.status_code}) bei «{action}» für {path}"
 
 
 mcp = FastMCP("archivio")
@@ -105,6 +130,30 @@ def semantic_search(query: str, project: str = "") -> str:
             f"  Inhalt: {(s.get('content') or '').strip()[:500]}"
         )
     return "\n".join(lines)
+
+
+@mcp.tool()
+def open_file(path: str) -> str:
+    """Öffnet eine Datei aus Archivio in der zugehörigen App (z.B. Bild, PDF) auf dem Mac.
+
+    Nutzt den lokalen Archivio Helper — funktioniert nur auf der Station, auf der
+    Claude Desktop + Archivio Helper laufen und die die Datei erreichen kann.
+
+    path: absoluter Dateipfad, exakt wie in den Suchergebnissen unter "Pfad" angegeben
+          (z.B. "/Volumes/Groups/.../Attika_rechts_Event.jpg").
+    """
+    err = _helper_action("open", path)
+    return err if err else f"Datei wird geöffnet: {path}"
+
+
+@mcp.tool()
+def reveal_file(path: str) -> str:
+    """Zeigt eine Datei im Finder (markiert sie in ihrem Ordner) via Archivio Helper.
+
+    path: absoluter Dateipfad wie in den Suchergebnissen unter "Pfad".
+    """
+    err = _helper_action("reveal", path)
+    return err if err else f"Im Finder angezeigt: {path}"
 
 
 if __name__ == "__main__":

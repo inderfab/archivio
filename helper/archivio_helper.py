@@ -154,9 +154,7 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
                     subprocess.run(["open", str(p)], timeout=5)
                     self._cors_headers(200)
                 else:
-                    log.warning("Datei nicht gefunden: %s", path)
-                    rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-                    self._cors_headers(404)
+                    self._not_found(path)
 
         elif parsed.path == "/reveal" and path:
             p = Path(path)
@@ -164,15 +162,24 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
                 subprocess.run(["open", "-R", str(p)], timeout=5)
                 self._cors_headers(200)
             else:
-                log.warning("Datei nicht gefunden: %s", path)
-                rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-                self._cors_headers(404)
+                self._not_found(path)
 
         elif parsed.path == "/ping":
             self._cors_headers(200)
 
         else:
             self._cors_headers(400)
+
+    def _not_found(self, path: str):
+        # HTTP-Antwort ZUERST senden — rumps.notification kann aus diesem
+        # (Nicht-Haupt-)Thread eine Exception werfen; passierte das vor dem
+        # Senden, käme beim Aufrufer eine leere Antwort statt eines sauberen 404.
+        log.warning("Datei nicht gefunden: %s", path)
+        self._cors_headers(404)
+        try:
+            rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+        except Exception as e:
+            log.warning("Notification fehlgeschlagen: %s", e)
 
     def _cors_headers(self, code: int):
         self.send_response(code)
