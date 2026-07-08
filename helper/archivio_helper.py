@@ -229,6 +229,40 @@ def _register_url_handler():
         log.warning("URL scheme handler not available: %s", e)
 
 
+# ── MCP-Registrierung (Claude Desktop) ───────────────────────────────────────────
+# Traegt Archivio als lokalen MCP-Server ein, damit Claude Desktop archivio_mcp.py
+# (im selben Bundle, mit demselben eingebetteten Python) als stdio-Tool starten kann.
+
+CLAUDE_CONFIG_PATH = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+
+
+def _ensure_mcp_registered():
+    if not CLAUDE_CONFIG_PATH.parent.exists():
+        return  # Claude Desktop nicht installiert
+    try:
+        try:
+            cfg = json.loads(CLAUDE_CONFIG_PATH.read_text())
+        except Exception:
+            cfg = {}
+        servers = cfg.setdefault("mcpServers", {})
+        target = {
+            "command": sys.executable,
+            "args": [str(Path(__file__).parent / "archivio_mcp.py")],
+        }
+        if servers.get("archivio") == target:
+            return  # bereits aktuell — kein unnoetiges Schreiben/Log-Spam
+        servers["archivio"] = target
+        CLAUDE_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        log.info("Archivio als MCP-Server in Claude Desktop registriert: %s", target)
+        rumps.notification(
+            "Archivio Helper",
+            "Claude Desktop: Archivio verfügbar",
+            "Bitte Claude Desktop neu starten, damit das Archivio-Tool aktiv wird.",
+        )
+    except Exception as e:
+        log.warning("MCP-Registrierung in Claude Desktop fehlgeschlagen: %s", e)
+
+
 # ── Update ────────────────────────────────────────────────────────────────────
 
 def _check_update() -> tuple[str, str] | None:
@@ -331,6 +365,7 @@ class ArchivioHelper(rumps.App):
 
         _start_local_server()
         _register_url_handler()
+        _ensure_mcp_registered()
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
         threading.Thread(target=self._delayed_update_check, daemon=True).start()

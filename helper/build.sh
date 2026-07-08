@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Baut Archivio Helper.app als macOS Bundle und packt sie als ZIP.
-# Enthaelt ein eingebettetes Python (rumps + requests) — kein Xcode/pip beim Nutzer noetig.
+# Enthaelt ein eingebettetes Python (rumps + requests + mcp) — kein Xcode/pip beim Nutzer noetig.
 set -e
 
 DIST="dist"
@@ -18,15 +18,17 @@ mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
 mkdir -p "$APP/Contents/Frameworks"
 
-# ── Minimales eingebettetes Python (nur rumps + requests) ───────────────────────
+# ── Minimales eingebettetes Python (rumps + requests + mcp) ─────────────────────
 # Basis-Python wird vom Server-Build (.python-base-*) wiederverwendet, sonst geladen.
+# mcp ist fuer den eingebetteten Archivio-MCP-Server (archivio_mcp.py), den Claude
+# Desktop als stdio-Subprozess startet.
 _build_helper_python() {
     local PBS_ARCH="$1"   # z.B. aarch64-apple-darwin
     local ARCH_TAG="$2"   # arm64 | x86_64
     local PY_BASE="$DIST/.python-base-$ARCH_TAG"
     local PY_HELPER="$DIST/.python-helper-$ARCH_TAG"
     local STAMP="$DIST/.python-helper-stamp-$ARCH_TAG"
-    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:rumps+requests"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:rumps+requests+mcp"
 
     # Basis-Python sicherstellen
     if [ "$(cat "$PY_BASE/.version" 2>/dev/null)" != "$PYTHON_VERSION:$PBS_ARCH" ]; then
@@ -51,15 +53,15 @@ for a in rel['assets']:
         echo "$PYTHON_VERSION:$PBS_ARCH" > "$PY_BASE/.version"
     fi
 
-    # rumps + requests installieren (cachebar)
+    # rumps + requests + mcp installieren (cachebar)
     if [ "$(cat "$STAMP" 2>/dev/null)" != "$EXPECTED" ] || [ ! -x "$PY_HELPER/bin/python3" ]; then
-        echo "  $ARCH_TAG: rumps + requests installieren…"
+        echo "  $ARCH_TAG: rumps + requests + mcp installieren…"
         rm -rf "$PY_HELPER"; cp -r "$PY_BASE" "$PY_HELPER"
         local PIP="$PY_HELPER/bin/python3"
         if [ "$ARCH_TAG" = "x86_64" ] && [ "$(uname -m)" = "arm64" ]; then
             PIP="arch -x86_64 $PY_HELPER/bin/python3"
         fi
-        $PIP -m pip install --prefer-binary -q --no-warn-script-location rumps requests
+        $PIP -m pip install --prefer-binary -q --no-warn-script-location rumps requests mcp
         echo "$EXPECTED" > "$STAMP"
     else
         echo "  $ARCH_TAG: Cache gültig"
@@ -125,7 +127,7 @@ if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Helper"'
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
-  "$VENV/bin/pip" install rumps requests
+  "$VENV/bin/pip" install rumps requests mcp
 fi
 exec "$VENV/bin/python3" "$DIR/archivio_helper.py"
 LAUNCHER
@@ -133,6 +135,7 @@ chmod +x "$APP/Contents/MacOS/Archivio Helper"
 
 # Python-Script und Ressourcen
 cp helper/archivio_helper.py  "$APP/Contents/Resources/"
+cp helper/archivio_mcp.py     "$APP/Contents/Resources/"
 cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
 cp helper/icon.png            "$APP/Contents/Resources/"
