@@ -2,6 +2,7 @@
 from __future__ import annotations
 
 import os
+import re
 import subprocess
 import threading
 import zipfile
@@ -47,6 +48,125 @@ async def status():
         "doc_count": total,
         "last_scan": last,
     })
+
+
+@router.get("/mcp/search")
+async def mcp_search(
+    q: str = "",
+    project_id: str = "",
+    search_in: str = "docs,filenames",
+    limit: int = 20,
+):
+    """Read-only JSON-Suche für den MCP-Server (Archivio Helper) — reine Textantwort statt HTML.
+    Nutzt dieselbe Such-Logik wie /search (main.py), nur ohne die Zusatzfilter (Datum, Absender, …).
+    """
+    from web.main import _build_filters, _search, _search_folders
+
+    q = q.strip()
+    scope = set(search_in.split(",")) if search_in else {"docs", "filenames"}
+
+    conn = connection.get_connection()
+    try:
+        results: list = []
+        if q:
+            filters_str, filter_params = _build_filters(project_id, "")
+            results, _error = _search(conn, q, filters_str, filter_params)
+        folders = _search_folders(conn, q, project_id) if q and "folders" in scope else []
+    finally:
+        conn.close()
+
+    cleaned = [
+        {
+            "id":            r.get("id"),
+            "filename":      r.get("filename"),
+            "extension":     r.get("extension"),
+            "filesize":      r.get("filesize"),
+            "modified_at":   r.get("modified_at"),
+            "project_name":  r.get("project_name"),
+            "filepath":      r.get("filepath"),
+            "page_number":   r.get("page_number"),
+            "mail_sender":   r.get("mail_sender"),
+            "mail_date":     r.get("mail_date"),
+            # <mark>-Tags entfernen — reiner Text statt HTML-Highlighting fürs LLM
+            "excerpt":       re.sub(r"</?mark>", "", r.get("excerpt") or ""),
+        }
+        for r in results[:limit]
+    ]
+    return JSONResponse({"results": cleaned, "folders": folders})
+
+
+@router.get("/mcp/semantic-search")
+async def mcp_semantic_search(
+    q: str = "",
+    project_id: str = "",
+    limit: int = 12,
+):
+    """Hybrid keyword+vector Suche (wie /search/ai), liefert Chunk-Inhalte statt HTML —
+    Claude formuliert die Antwort selbst aus den Quellen, kein lokaler LLM-Aufruf nötig.
+    """
+    import asyncio
+
+    from web.main import _ai_vector_search
+
+    q = q.strip()
+    if not q:
+        return JSONResponse({"sources": [], "error": None, "ollama_missing": False})
+
+    loop = asyncio.get_event_loop()
+    sources, error, ollama_missing = await loop.run_in_executor(
+        None, _ai_vector_search, q, project_id
+    )
+
+    cleaned = [
+        {
+            "document_id":  s.get("document_id"),
+            "filename":     s.get("filename"),
+            "project_name": s.get("project_name"),
+            "filepath":     s.get("filepath"),
+            "page_number":  s.get("page_number"),
+            "content":      s.get("content"),
+            "score":        s.get("score"),
+        }
+        for s in (sources or [])[:limit]
+    ]
+    return JSONResponse({"sources": cleaned, "error": error, "ollama_missing": ollama_missing})
+
+
+@router.get("/mcp/document")
+async def mcp_document(document_id: int):
+    """Volltext + Metadaten eines Dokuments — damit der MCP-Server (read_document) den
+    Inhalt in die Claude-Unterhaltung laden kann (z.B. Mail-Text zum Umschreiben)."""
+    conn = connection.get_connection()
+    try:
+        doc = conn.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+        if not doc:
+            return JSONResponse({"error": f"Kein Dokument mit id {document_id}"}, status_code=404)
+        doc = dict(doc)
+        content_row = conn.execute(
+            "SELECT content FROM document_content WHERE document_id=?", (document_id,)
+        ).fetchone()
+        path_row = conn.execute(
+            "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1", (document_id,)
+        ).fetchone()
+        result = {
+            "id":                document_id,
+            "filename":          doc["filename"],
+            "extension":         doc["extension"],
+            "source_type":       doc["source_type"],
+            "extraction_status": doc["extraction_status"],
+            "filepath":          path_row["path"] if path_row else None,
+            "content":           (content_row["content"] if content_row else "") or "",
+        }
+        if doc["source_type"] == "email":
+            m = conn.execute(
+                "SELECT sender, recipients, cc, subject, date, mailbox_name "
+                "FROM mails WHERE document_id=?", (document_id,)
+            ).fetchone()
+            if m:
+                result["mail"] = dict(m)
+        return JSONResponse(result)
+    finally:
+        conn.close()
 
 
 @router.post("/scan/all")

@@ -154,9 +154,7 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
                     subprocess.run(["open", str(p)], timeout=5)
                     self._cors_headers(200)
                 else:
-                    log.warning("Datei nicht gefunden: %s", path)
-                    rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-                    self._cors_headers(404)
+                    self._not_found(path)
 
         elif parsed.path == "/reveal" and path:
             p = Path(path)
@@ -164,24 +162,44 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
                 subprocess.run(["open", "-R", str(p)], timeout=5)
                 self._cors_headers(200)
             else:
-                log.warning("Datei nicht gefunden: %s", path)
-                rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
-                self._cors_headers(404)
+                self._not_found(path)
 
         elif parsed.path == "/ping":
             self._cors_headers(200)
 
+        elif parsed.path == "/config":
+            # Der MCP-Server fragt hier die aktuell im Helper eingestellte Server-URL
+            # ab (Single Source of Truth — dieselbe config.json, die das Menü pflegt).
+            cfg = _load_config()
+            body = json.dumps({"server_url": cfg.get("server_url", "")}).encode("utf-8")
+            self._cors_headers(200, body)
+
         else:
             self._cors_headers(400)
 
-    def _cors_headers(self, code: int):
+    def _not_found(self, path: str):
+        # HTTP-Antwort ZUERST senden — rumps.notification kann aus diesem
+        # (Nicht-Haupt-)Thread eine Exception werfen; passierte das vor dem
+        # Senden, käme beim Aufrufer eine leere Antwort statt eines sauberen 404.
+        log.warning("Datei nicht gefunden: %s", path)
+        self._cors_headers(404)
+        try:
+            rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
+        except Exception as e:
+            log.warning("Notification fehlgeschlagen: %s", e)
+
+    def _cors_headers(self, code: int, body: bytes | None = None):
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Private-Network", "true")
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        ctype = "application/json" if body is not None else "text/plain"
+        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"ok" if code == 200 else b"error")
+        if body is not None:
+            self.wfile.write(body)
+        else:
+            self.wfile.write(b"ok" if code == 200 else b"error")
 
     def log_message(self, *args):
         pass  # kein HTTP-Log-Spam
@@ -227,6 +245,40 @@ def _register_url_handler():
         log.info("URL scheme handler registered")
     except Exception as e:
         log.warning("URL scheme handler not available: %s", e)
+
+
+# ── MCP-Registrierung (Claude Desktop) ───────────────────────────────────────────
+# Traegt Archivio als lokalen MCP-Server ein, damit Claude Desktop archivio_mcp.py
+# (im selben Bundle, mit demselben eingebetteten Python) als stdio-Tool starten kann.
+
+CLAUDE_CONFIG_PATH = Path.home() / "Library" / "Application Support" / "Claude" / "claude_desktop_config.json"
+
+
+def _ensure_mcp_registered():
+    if not CLAUDE_CONFIG_PATH.parent.exists():
+        return  # Claude Desktop nicht installiert
+    try:
+        try:
+            cfg = json.loads(CLAUDE_CONFIG_PATH.read_text())
+        except Exception:
+            cfg = {}
+        servers = cfg.setdefault("mcpServers", {})
+        target = {
+            "command": sys.executable,
+            "args": [str(Path(__file__).parent / "archivio_mcp.py")],
+        }
+        if servers.get("archivio") == target:
+            return  # bereits aktuell — kein unnoetiges Schreiben/Log-Spam
+        servers["archivio"] = target
+        CLAUDE_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        log.info("Archivio als MCP-Server in Claude Desktop registriert: %s", target)
+        rumps.notification(
+            "Archivio Helper",
+            "Claude Desktop: Archivio verfügbar",
+            "Bitte Claude Desktop neu starten, damit das Archivio-Tool aktiv wird.",
+        )
+    except Exception as e:
+        log.warning("MCP-Registrierung in Claude Desktop fehlgeschlagen: %s", e)
 
 
 # ── Update ────────────────────────────────────────────────────────────────────
@@ -331,6 +383,7 @@ class ArchivioHelper(rumps.App):
 
         _start_local_server()
         _register_url_handler()
+        _ensure_mcp_registered()
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
         threading.Thread(target=self._delayed_update_check, daemon=True).start()
