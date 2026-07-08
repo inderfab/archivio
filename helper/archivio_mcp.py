@@ -24,11 +24,31 @@ HELPER_PORT = 44380
 
 
 def _server_url() -> str:
+    """Ermittelt die Archivio-Server-URL. Reihenfolge:
+    1. den laufenden Helper fragen (localhost:44380/config) — das ist die im
+       Helper-Menü gesetzte, aktuelle URL (z.B. http://windows.local:8000);
+    2. eigene config.json neben diesem Skript;
+    3. Fallback localhost:8000.
+    Der Helper ist der zuverlässigste Punkt, weil er nur EINE laufende Instanz pro
+    Station hat und seine URL im Menü pflegt — eine evtl. veraltete gebündelte
+    config.json führt so nicht mehr zum falschen Server.
+    """
+    try:
+        resp = requests.get(f"http://localhost:{HELPER_PORT}/config", timeout=2)
+        if resp.status_code == 200:
+            url = (resp.json().get("server_url") or "").rstrip("/")
+            if url:
+                return url
+    except Exception:
+        pass
     try:
         cfg = json.loads(CONFIG_PATH.read_text())
-        return cfg.get("server_url", "http://localhost:8000").rstrip("/")
+        url = (cfg.get("server_url") or "").rstrip("/")
+        if url:
+            return url
     except Exception:
-        return "http://localhost:8000"
+        pass
+    return "http://localhost:8000"
 
 
 def _helper_action(action: str, path: str) -> str:
@@ -59,6 +79,9 @@ def search(query: str, project: str = "", scope: str = "docs,filenames") -> str:
     query: Suchbegriff(e).
     project: optionale Projekt-ID zum Einschränken.
     scope: Komma-getrennt, z.B. "docs,filenames" oder "docs,filenames,folders".
+
+    Jeder Treffer hat eine [ID nnn]: mit read_document(nnn) den Volltext laden,
+    mit open_file(pfad) die Datei extern öffnen.
     """
     base = _server_url()
     try:
@@ -80,11 +103,15 @@ def search(query: str, project: str = "", scope: str = "docs,filenames") -> str:
     lines = []
     for r in results:
         proj    = r.get("project_name") or "—"
-        loc     = r.get("filepath") or r.get("mail_sender") or ""
         excerpt = r.get("excerpt") or ""
-        entry   = f"- {r['filename']} [{proj}]"
-        if loc:
-            entry += f"\n  Pfad: {loc}"
+        entry   = f"- [ID {r.get('id')}] {r['filename']} [{proj}]"
+        if r.get("filepath"):
+            entry += f"\n  Pfad: {r['filepath']}"
+        elif r.get("mail_sender"):
+            von = f"\n  Mail von: {r['mail_sender']}"
+            if r.get("mail_date"):
+                von += f" ({r['mail_date']})"
+            entry += von
         if excerpt:
             entry += f"\n  Auszug: {excerpt}"
         lines.append(entry)
@@ -125,11 +152,60 @@ def semantic_search(query: str, project: str = "") -> str:
         proj = s.get("project_name") or "—"
         page = f", Seite {s['page_number']}" if s.get("page_number") else ""
         lines.append(
-            f"- {s['filename']} [{proj}{page}] (Score {s.get('score', 0):.2f})\n"
+            f"- [ID {s.get('document_id')}] {s['filename']} [{proj}{page}] (Score {s.get('score', 0):.2f})\n"
             f"  Pfad: {s.get('filepath') or '—'}\n"
             f"  Inhalt: {(s.get('content') or '').strip()[:500]}"
         )
     return "\n".join(lines)
+
+
+@mcp.tool()
+def read_document(document_id: int) -> str:
+    """Lädt den extrahierten Text-Inhalt eines Dokuments in die Unterhaltung — damit Claude
+    ihn direkt lesen, zusammenfassen, umschreiben, übersetzen oder Fragen dazu beantworten kann.
+
+    Für Text-Dokumente: Mails, PDFs, Word, Textdateien. Für Bilder/Pläne stattdessen
+    open_file benutzen (die öffnet die Datei extern zum Anschauen).
+
+    document_id: die Zahl aus der [ID nnn] eines Suchergebnisses.
+    """
+    base = _server_url()
+    try:
+        resp = requests.get(
+            f"{base}/api/mcp/document", params={"document_id": document_id}, timeout=30
+        )
+    except Exception as e:
+        return f"Fehler beim Zugriff auf Archivio ({base}): {e}"
+    if resp.status_code == 404:
+        return f"Kein Dokument mit ID {document_id} gefunden."
+    if resp.status_code != 200:
+        return f"Archivio-Fehler ({resp.status_code}) für Dokument {document_id}."
+
+    d       = resp.json()
+    header  = [f"Datei: {d.get('filename')}"]
+    if d.get("filepath"):
+        header.append(f"Pfad: {d['filepath']}")
+    mail = d.get("mail")
+    if mail:
+        header.append(f"Von: {mail.get('sender', '')}")
+        header.append(f"An: {mail.get('recipients', '')}")
+        if mail.get("cc"):
+            header.append(f"Cc: {mail['cc']}")
+        header.append(f"Betreff: {mail.get('subject', '')}")
+        header.append(f"Datum: {mail.get('date', '')}")
+
+    content = (d.get("content") or "").strip()
+    if not content:
+        return (
+            "\n".join(header)
+            + "\n\n(Kein extrahierter Text vorhanden — evtl. ein Bild/Plan ohne Text. "
+            "Zum Anschauen open_file benutzen.)"
+        )
+
+    MAX = 40000
+    if len(content) > MAX:
+        content = content[:MAX] + f"\n\n… (gekürzt — {len(content)} Zeichen gesamt)"
+    return "\n".join(header) + "\n\n" + content
 
 
 @mcp.tool()

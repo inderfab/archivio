@@ -15,6 +15,8 @@ def _make_doc(conn, project_id, filename, content):
     })
     queries.set_extraction_status(conn, doc_id, "ok")
     queries.upsert_path(conn, doc_id, f"/scan/{filename}", True)
+    # Produktion füllt beides: Volltext in document_content, Chunks in document_chunks
+    queries.upsert_content(conn, doc_id, content)
     queries.save_chunks(conn, doc_id, [{"page_number": None, "chunk_index": 0, "content": content}])
     return doc_id
 
@@ -49,6 +51,59 @@ def test_mcp_search_without_query_returns_empty(tmp_db):
     r = c.get("/api/mcp/search", params={"q": ""})
     assert r.status_code == 200
     assert r.json() == {"results": [], "folders": []}
+
+
+def test_mcp_document_returns_full_content(tmp_db):
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    doc_id = _make_doc(tmp_db, p, "brief.txt", "Sehr geehrte Damen und Herren, anbei der Entwurf.")
+    tmp_db.commit()
+
+    c = TestClient(app)
+    r = c.get("/api/mcp/document", params={"document_id": doc_id})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["filename"] == "brief.txt"
+    assert d["source_type"] == "filesystem"
+    assert "anbei der Entwurf" in d["content"]
+    assert "mail" not in d  # keine Mail → kein mail-Block
+
+
+def test_mcp_document_includes_mail_metadata(tmp_db):
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    did = tmp_db.execute(
+        "INSERT INTO documents (project_id, hash, filename, source_type, extraction_status) "
+        "VALUES (?, 'mh1', 'Angebot', 'email', 'ok')", (p,),
+    ).lastrowid
+    tmp_db.execute(
+        "INSERT INTO mails (document_id, sender, recipients, subject, date, mailbox_name) "
+        "VALUES (?, 'a@x.ch', 'b@y.ch', 'Angebot', '2026-01-02T10:00:00Z', 'INBOX')", (did,),
+    )
+    queries.upsert_content(tmp_db, did, "Wir freuen uns über Ihre Anfrage.")
+    tmp_db.commit()
+
+    c = TestClient(app)
+    r = c.get("/api/mcp/document", params={"document_id": did})
+    assert r.status_code == 200
+    d = r.json()
+    assert d["source_type"] == "email"
+    assert d["mail"]["sender"] == "a@x.ch"
+    assert d["mail"]["subject"] == "Angebot"
+    assert "Anfrage" in d["content"]
+
+
+def test_mcp_document_404_for_unknown_id(tmp_db):
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    c = TestClient(app)
+    r = c.get("/api/mcp/document", params={"document_id": 987654})
+    assert r.status_code == 404
 
 
 def test_mcp_semantic_search_is_graceful_without_ollama(tmp_db):

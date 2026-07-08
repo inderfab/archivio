@@ -167,6 +167,13 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         elif parsed.path == "/ping":
             self._cors_headers(200)
 
+        elif parsed.path == "/config":
+            # Der MCP-Server fragt hier die aktuell im Helper eingestellte Server-URL
+            # ab (Single Source of Truth — dieselbe config.json, die das Menü pflegt).
+            cfg = _load_config()
+            body = json.dumps({"server_url": cfg.get("server_url", "")}).encode("utf-8")
+            self._cors_headers(200, body)
+
         else:
             self._cors_headers(400)
 
@@ -181,14 +188,18 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         except Exception as e:
             log.warning("Notification fehlgeschlagen: %s", e)
 
-    def _cors_headers(self, code: int):
+    def _cors_headers(self, code: int, body: bytes | None = None):
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Private-Network", "true")
-        self.send_header("Content-Type", "text/plain; charset=utf-8")
+        ctype = "application/json" if body is not None else "text/plain"
+        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"ok" if code == 200 else b"error")
+        if body is not None:
+            self.wfile.write(body)
+        else:
+            self.wfile.write(b"ok" if code == 200 else b"error")
 
     def log_message(self, *args):
         pass  # kein HTTP-Log-Spam

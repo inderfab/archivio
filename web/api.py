@@ -132,6 +132,43 @@ async def mcp_semantic_search(
     return JSONResponse({"sources": cleaned, "error": error, "ollama_missing": ollama_missing})
 
 
+@router.get("/mcp/document")
+async def mcp_document(document_id: int):
+    """Volltext + Metadaten eines Dokuments — damit der MCP-Server (read_document) den
+    Inhalt in die Claude-Unterhaltung laden kann (z.B. Mail-Text zum Umschreiben)."""
+    conn = connection.get_connection()
+    try:
+        doc = conn.execute("SELECT * FROM documents WHERE id=?", (document_id,)).fetchone()
+        if not doc:
+            return JSONResponse({"error": f"Kein Dokument mit id {document_id}"}, status_code=404)
+        doc = dict(doc)
+        content_row = conn.execute(
+            "SELECT content FROM document_content WHERE document_id=?", (document_id,)
+        ).fetchone()
+        path_row = conn.execute(
+            "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1", (document_id,)
+        ).fetchone()
+        result = {
+            "id":                document_id,
+            "filename":          doc["filename"],
+            "extension":         doc["extension"],
+            "source_type":       doc["source_type"],
+            "extraction_status": doc["extraction_status"],
+            "filepath":          path_row["path"] if path_row else None,
+            "content":           (content_row["content"] if content_row else "") or "",
+        }
+        if doc["source_type"] == "email":
+            m = conn.execute(
+                "SELECT sender, recipients, cc, subject, date, mailbox_name "
+                "FROM mails WHERE document_id=?", (document_id,)
+            ).fetchone()
+            if m:
+                result["mail"] = dict(m)
+        return JSONResponse(result)
+    finally:
+        conn.close()
+
+
 @router.post("/scan/all")
 async def scan_all():
     conn     = connection.get_connection()
