@@ -4,7 +4,7 @@
 > Sitzung/einem neuen Account nahtlos weitergearbeitet werden kann. Liegt bewusst im Repo,
 > damit sie account-übergreifend verfügbar ist. Ergänzt `CLAUDE.md` (Projektinstruktionen).
 >
-> **Stand: v3.0.4 (Server) · v3.0.1 (Helper) · 2026-07-06**
+> **Stand: v3.0.5 (Server) · v3.1.0 (Helper) · 2026-07-08**
 
 ---
 
@@ -216,3 +216,17 @@ git branch -d fix/xyz
 ## 16. Sicherheits-Randbedingung (IMMER beachten)
 
 Die lokal gelesenen **Mail-Zugangsdaten (bauchat/strut, `config.yaml`) dürfen NIE nach GitHub**. `config.yaml` ist gitignored, das Datenverzeichnis liegt außerhalb des Repos, nur Code wird committet. `*.db` ist gitignored.
+
+---
+
+## 17. MCP-Server (Claude Desktop) — seit v3.0.5 / Helper 3.1.0
+
+Claude Desktop kann Archivio als lokales **MCP-Tool** nutzen (vollständig lokal, kein Cloud-Dienst). Der MCP-Server ist **in den Helper integriert** (nicht separat verteilt) und läuft mit dessen eingebettetem Python.
+
+- **Server-Endpunkte (`web/api.py`, alle read-only JSON):** `GET /api/mcp/search` (nutzt `_build_filters`+`_search` aus `web/main.py`, entfernt `<mark>`-Tags), `GET /api/mcp/semantic-search` (nutzt `_ai_vector_search`, liefert Chunk-`content`; ohne Ollama sauberes `ollama_missing`), `GET /api/mcp/document?document_id=` (Volltext + bei Mails Absender/Betreff/… für `read_document`).
+- **MCP-Server (`helper/archivio_mcp.py`, stdio, FastMCP):** 5 Tools — `search`, `semantic_search`, `read_document` (Text in den Chat laden → umschreiben/zusammenfassen), `open_file` + `reveal_file` (extern öffnen / im Finder zeigen via Helper-HTTP `localhost:44380`). Suchergebnisse zeigen `[ID nnn]` → an `read_document` übergeben.
+- **Server-URL-Auflösung:** `_server_url()` fragt ZUERST den laufenden Helper (`GET localhost:44380/config` → im Menü gesetzte URL, z.B. `windows.local:8000`), dann eigene `config.json`, dann `localhost:8000`. So kein falscher Server durch veraltete gebündelte config.
+- **Auto-Registrierung:** `_ensure_mcp_registered()` (in `archivio_helper.py`, beim Start) trägt idempotent einen `archivio`-Eintrag in `~/Library/Application Support/Claude/claude_desktop_config.json` ein (`command`=`sys.executable`=eingebettetes Python, `args`=archivio_mcp.py), ohne andere `mcpServers` anzutasten. Danach Notification „Claude Desktop neu starten".
+- **Helper-HTTP `/config`-Endpoint** neu; `_cors_headers(code, body=None)` kann jetzt JSON-Body senden. **404-Fix:** `/open`+`/reveal` senden die HTTP-Antwort VOR `rumps.notification` (die aus dem HTTP-Thread eine Exception werfen kann → vorher leere Antwort statt sauberem 404).
+- **Nach Claude-Desktop-**oder**-`archivio_mcp.py`-Änderung: Claude Desktop neu starten** (lädt den stdio-Subprozess neu). Nach Helper-Änderung (`archivio_helper.py`): Helper-App neu starten.
+- **`mcp`-Paket** ist im eingebetteten Helper-Python (arm64+x86_64) via `helper/build.sh` (Cache-Stamp `rumps+requests+mcp`). Tests: `tests/test_mcp_api.py`.
