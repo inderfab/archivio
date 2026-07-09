@@ -218,6 +218,31 @@ async def scan_all():
     return JSONResponse({"ok": True, "projects_started": started})
 
 
+@router.post("/scan/cancel-all")
+async def cancel_all_scans():
+    """Bricht ALLE Projekt-Scans (laufend UND in der Warteschlange) sowie den
+    Mail-Scan auf einmal ab. Laufende Scans prüfen ihr Cancel-Flag periodisch;
+    wartende (queued) Threads sehen es, sobald sie den Scan-Lock bekommen, und
+    kehren dann sofort zurück (ohne wirklich zu scannen)."""
+    cancelled = 0
+    for pid, flag in list(_cancel_flags.items()):
+        flag["cancel"] = True
+    for pid, s in list(_scans.items()):
+        # 'running' deckt sowohl laufende als auch wartende (phase 'queued') Scans ab —
+        # beide tragen status 'running'.
+        if s.get("status") == "running":
+            s["status"]      = "cancelled"
+            s["finished_at"] = _now()
+            cancelled += 1
+    # Mail-Scan ebenfalls stoppen (Flag wird zwischen den Postfächern geprüft)
+    mail_cancelled = False
+    if _mail_scan.get("status") == "running":
+        _mail_scan["cancel"] = True
+        mail_cancelled = True
+
+    return JSONResponse({"ok": True, "cancelled": cancelled, "mail_cancelled": mail_cancelled})
+
+
 @router.get("/scan/nav-status", response_class=None)
 async def scan_nav_status():
     """Mini-Indikator für die globale Navigation — leer wenn kein Scan aktiv."""

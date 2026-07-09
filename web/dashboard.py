@@ -1518,6 +1518,15 @@ def _run_mail_scan(only_mailbox: str | None = None):
         total_new = skipped_total = errors_total = 0
         mailbox_details = []
         for row in active:
+            if _mail_scan.get("cancel"):
+                _mail_scan["status"]      = "cancelled"
+                _mail_scan["finished_at"] = _now()
+                _mail_scan.pop("current_mailbox", None)
+                try:
+                    client.logout()
+                except Exception:
+                    pass
+                return
             _mail_scan["current_mailbox"] = row["mailbox_name"]
             if row["project_id"] is None:
                 log.warning("Postfach '%s' hat kein Projekt — übersprungen", row["mailbox_name"])
@@ -1670,7 +1679,16 @@ def _run_fts_optimize():
         return  # bereits eingeplant/aktiv — ein Lauf genügt für alle Änderungen
     try:
         from scanner.walker import optimize_fts
-        _scan_lock.acquire()   # wartet bis kein Scan läuft
+        # Auf den GANZEN Batch warten, nicht nur auf eine Lock-Lücke zwischen zwei
+        # Projekten. Bei "Alle scannen" stehen noch Projekte in der Warteschlange
+        # (status 'running') und der Mail-Scan läuft parallel. Würde optimize hier den
+        # _scan_lock zwischen zwei Projekten grapschen, blockierte es das nächste
+        # wartende Projekt (erscheint als "hängt in Vorbereitung") und konkurriert mit
+        # den Mail-Inserts um die FTS ("database is locked"). Also warten bis wirklich
+        # nichts mehr läuft, DANN einmal optimieren.
+        while _any_scan_active():
+            time.sleep(2)
+        _scan_lock.acquire()   # jetzt unbestritten
         try:
             optimize_fts()
         finally:

@@ -15,7 +15,10 @@
   </div>
 
   {# ── Alles scannen ── #}
-  <div style="display:flex; justify-content:flex-end; margin-bottom:16px;">
+  <div style="display:flex; justify-content:flex-end; gap:8px; margin-bottom:16px;">
+    <button class="btn" id="cancel-all-btn" onclick="cancelAll(this)">
+      ⏹ Alle Scans abbrechen
+    </button>
     <button class="btn btn-primary" id="scan-all-btn" onclick="scanAll(this)">
       ⟳ Alle aktiven Projekte jetzt scannen
     </button>
@@ -135,6 +138,26 @@
       .catch(function() {
         btn.disabled = false;
         btn.textContent = '⟳ Alle aktiven Projekte jetzt scannen';
+      });
+  }
+
+  function cancelAll(btn) {
+    btn.disabled = true;
+    btn.textContent = '⏹ Wird abgebrochen…';
+    fetch('/api/scan/cancel-all', { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        btn.textContent = '✓ ' + (d.cancelled || 0) + ' Scan(s) abgebrochen';
+        htmx.ajax('GET', '/dashboard/projects/list',
+                  { target: '#project-list', swap: 'innerHTML' });
+        setTimeout(function() {
+          btn.disabled = false;
+          btn.textContent = '⏹ Alle Scans abbrechen';
+        }, 4000);
+      })
+      .catch(function() {
+        btn.disabled = false;
+        btn.textContent = '⏹ Alle Scans abbrechen';
       });
   }
 
