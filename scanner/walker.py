@@ -141,9 +141,14 @@ def _auto_limits() -> tuple[float, int, float]:
         total_gb = psutil.virtual_memory().total / (1024 ** 3)
     except Exception:
         total_gb = 16.0
-    rss_limit  = max(3.0, total_gb * 0.20)       # 20% des RAM (64 GB → ~12.8 GB)
+    # 50% des RAM (64 GB → 32 GB). Vorher 20% (12.8 GB) — das killte auf grossen
+    # Maschinen schon legitime, speicherhungrige Extraktionen (grosse/komplexe PDFs)
+    # mitten in der Verarbeitung, sodass die Datei nie fertig wurde und der Scan an
+    # 8 solchen Kills in Folge abbrach. Der _MIN_FREE_GB-Check unten schützt weiter
+    # vor echtem System-OOM.
+    rss_limit  = max(3.0, total_gb * 0.50)
     timeout    = max(120, int(total_gb * 10))   # 10s pro GB RAM (64 GB → 640s)
-    min_free   = max(2.0, min(4.0, total_gb * 0.08))  # max 4 GB — 20% war zu aggressiv für grosse Maschinen
+    min_free   = max(2.0, min(4.0, total_gb * 0.08))  # max 4 GB — schützt vor System-OOM
     return rss_limit, timeout, min_free
 
 _MAX_WORKER_RSS, _TASK_TIMEOUT, _MIN_FREE_GB = _auto_limits()
@@ -555,7 +560,11 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"; stalled = True
+                            # Speicher-Kill ist KEIN NAS-Stall → nicht in die 8-in-Folge-Notbremse
+                            # zählen (die bräche sonst das ganze Projekt mit "NAS prüfen" ab).
+                            # Stattdessen die verursachende Datei als 'error' markieren, damit
+                            # der nächste Scan sie überspringt statt wieder den Worker zu sprengen.
+                            result = "error"; file_broken = True
                         elif pressure:
                             log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
                             _kill_workers(pool)
