@@ -415,7 +415,16 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int
         chunk = text[start:split_at].strip()
         if chunk:
             chunks.append(chunk)
-        start = split_at - overlap
+        # Fortschritt GARANTIEREN: normalerweise überlappt der nächste Chunk um `overlap`.
+        # Aber wenn `split_at - overlap` nicht über den aktuellen Start hinauskommt, würde
+        # der Start stehenbleiben → Endlosschleife. Das passiert z.B. wenn eine früh
+        # gefundene Absatzgrenze (\n\n) im Fenster bleibt und rfind sie immer wieder
+        # liefert (Dateien mit EINER Leerzeile + langem Fliesstext, z.B. Kamera-Logs).
+        # split_at ist per Konstruktion immer > start → als Fallback vorwärts springen.
+        next_start = split_at - overlap
+        if next_start <= start:
+            next_start = split_at
+        start = next_start
         if start < 0:
             start = 0
     return [c for c in chunks if len(c) > 20]
@@ -448,8 +457,15 @@ def extract_chunks(path: Path) -> list[dict]:
         if use_alarm:
             old_handler = _signal.signal(_signal.SIGALRM, _non_pdf_alarm)
             _signal.alarm(_NON_PDF_TIMEOUT)
+        # Der Timeout umschliesst bewusst AUCH Normalisierung + Chunking — nicht nur das
+        # Lesen. Sonst würde ein Hänger in split_text_into_chunks (kein interner Timeout)
+        # erst vom 120s-SIGKILL des Scanners gestoppt.
         try:
             text, _ = extract(path)
+            if not text:
+                parts = []
+            else:
+                parts = split_text_into_chunks(normalize_text(text))
         except _NonPdfTimeout:
             log.warning("Extraktion Timeout (%ds): %s", _NON_PDF_TIMEOUT, path.name)
             raise ExtractionError(f"Timeout ({_NON_PDF_TIMEOUT}s): {path.name}")
@@ -457,9 +473,6 @@ def extract_chunks(path: Path) -> list[dict]:
             if use_alarm:
                 _signal.alarm(0)
                 _signal.signal(_signal.SIGALRM, old_handler)
-        if not text:
-            return []
-        parts = split_text_into_chunks(normalize_text(text))
         return [
             {"page_number": None, "chunk_index": i, "content": part}
             for i, part in enumerate(parts)
