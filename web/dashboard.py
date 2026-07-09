@@ -432,16 +432,30 @@ async def dashboard_stats(request: Request):
 @router.get("/scan-progress-banner", response_class=HTMLResponse)
 async def scan_progress_banner(request: Request):
     """Liefert den Fortschritts-Banner für HTMX-Polling. Leer wenn kein Scan aktiv."""
+    # Bei "Alle scannen" stehen viele Projekte gleichzeitig auf status="running"
+    # (die meisten warten nur auf den _scan_lock, total=0/processed=0). Das Projekt
+    # mit ECHTEM Fortschritt (das den Lock hat und gerade tatsächlich verarbeitet)
+    # hat Vorrang vor bloss wartenden — sonst zeigt der Banner zufällig irgendein
+    # wartendes Projekt bei "Ordner wird durchsucht…", während in der Liste darunter
+    # ein ANDERES Projekt echten Fortschritt zeigt (verwirrender Widerspruch).
     active = None
+    queued_only = None
+    recent_finished = None
     for pid, s in _scans.items():
         status = s.get("status")
         if status == "running":
-            active = (pid, s)
-            break
-        if status in ("done", "error"):
+            has_progress = s.get("total", 0) > 0 or s.get("processed", 0) > 0
+            if has_progress:
+                active = (pid, s)
+                break
+            if queued_only is None:
+                queued_only = (pid, s)
+        elif status in ("done", "error"):
             elapsed = _elapsed_seconds(s.get("finished_at", ""))
             if elapsed < 8:
-                active = (pid, s)
+                recent_finished = (pid, s)
+    if active is None:
+        active = queued_only or recent_finished
 
     if active is None:
         # Kein Projekt-Scan → ggf. Mail-Scan im selben grossen Banner zeigen
