@@ -213,9 +213,10 @@ def _is_junk_file(name: str) -> bool:
         return True
     return False
 
-# Formate die komplett in RAM geladen werden → Grössencheck
-_SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
-_MAX_EXTRACT_MB = 30  # Dateien > 30 MB werden nur registriert, nicht extrahiert
+# Nicht-PDF-Dateien > _MAX_EXTRACT_MB werden nur registriert (list-only), nicht gelesen —
+# schon das SHA256-Hashen läse sonst die ganze Datei (blockiert bei riesigen/als Text
+# getarnten Binärdateien über das NAS). PDF hat einen eigenen, grösseren Grenzwert.
+_MAX_EXTRACT_MB = 30
 
 
 def _supported_extensions() -> set[str]:
@@ -759,6 +760,34 @@ def _process_file(conn, project_id: int, path: Path) -> str:
             queries.set_extraction_status(conn, doc_id, "listed")
         return "listed"
 
+    # Grosse Dateien NICHT einlesen — schon das SHA256-Hashen liest die GANZE Datei.
+    # Bei als .txt/.eml getarnten Binaer-/Kameradaten (Ordner "Video/Sec" …) oder
+    # riesigen Logs blockiert das Lesen ueber das NAS, bis der Scanner den Worker per
+    # Timeout killt; 8 solche in Folge brechen das ganze Projekt ab. Deshalb hier —
+    # VOR dem Hashen — nur als Dateiname registrieren (Metadaten-Hash, kein Datei-I/O).
+    # PDF hat weiter unten seinen eigenen, groesseren Grenzwert (_MAX_PDF_EXTRACT_MB).
+    size_mb = stat.st_size / (1024 * 1024)
+    if ext != ".pdf" and size_mb > _MAX_EXTRACT_MB:
+        import hashlib as _hl
+        file_hash = "m:" + _hl.sha256(
+            f"{path}:{stat.st_size}:{mtime_iso}".encode()
+        ).hexdigest()
+        log.warning("Datei zu gross fuer Textextraktion (%.0f MB > %d MB): %s — nur gelistet",
+                    size_mb, _MAX_EXTRACT_MB, path.name)
+        with conn:
+            doc_id = queries.upsert_document(conn, {
+                "project_id":  project_id,
+                "hash":        file_hash,
+                "filename":    path.name,
+                "extension":   ext,
+                "filesize":    stat.st_size,
+                "modified_at": mtime_iso,
+                "source_type": "filesystem",
+            })
+            queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "listed"
+
     # Text-Formate: SHA256 des Dateiinhalts (für Deduplikation bei Verschiebungen)
     try:
         file_hash = hasher.sha256(path)
@@ -787,20 +816,11 @@ def _process_file(conn, project_id: int, path: Path) -> str:
         doc_id = queries.upsert_document(conn, data)
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
 
-    size_mb = stat.st_size / (1024 * 1024)
-
-    # Grosse PDFs (Pläne, Scan-Archive) nur registrieren
+    # Grosse PDFs (Pläne, Scan-Archive) nur registrieren. Nicht-PDF-Dateien > _MAX_EXTRACT_MB
+    # sind bereits oben (vor dem Hashen) als 'listed' abgefangen.
     if ext == ".pdf" and size_mb > _MAX_PDF_EXTRACT_MB:
         log.warning("PDF zu gross (%.0f MB > %d MB): %s",
                     size_mb, _MAX_PDF_EXTRACT_MB, path.name)
-        with conn:
-            queries.set_extraction_status(conn, doc_id, "listed")
-        return "listed"
-
-    # Grössencheck: Formate die alles in RAM laden
-    if ext in _SIZE_LIMITED_EXTENSIONS and size_mb > _MAX_EXTRACT_MB:
-        log.warning("Datei zu gross für Extraktion (%.1f MB > %d MB): %s",
-                    size_mb, _MAX_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
         return "listed"
