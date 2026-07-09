@@ -537,7 +537,8 @@ def scan_project(project_id: int, root: Path,
                 file_timeout = _TASK_TIMEOUT if path.suffix.lower() == ".pdf" else min(_TASK_TIMEOUT, 120)
 
                 # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
-                stalled = False   # True bei Timeout/Speicher-Kill (NAS/RAM-Symptom)
+                stalled     = False  # True bei Timeout/Speicher-Kill (NAS/RAM-Symptom)
+                file_broken = False  # Worker starb WEGEN DIESER Datei (Timeout ODER Crash)
                 while result is None:
                     try:
                         result = ar.get(timeout=_POLL_INTERVAL)
@@ -568,10 +569,30 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"; stalled = True
+                            result = "error"; stalled = True; file_broken = True
                     except Exception as exc:
+                        # Worker-Prozess ist gestorben (Crash/Segfault in openpyxl/PyMuPDF,
+                        # OS-OOM …) BEVOR er einen Status schreiben konnte — diese Datei ist
+                        # die Ursache. Pool neu aufsetzen, sonst schlägt der nächste Task fehl.
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
-                        result = "error"
+                        try:
+                            _kill_workers(pool)
+                        except Exception:
+                            pass
+                        pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
+                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                        _track_pool(pool)
+                        result = "error"; file_broken = True
+
+                # Der Worker starb (SIGKILL bei Timeout ODER Crash) BEVOR _extract_and_store
+                # den Status schreiben konnte — der Datensatz bleibt sonst 'pending' und wird
+                # bei JEDEM weiteren Scan erneut verarbeitet (hängt/crasht wieder → nie fertig;
+                # 8 in Folge brechen das ganze Projekt mit "Fehler" ab). Deshalb terminalen
+                # Status setzen, damit die Datei künftig übersprungen wird. NICHT bei
+                # systemweitem RAM-Druck (rss/pressure) — da ist die Datei unschuldig und ein
+                # späterer Retry sinnvoll (_mark_pending_error greift nur bei file_broken).
+                if file_broken:
+                    _mark_pending_error(str(path))
 
                 # Notbremse: zu viele Timeouts/Speicher-Kills in Folge → NAS hängt
                 # wahrscheinlich; Scan sauber abbrechen statt stundenlang weiterzukriechen.
@@ -647,6 +668,28 @@ def optimize_fts() -> None:
         log.info("FTS5 optimize abgeschlossen")
     except Exception as exc:
         log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
+
+
+def _mark_pending_error(path_str: str) -> None:
+    """Setzt den (vom Worker als 'pending' angelegten) Datensatz eines nach Datei-Timeout
+    gekillten Files auf 'error' — damit die Datei beim nächsten Scan vom Skip-Pfad
+    übersprungen wird (der 'pending' NICHT abdeckt) statt jedes Mal erneut zu blockieren.
+
+    Nur 'pending' → 'error': ein bereits gültiger Status (ok/listed) wird nie überschrieben.
+    Läuft im Hauptprozess; eigene kurzlebige Connection (WAL serialisiert Writes).
+    """
+    try:
+        c = connection.get_connection()
+        with c:
+            c.execute(
+                "UPDATE documents SET extraction_status='error' "
+                "WHERE extraction_status='pending' AND id IN "
+                "(SELECT document_id FROM document_paths WHERE path=?)",
+                (path_str,),
+            )
+        c.close()
+    except Exception as exc:
+        log.warning("Konnte Timeout-Datei nicht als 'error' markieren (%s): %s", path_str, exc)
 
 
 def _process_file(conn, project_id: int, path: Path) -> str:

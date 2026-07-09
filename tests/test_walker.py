@@ -1,5 +1,5 @@
 from db import queries
-from scanner.walker import scan_project
+from scanner.walker import scan_project, _process_file, _mark_pending_error, _iso
 
 
 def test_scan_indexes_txt(tmp_db, sample_files):
@@ -141,3 +141,55 @@ def test_fts_finds_content(tmp_db, sample_files):
         "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'Grundriss'"
     ).fetchall()
     assert len(rows) == 1
+
+
+def _insert_doc_with_status(conn, project_id, path, status):
+    """Legt ein Dokument mit gegebenem Status an — modified_at exakt wie der Skip-Pfad
+    (walker._iso(mtime)), damit der Metadaten-Vergleich matcht."""
+    stat = path.stat()
+    doc_id = queries.upsert_document(conn, {
+        "project_id":  project_id,
+        "hash":        f"h-{path.name}",
+        "filename":    path.name,
+        "extension":   path.suffix.lower(),
+        "filesize":    stat.st_size,
+        "modified_at": _iso(stat.st_mtime),
+        "source_type": "filesystem",
+    })
+    queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+    queries.set_extraction_status(conn, doc_id, status)
+    conn.commit()
+    return doc_id
+
+
+def test_mark_pending_error_only_touches_pending(tmp_db, sample_files):
+    """_mark_pending_error setzt genau 'pending' → 'error' und lässt gültige Status in Ruhe."""
+    project_id = queries.insert_project(tmp_db, "Test", str(sample_files))
+    tmp_db.commit()
+
+    pend = _insert_doc_with_status(tmp_db, project_id, sample_files / "plan.txt", "pending")
+    okay = _insert_doc_with_status(tmp_db, project_id, sample_files / "notes.txt", "ok")
+
+    _mark_pending_error(str(sample_files / "plan.txt"))
+    _mark_pending_error(str(sample_files / "notes.txt"))
+
+    assert tmp_db.execute(
+        "SELECT extraction_status FROM documents WHERE id=?", (pend,)
+    ).fetchone()["extraction_status"] == "error"
+    # 'ok' darf NICHT überschrieben werden
+    assert tmp_db.execute(
+        "SELECT extraction_status FROM documents WHERE id=?", (okay,)
+    ).fetchone()["extraction_status"] == "ok"
+
+
+def test_error_status_file_is_skipped_not_reprocessed(tmp_db, sample_files):
+    """Kernaussage des Fix: eine als 'error' markierte, unveränderte Datei wird beim
+    nächsten Scan übersprungen (nicht erneut extrahiert → kein wiederholter 120s-Hänger)."""
+    project_id = queries.insert_project(tmp_db, "Test", str(sample_files))
+    tmp_db.commit()
+
+    _insert_doc_with_status(tmp_db, project_id, sample_files / "plan.txt", "error")
+
+    # _process_file muss die Datei am Schnellpfad überspringen
+    result = _process_file(tmp_db, project_id, sample_files / "plan.txt")
+    assert result == "skipped"
