@@ -270,11 +270,11 @@
 
         <h3>Schritt 1 — Archivio Server installieren</h3>
         <ol class="step-list">
-          <li>Doppelklick auf die heruntergeladene <code>.pkg</code>-Datei — der Installer öffnet sich.<br><small style="color:#888;">Falls macOS die Datei blockiert: <a href="#sicherheitswarnung">Sicherheitswarnung beim ersten Öffnen ↓</a></small></li>
-          <li>Auf <strong>Fortfahren</strong> und dann <strong>Installieren</strong> klicken.</li>
-          <li>Mac-Passwort eingeben und auf <strong>Software installieren</strong> klicken.</li>
-          <li>Zwei Berechtigungsdialoge erscheinen — jeweils <strong>Erlauben</strong> klicken.</li>
-          <li>„Die Installation war erfolgreich" — auf <strong>Schließen</strong> klicken.</li>
+          <li><span>Doppelklick auf die heruntergeladene <code>.pkg</code>-Datei — der Installer öffnet sich.<br><small style="color:#888;">Falls macOS die Datei blockiert: <a href="#sicherheitswarnung">Sicherheitswarnung beim ersten Öffnen ↓</a></small></span></li>
+          <li><span>Auf <strong>Fortfahren</strong> und dann <strong>Installieren</strong> klicken.</span></li>
+          <li><span>Mac-Passwort eingeben und auf <strong>Software installieren</strong> klicken.</span></li>
+          <li><span>Zwei Berechtigungsdialoge erscheinen — jeweils <strong>Erlauben</strong> klicken.</span></li>
+          <li><span>„Die Installation war erfolgreich" — auf <strong>Schließen</strong> klicken.</span></li>
         </ol>
         <div class="install-screenshots">
           <figure>
@@ -306,9 +306,9 @@
         <h3>Schritt 2 — Festplattenvollzugriff gewähren</h3>
         <p>Damit Archivio auf NAS-Volumes und Dokumente zugreifen kann, muss <strong>Archivio Server</strong> den Festplattenvollzugriff erhalten.</p>
         <ol class="step-list">
-          <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</li>
-          <li>Klicke auf <strong>+</strong> und wähle <strong>Archivio Server</strong> aus dem Ordner <em>Programme</em>.</li>
-          <li>Starte Archivio Server neu — Menüleisten-Icon → Beenden → App wieder öffnen.</li>
+          <li><span>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</span></li>
+          <li><span>Klicke auf <strong>+</strong> und wähle <strong>Archivio Server</strong> aus dem Ordner <em>Programme</em>.</span></li>
+          <li><span>Starte Archivio Server neu — Menüleisten-Icon → Beenden → App wieder öffnen.</span></li>
         </ol>
         <div class="install-screenshots">
           <figure>
@@ -327,9 +327,9 @@
         <h3 id="sicherheitswarnung">Sicherheitswarnung beim ersten Öffnen</h3>
         <p>Auf macOS Ventura und neuer kann macOS die App beim ersten Öffnen blockieren. So gehst du vor:</p>
         <ol class="step-list">
-          <li>Beim ersten Start erscheint der Hinweis, dass „Archivio Server.app" nicht geöffnet werden konnte. Klicke auf <strong>Fertig</strong>.</li>
-          <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong>. Im Abschnitt „Sicherheit" erscheint die Meldung, dass die App blockiert wurde.</li>
-          <li>Klicke dort auf <strong>Dennoch öffnen</strong> und bestätige mit deinem Mac-Passwort oder Touch&nbsp;ID.</li>
+          <li><span>Beim ersten Start erscheint der Hinweis, dass „Archivio Server.app" nicht geöffnet werden konnte. Klicke auf <strong>Fertig</strong>.</span></li>
+          <li><span>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit</strong>. Im Abschnitt „Sicherheit" erscheint die Meldung, dass die App blockiert wurde.</span></li>
+          <li><span>Klicke dort auf <strong>Dennoch öffnen</strong> und bestätige mit deinem Mac-Passwort oder Touch&nbsp;ID.</span></li>
         </ol>
         <div class="install-screenshots">
           <figure>
@@ -370,10 +370,10 @@
         <h2>NAS verknüpfen</h2>
         <p>Archivio liest Dateien direkt vom NAS. Das NAS muss auf dem Server-Mac eingehängt sein, bevor ein Scan läuft.</p>
         <ol class="step-list">
-          <li>Im Finder: <strong>Gehe zu → Mit Server verbinden</strong> (<code>⌘K</code>) → NAS-Adresse eingeben → verbinden.</li>
-          <li>In der Archivio-Weboberfläche: <strong>Dashboard → Projekte → Neues Projekt</strong>.</li>
-          <li>Projektname vergeben und den Pfad zum NAS-Ordner eintragen, z.&nbsp;B. <code>/Volumes/NAS/Projekte/2024</code>.</li>
-          <li>Speichern → <strong>Scan starten</strong>.</li>
+          <li><span>Im Finder: <strong>Gehe zu → Mit Server verbinden</strong> (<code>⌘K</code>) → NAS-Adresse eingeben → verbinden.</span></li>
+          <li><span>In der Archivio-Weboberfläche: <strong>Dashboard → Projekte → Neues Projekt</strong>.</span></li>
+          <li><span>Projektname vergeben und den Pfad zum NAS-Ordner eintragen, z.&nbsp;B. <code>/Volumes/NAS/Projekte/2024</code>.</span></li>
+          <li><span>Speichern → <strong>Scan starten</strong>.</span></li>
         </ol>
         <div class="callout">
           <strong>Tipp:</strong> Der NAS-Ordner sollte beim Serverstart automatisch eingehängt sein. Das lässt sich in den macOS-Systemeinstellungen unter „Benutzer &amp; Gruppen → Anmeldeobjekte" einrichten.
@@ -384,10 +384,10 @@
         <h2>Unterordner als Projekte</h2>
         <p>Unterordner eines bestehenden Projekts können als eigene Sub-Projekte geführt werden — mit separatem Scan, eigenem Filter und eigener Dokumentenliste.</p>
         <ol class="step-list">
-          <li>Im Dashboard die <strong>Browse-Ansicht</strong> des übergeordneten Projekts öffnen.</li>
-          <li>Den gewünschten Unterordner anklicken — rechts erscheint das Detailpanel.</li>
-          <li>Auf <strong>„Diesen Ordner als eigenes Projekt"</strong> klicken.</li>
-          <li>Der Unterordner erscheint jetzt in der Projektliste und kann separat gescannt und durchsucht werden.</li>
+          <li><span>Im Dashboard die <strong>Browse-Ansicht</strong> des übergeordneten Projekts öffnen.</span></li>
+          <li><span>Den gewünschten Unterordner anklicken — rechts erscheint das Detailpanel.</span></li>
+          <li><span>Auf <strong>„Diesen Ordner als eigenes Projekt"</strong> klicken.</span></li>
+          <li><span>Der Unterordner erscheint jetzt in der Projektliste und kann separat gescannt und durchsucht werden.</span></li>
         </ol>
         <div class="callout">
           <strong>Tipp:</strong> Dokumente, die vor der Sub-Projekt-Erstellung bereits indiziert wurden, tauchen auch bei einer Suche innerhalb des Sub-Projekts auf — Archivio erkennt sie anhand des Dateipfads. Um ein Sub-Projekt wieder aufzulösen, auf <strong>„Nicht mehr als eigenes Projekt"</strong> klicken.
@@ -400,16 +400,16 @@
 
         <h3>Einzelnen Ordner ignorieren</h3>
         <ol class="step-list">
-          <li>Im Dashboard die Browse-Ansicht des Projekts öffnen und den Ordner anklicken.</li>
-          <li>Im Detailpanel auf <strong>„Ignorieren"</strong> klicken.</li>
-          <li>Der Ordner wird beim nächsten Scan übersprungen und in der Browse-Liste als <em>ignoriert</em> markiert.</li>
+          <li><span>Im Dashboard die Browse-Ansicht des Projekts öffnen und den Ordner anklicken.</span></li>
+          <li><span>Im Detailpanel auf <strong>„Ignorieren"</strong> klicken.</span></li>
+          <li><span>Der Ordner wird beim nächsten Scan übersprungen und in der Browse-Liste als <em>ignoriert</em> markiert.</span></li>
         </ol>
 
         <h3>Alle Ordner einer Ebene auf einmal ignorieren</h3>
         <ol class="step-list">
-          <li>Einen beliebigen Ordner auf der gewünschten Ebene anklicken.</li>
-          <li>Im Detailpanel auf <strong>„Alle Ordner auf dieser Ebene ignorieren"</strong> klicken und bestätigen.</li>
-          <li>Alle Geschwister-Ordner werden auf einmal ausgeschlossen.</li>
+          <li><span>Einen beliebigen Ordner auf der gewünschten Ebene anklicken.</span></li>
+          <li><span>Im Detailpanel auf <strong>„Alle Ordner auf dieser Ebene ignorieren"</strong> klicken und bestätigen.</span></li>
+          <li><span>Alle Geschwister-Ordner werden auf einmal ausgeschlossen.</span></li>
         </ol>
 
         <h3>Ignorierung aufheben</h3>
@@ -420,20 +420,20 @@
         <h2>Mitarbeiter-Macs einrichten</h2>
         <p>Der <strong>Archivio Helper</strong> läuft auf jedem Mitarbeiter-Mac als kleines Menüleisten-Icon. Er ermöglicht das Öffnen von Dateien direkt aus der Suchoberfläche.</p>
         <ol class="step-list">
-          <li>Auf dem Mitarbeiter-Mac die Archivio-Weboberfläche öffnen: <code>http://&lt;Server-IP&gt;:8000</code>.</li>
-          <li>Oben rechts: <strong>Helper herunterladen</strong> → <code>.zip</code> entpacken.</li>
-          <li>„Archivio Helper" in den Programme-Ordner ziehen und starten.</li>
-          <li>Im Helper-Menü die Server-URL eintragen. Die korrekte URL steht in der Archivio-Weboberfläche unter <strong>Einstellungen → ganz unten</strong>, im Abschnitt „Archivio Helper".</li>
-          <li>„Autostart beim Login" aktivieren.</li>
+          <li><span>Auf dem Mitarbeiter-Mac die Archivio-Weboberfläche öffnen: <code>http://&lt;Server-IP&gt;:8000</code>.</span></li>
+          <li><span>Oben rechts: <strong>Helper herunterladen</strong> → <code>.zip</code> entpacken.</span></li>
+          <li><span>„Archivio Helper" in den Programme-Ordner ziehen und starten.</span></li>
+          <li><span>Im Helper-Menü die Server-URL eintragen. Die korrekte URL steht in der Archivio-Weboberfläche unter <strong>Einstellungen → ganz unten</strong>, im Abschnitt „Archivio Helper".</span></li>
+          <li><span>„Autostart beim Login" aktivieren.</span></li>
         </ol>
         <p>Ab jetzt erscheinen in den Suchergebnissen „Öffnen"- und „Im Finder zeigen"-Buttons, die Dateien direkt auf dem Mitarbeiter-Mac öffnen.</p>
 
         <h3>Festplattenvollzugriff für den Helper</h3>
         <p>Damit der Helper Dateien auf Netzlaufwerken (NAS) direkt öffnen und im Finder anzeigen kann, muss auch <strong>Archivio Helper</strong> den Festplattenvollzugriff erhalten.</p>
         <ol class="step-list">
-          <li>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</li>
-          <li>Klicke auf <strong>+</strong> und wähle <strong>Archivio Helper</strong> aus dem Programme-Ordner.</li>
-          <li>Helper neu starten.</li>
+          <li><span>Öffne <strong>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff</strong>.</span></li>
+          <li><span>Klicke auf <strong>+</strong> und wähle <strong>Archivio Helper</strong> aus dem Programme-Ordner.</span></li>
+          <li><span>Helper neu starten.</span></li>
         </ol>
         <div class="callout">
           <strong>Hinweis:</strong> Genau wie beim Server reicht ein einziger Eintrag — der Helper enthält alle nötigen Komponenten direkt im App-Bundle.
@@ -490,10 +490,10 @@
         <h3>Ollama installieren</h3>
         <p>Beim ersten Öffnen von Archivio erscheint eine Karte im Dashboard, falls Ollama noch nicht installiert ist:</p>
         <ol class="step-list">
-          <li>Im Dashboard die Karte <strong>„KI-Suche einrichten"</strong> anklicken — <strong>Jetzt installieren</strong> wählen.</li>
-          <li>Archivio lädt Ollama automatisch herunter und installiert es. Der Fortschritt wird direkt angezeigt.</li>
-          <li>Nach erfolgreicher Installation: Archivio Server neu starten (Menüleisten-Icon → Beenden → wieder öffnen).</li>
-          <li>Archivio lädt das Sprachmodell beim ersten Start automatisch — das kann einige Minuten dauern.</li>
+          <li><span>Im Dashboard die Karte <strong>„KI-Suche einrichten"</strong> anklicken — <strong>Jetzt installieren</strong> wählen.</span></li>
+          <li><span>Archivio lädt Ollama automatisch herunter und installiert es. Der Fortschritt wird direkt angezeigt.</span></li>
+          <li><span>Nach erfolgreicher Installation: Archivio Server neu starten (Menüleisten-Icon → Beenden → wieder öffnen).</span></li>
+          <li><span>Archivio lädt das Sprachmodell beim ersten Start automatisch — das kann einige Minuten dauern.</span></li>
         </ol>
         <div class="callout">
           <strong>Hinweis:</strong> Ollama läuft vollständig lokal auf diesem Computer — keine Cloud, keine Abos. Die Karte erscheint nicht mehr, sobald Ollama installiert ist. Falls du die Karte mit „Später" weggeklickt hast, kannst du Ollama über die KI-Suche nachinstallieren.
@@ -513,9 +513,9 @@
         <h2>Automatischer Scan</h2>
         <p>Damit neue Dateien auf dem NAS automatisch gefunden werden, kann ein täglicher Scan eingerichtet werden.</p>
         <ol class="step-list">
-          <li>Dashboard → <strong>Einstellungen</strong> öffnen.</li>
-          <li>Im Abschnitt „Automatischer Scan" eine Uhrzeit eintragen, z.&nbsp;B. <code>02:00</code>.</li>
-          <li>Speichern. Der Scan läuft täglich zur eingestellten Zeit — vorausgesetzt, der Server läuft.</li>
+          <li><span>Dashboard → <strong>Einstellungen</strong> öffnen.</span></li>
+          <li><span>Im Abschnitt „Automatischer Scan" eine Uhrzeit eintragen, z.&nbsp;B. <code>02:00</code>.</span></li>
+          <li><span>Speichern. Der Scan läuft täglich zur eingestellten Zeit — vorausgesetzt, der Server läuft.</span></li>
         </ol>
         <div class="callout">
           <strong>Manueller Scan:</strong> Im Dashboard kann jederzeit ein Scan per Knopfdruck gestartet werden. Bei grossen NAS-Ordnern dauert der erste Scan einige Stunden.
