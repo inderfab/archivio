@@ -254,6 +254,7 @@
         <li><a href="#projekte">Unterordner als Projekte</a></li>
         <li><a href="#ordner">Ordner ignorieren</a></li>
         <li><a href="#mitarbeiter">Mitarbeiter-Macs</a></li>
+        <li><a href="#mcp">Claude Desktop verbinden (MCP)</a></li>
         <li class="nav-section">Funktionen</li>
         <li><a href="#suche">Suche</a></li>
         <li><a href="#ki">KI-Suche aktivieren</a></li>
@@ -436,6 +437,30 @@
         </ol>
         <div class="callout">
           <strong>Hinweis:</strong> Genau wie beim Server reicht ein einziger Eintrag — der Helper enthält alle nötigen Komponenten direkt im App-Bundle.
+        </div>
+      </div>
+
+      <div class="doc-section" id="mcp">
+        <h2>Claude Desktop verbinden (MCP)</h2>
+        <p>Mit installiertem Helper kann <strong>Claude Desktop</strong> direkt auf Archivio zugreifen — Dokumente und Mails durchsuchen, Inhalte zum Zusammenfassen oder Umschreiben laden, Dateien öffnen. Vollständig lokal: die Anfragen laufen nur zwischen Claude Desktop, dem Helper und dem Archivio Server im Büronetz.</p>
+        <div class="callout">
+          <strong>Voraussetzung:</strong> Der <strong>Archivio Helper</strong> muss auf demselben Mac installiert sein und mindestens einmal gestartet worden sein (siehe <a href="#mitarbeiter">Mitarbeiter-Macs einrichten ↑</a>). Ohne Helper funktioniert MCP nicht — auch nicht, wenn Server und Claude Desktop zufällig auf demselben Rechner laufen.
+        </div>
+        <ol class="step-list">
+          <li><span>Archivio Helper installieren und starten (siehe oben) — er trägt sich damit <strong>automatisch</strong> bei Claude Desktop ein. Keine manuelle Konfiguration, kein Connector-Store nötig.</span></li>
+          <li><span>Im Helper-Menü prüfen, dass die <strong>Server-URL</strong> korrekt gesetzt ist (dieselbe URL wie für die Weboberfläche).</span></li>
+          <li><span><strong>Claude Desktop neu starten</strong>, damit die Verbindung aktiv wird.</span></li>
+        </ol>
+        <p>Danach ist Archivio in Claude als Werkzeug verfügbar — einfach danach fragen, z.&nbsp;B.: <em>„Suche in Archivio nach dem Projekt Keller und zeig mir die aktuelle Visualisierung für Attika Event"</em>.</p>
+        <p>Claude wählt selbst das passende Werkzeug:</p>
+        <ul>
+          <li><strong>Suchen</strong> — Volltext-, Dateinamen- und Ordnersuche.</li>
+          <li><strong>KI-Suche</strong> — findet auch sinngemässe Treffer, die die Volltextsuche verpasst.</li>
+          <li><strong>Inhalt lesen</strong> — lädt ein Dokument (z.&nbsp;B. eine Mail) als Text in die Unterhaltung, damit Claude ihn direkt zusammenfassen, umschreiben oder übersetzen kann.</li>
+          <li><strong>Datei öffnen / im Finder zeigen</strong> — öffnet Bilder, Pläne oder PDFs direkt in der zugehörigen App auf dem Mac.</li>
+        </ul>
+        <div class="callout">
+          <strong>Hinweis:</strong> Das gilt pro Arbeitsstation — jeder Mitarbeiter-Mac mit Claude Desktop braucht seinen eigenen laufenden Helper, um Zugriff zu bekommen.
         </div>
       </div>
 
