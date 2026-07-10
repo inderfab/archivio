@@ -43,10 +43,10 @@ def _alarm_raise(signum, frame):
 
 # ── OCR-Worker (Subprocess — Tesseract kann GIL halten) ──────────────────────
 
-def _worker_ocr(path_str: str, result_q: multiprocessing.Queue) -> None:
-    """Läuft im eigenen Prozess damit Tesseract den Server-GIL nicht blockiert.
-    Pro Seite 60s Timeout via SIGALRM — hängende Seiten (z.B. riesige Pläne) werden
-    übersprungen, der Rest des Dokuments wird weiterverarbeitet."""
+def _ocr_pages(path_str: str) -> list[dict]:
+    """OCR aller Seiten. Pro Seite _PAGE_OCR_TIMEOUT via SIGALRM (nur im Hauptthread
+    des jeweiligen Prozesses gültig). Gibt [{page_number, content}] zurück.
+    Läuft je nach Kontext inline im Worker-Prozess ODER im Subprozess (_worker_ocr)."""
     import signal
 
     class _OCRPageTimeout(Exception):
@@ -55,41 +55,47 @@ def _worker_ocr(path_str: str, result_q: multiprocessing.Queue) -> None:
     def _ocr_alarm(signum, frame):
         raise _OCRPageTimeout()
 
+    import fitz
+    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+    result = []
+    old_handler = signal.signal(signal.SIGALRM, _ocr_alarm)
     try:
-        import fitz
-        FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
-        result = []
-        old_handler = signal.signal(signal.SIGALRM, _ocr_alarm)
-        try:
-            with fitz.open(path_str) as doc:
-                for i, page in enumerate(doc, start=1):
+        with fitz.open(path_str) as doc:
+            for i, page in enumerate(doc, start=1):
+                text = ""
+                signal.alarm(_PAGE_OCR_TIMEOUT)
+                try:
+                    for lang in ("deu+eng", "deu", "eng"):
+                        try:
+                            tp = page.get_textpage_ocr(
+                                flags=FLAGS, language=lang, dpi=150, full=True,
+                            )
+                            text = page.get_text(textpage=tp, flags=FLAGS).strip()
+                            if text:
+                                break
+                        except _OCRPageTimeout:
+                            raise
+                        except Exception:
+                            continue
+                except _OCRPageTimeout:
+                    log.warning("OCR Seite %d Timeout (%ds) übersprungen: %s",
+                                i, _PAGE_OCR_TIMEOUT, Path(path_str).name)
                     text = ""
-                    signal.alarm(_PAGE_OCR_TIMEOUT)
-                    try:
-                        for lang in ("deu+eng", "deu", "eng"):
-                            try:
-                                tp = page.get_textpage_ocr(
-                                    flags=FLAGS, language=lang, dpi=150, full=True,
-                                )
-                                text = page.get_text(textpage=tp, flags=FLAGS).strip()
-                                if text:
-                                    break
-                            except _OCRPageTimeout:
-                                raise
-                            except Exception:
-                                continue
-                    except _OCRPageTimeout:
-                        log.warning("OCR Seite %d Timeout (%ds) übersprungen: %s",
-                                    i, _PAGE_OCR_TIMEOUT, Path(path_str).name)
-                        text = ""
-                    finally:
-                        signal.alarm(0)
-                    if len(text) >= 50:
-                        result.append({"page_number": i, "content": text})
-        finally:
-            signal.alarm(0)
-            signal.signal(signal.SIGALRM, old_handler)
-        result_q.put(("ok", result))
+                finally:
+                    signal.alarm(0)
+                if len(text) >= 50:
+                    result.append({"page_number": i, "content": text})
+    finally:
+        signal.alarm(0)
+        signal.signal(signal.SIGALRM, old_handler)
+    return result
+
+
+def _worker_ocr(path_str: str, result_q: multiprocessing.Queue) -> None:
+    """Subprozess-Wrapper (Server-Kontext): OCR im eigenen Prozess damit Tesseract den
+    Server-GIL nicht blockiert. Ergebnis über die Queue."""
+    try:
+        result_q.put(("ok", _ocr_pages(path_str)))
     except Exception as e:
         result_q.put(("err", str(e)))
 
@@ -212,9 +218,14 @@ def _run_pdf(fn, path: Path, timeout: int) -> list[dict]:
 
 
 def _run_ocr_in_process(path: Path) -> list[dict]:
-    """OCR in eigenem Prozess mit hartem SIGKILL nach _OCR_TIMEOUT Sekunden.
-    Nur OCR braucht Subprocess: Tesseract kann den GIL blockieren.
+    """OCR. Im Worker-Prozess (Pool-Worker sind daemon → dürfen KEINE Kindprozesse
+    starten, sonst 'daemonic processes are not allowed to have children') direkt inline
+    ausführen — der Worker ist selbst schon isoliert und hat den 120s-SIGKILL des
+    Scanners als harte Grenze, plus _PAGE_OCR_TIMEOUT pro Seite. Sonst (Server-Thread)
+    in eigenem Prozess mit hartem SIGKILL nach _OCR_TIMEOUT (Tesseract blockiert den GIL).
     """
+    if _IN_WORKER_PROCESS:
+        return _ocr_pages(str(path))
     ctx = multiprocessing.get_context("spawn")
     q: multiprocessing.Queue = ctx.Queue()
     p = ctx.Process(target=_worker_ocr, args=(str(path), q), daemon=True)
@@ -415,7 +426,16 @@ def split_text_into_chunks(text: str, chunk_size: int = CHUNK_SIZE, overlap: int
         chunk = text[start:split_at].strip()
         if chunk:
             chunks.append(chunk)
-        start = split_at - overlap
+        # Fortschritt GARANTIEREN: normalerweise überlappt der nächste Chunk um `overlap`.
+        # Aber wenn `split_at - overlap` nicht über den aktuellen Start hinauskommt, würde
+        # der Start stehenbleiben → Endlosschleife. Das passiert z.B. wenn eine früh
+        # gefundene Absatzgrenze (\n\n) im Fenster bleibt und rfind sie immer wieder
+        # liefert (Dateien mit EINER Leerzeile + langem Fliesstext, z.B. Kamera-Logs).
+        # split_at ist per Konstruktion immer > start → als Fallback vorwärts springen.
+        next_start = split_at - overlap
+        if next_start <= start:
+            next_start = split_at
+        start = next_start
         if start < 0:
             start = 0
     return [c for c in chunks if len(c) > 20]
@@ -448,8 +468,15 @@ def extract_chunks(path: Path) -> list[dict]:
         if use_alarm:
             old_handler = _signal.signal(_signal.SIGALRM, _non_pdf_alarm)
             _signal.alarm(_NON_PDF_TIMEOUT)
+        # Der Timeout umschliesst bewusst AUCH Normalisierung + Chunking — nicht nur das
+        # Lesen. Sonst würde ein Hänger in split_text_into_chunks (kein interner Timeout)
+        # erst vom 120s-SIGKILL des Scanners gestoppt.
         try:
             text, _ = extract(path)
+            if not text:
+                parts = []
+            else:
+                parts = split_text_into_chunks(normalize_text(text))
         except _NonPdfTimeout:
             log.warning("Extraktion Timeout (%ds): %s", _NON_PDF_TIMEOUT, path.name)
             raise ExtractionError(f"Timeout ({_NON_PDF_TIMEOUT}s): {path.name}")
@@ -457,9 +484,6 @@ def extract_chunks(path: Path) -> list[dict]:
             if use_alarm:
                 _signal.alarm(0)
                 _signal.signal(_signal.SIGALRM, old_handler)
-        if not text:
-            return []
-        parts = split_text_into_chunks(normalize_text(text))
         return [
             {"page_number": None, "chunk_index": i, "content": part}
             for i, part in enumerate(parts)

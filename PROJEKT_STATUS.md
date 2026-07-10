@@ -27,7 +27,7 @@ Dateien vom NAS und Mails per IMAP.
 - LAN: `http://windows.local:8000` (Gerätename ist „Windows"). Kann per Bonjour-LocalHostname zu `archivio.local` gemacht werden, oder per Router-DNS zu `archivio:8000`.
 - App: `/Applications/Archivio Server.app/` (per `.pkg` installiert)
 - DATA_DIR: `~/Library/Application Support/Archivio/` (DB, config.yaml, Helper-ZIP)
-- Logs: `~/Library/Logs/ArchivioServer.log` (Menubar/Watchdog) **und** `~/.archivio/logs/server.log` (uvicorn) + `~/.archivio/logs/launchd-server.log`
+- Logs: **`~/Library/Application Support/Archivio/logs/server.log`** = der **echte** Scanner-/uvicorn-Log (Python-Logging, DATA_DIR-basiert — hier stehen `scanner.walker`-Zeilen wie Datei-Timeout/SIGKILL/RSS). Zusätzlich `~/Library/Logs/ArchivioServer.log` (Menubar/Watchdog). **Falle:** `~/.archivio/logs/server.log` ist ein **veralteter** Pfad (alte Config) — dort wird NICHT mehr geschrieben, Greps darauf sind irreführend leer. Die aktuelle Log-Datei zur Not per `lsof -p <server-pid> | grep '\.log'` verifizieren.
 - DB: `~/Library/Application Support/Archivio/archivio.db`
 - Ollama läuft dort (Port 11434)
 - **Autostart:** LaunchAgent `~/Library/LaunchAgents/io.archivio.server.plist` (siehe §5)
@@ -207,7 +207,7 @@ git branch -d fix/xyz
 ## 15. Diagnose-Endpoints & nützliche Befehle
 
 - `GET /api/status`, `GET /api/version`, `GET /api/scan/state`, `GET /api/debug/diagnostics`
-- iMac-Log-Analyse (Nutzer per Copy-Paste): `~/Library/Logs/ArchivioServer.log`, `~/.archivio/logs/server.log`
+- iMac-Log-Analyse (Nutzer per Copy-Paste): **`~/Library/Application Support/Archivio/logs/server.log`** (echter Scanner-Log!), `~/Library/Logs/ArchivioServer.log`. NICHT `~/.archivio/logs/` (veraltet, leer).
 - Worker-RSS auf iMac: `ps aux | grep archivio-python`
 - launchd-Status: `launchctl print "gui/$(id -u)/io.archivio.server"`
 

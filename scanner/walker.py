@@ -141,9 +141,14 @@ def _auto_limits() -> tuple[float, int, float]:
         total_gb = psutil.virtual_memory().total / (1024 ** 3)
     except Exception:
         total_gb = 16.0
-    rss_limit  = max(3.0, total_gb * 0.20)       # 20% des RAM (64 GB → ~12.8 GB)
+    # 50% des RAM (64 GB → 32 GB). Vorher 20% (12.8 GB) — das killte auf grossen
+    # Maschinen schon legitime, speicherhungrige Extraktionen (grosse/komplexe PDFs)
+    # mitten in der Verarbeitung, sodass die Datei nie fertig wurde und der Scan an
+    # 8 solchen Kills in Folge abbrach. Der _MIN_FREE_GB-Check unten schützt weiter
+    # vor echtem System-OOM.
+    rss_limit  = max(3.0, total_gb * 0.50)
     timeout    = max(120, int(total_gb * 10))   # 10s pro GB RAM (64 GB → 640s)
-    min_free   = max(2.0, min(4.0, total_gb * 0.08))  # max 4 GB — 20% war zu aggressiv für grosse Maschinen
+    min_free   = max(2.0, min(4.0, total_gb * 0.08))  # max 4 GB — schützt vor System-OOM
     return rss_limit, timeout, min_free
 
 _MAX_WORKER_RSS, _TASK_TIMEOUT, _MIN_FREE_GB = _auto_limits()
@@ -213,9 +218,10 @@ def _is_junk_file(name: str) -> bool:
         return True
     return False
 
-# Formate die komplett in RAM geladen werden → Grössencheck
-_SIZE_LIMITED_EXTENSIONS = {".docx", ".doc", ".xlsx", ".rtf"}
-_MAX_EXTRACT_MB = 30  # Dateien > 30 MB werden nur registriert, nicht extrahiert
+# Nicht-PDF-Dateien > _MAX_EXTRACT_MB werden nur registriert (list-only), nicht gelesen —
+# schon das SHA256-Hashen läse sonst die ganze Datei (blockiert bei riesigen/als Text
+# getarnten Binärdateien über das NAS). PDF hat einen eigenen, grösseren Grenzwert.
+_MAX_EXTRACT_MB = 30
 
 
 def _supported_extensions() -> set[str]:
@@ -537,7 +543,8 @@ def scan_project(project_id: int, root: Path,
                 file_timeout = _TASK_TIMEOUT if path.suffix.lower() == ".pdf" else min(_TASK_TIMEOUT, 120)
 
                 # Polling-Loop: alle _POLL_INTERVAL Sekunden RSS + System-RAM prüfen
-                stalled = False   # True bei Timeout/Speicher-Kill (NAS/RAM-Symptom)
+                stalled     = False  # True bei Timeout/Speicher-Kill (NAS/RAM-Symptom)
+                file_broken = False  # Worker starb WEGEN DIESER Datei (Timeout ODER Crash)
                 while result is None:
                     try:
                         result = ar.get(timeout=_POLL_INTERVAL)
@@ -553,7 +560,11 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"; stalled = True
+                            # Speicher-Kill ist KEIN NAS-Stall → nicht in die 8-in-Folge-Notbremse
+                            # zählen (die bräche sonst das ganze Projekt mit "NAS prüfen" ab).
+                            # Stattdessen die verursachende Datei als 'error' markieren, damit
+                            # der nächste Scan sie überspringt statt wieder den Worker zu sprengen.
+                            result = "error"; file_broken = True
                         elif pressure:
                             log.warning("System-Speicherdruck — SIGKILL Worker: %s", path.name)
                             _kill_workers(pool)
@@ -568,10 +579,30 @@ def scan_project(project_id: int, root: Path,
                             pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
                                             initializer=_worker_watchdog_init, initargs=(os.getpid(),))
                             _track_pool(pool)
-                            result = "error"; stalled = True
+                            result = "error"; stalled = True; file_broken = True
                     except Exception as exc:
+                        # Worker-Prozess ist gestorben (Crash/Segfault in openpyxl/PyMuPDF,
+                        # OS-OOM …) BEVOR er einen Status schreiben konnte — diese Datei ist
+                        # die Ursache. Pool neu aufsetzen, sonst schlägt der nächste Task fehl.
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)
-                        result = "error"
+                        try:
+                            _kill_workers(pool)
+                        except Exception:
+                            pass
+                        pool = ctx.Pool(processes=num_workers, maxtasksperchild=tasks_per_worker,
+                                        initializer=_worker_watchdog_init, initargs=(os.getpid(),))
+                        _track_pool(pool)
+                        result = "error"; file_broken = True
+
+                # Der Worker starb (SIGKILL bei Timeout ODER Crash) BEVOR _extract_and_store
+                # den Status schreiben konnte — der Datensatz bleibt sonst 'pending' und wird
+                # bei JEDEM weiteren Scan erneut verarbeitet (hängt/crasht wieder → nie fertig;
+                # 8 in Folge brechen das ganze Projekt mit "Fehler" ab). Deshalb terminalen
+                # Status setzen, damit die Datei künftig übersprungen wird. NICHT bei
+                # systemweitem RAM-Druck (rss/pressure) — da ist die Datei unschuldig und ein
+                # späterer Retry sinnvoll (_mark_pending_error greift nur bei file_broken).
+                if file_broken:
+                    _mark_pending_error(str(path))
 
                 # Notbremse: zu viele Timeouts/Speicher-Kills in Folge → NAS hängt
                 # wahrscheinlich; Scan sauber abbrechen statt stundenlang weiterzukriechen.
@@ -649,6 +680,28 @@ def optimize_fts() -> None:
         log.warning("FTS5 optimize fehlgeschlagen: %s", exc)
 
 
+def _mark_pending_error(path_str: str) -> None:
+    """Setzt den (vom Worker als 'pending' angelegten) Datensatz eines nach Datei-Timeout
+    gekillten Files auf 'error' — damit die Datei beim nächsten Scan vom Skip-Pfad
+    übersprungen wird (der 'pending' NICHT abdeckt) statt jedes Mal erneut zu blockieren.
+
+    Nur 'pending' → 'error': ein bereits gültiger Status (ok/listed) wird nie überschrieben.
+    Läuft im Hauptprozess; eigene kurzlebige Connection (WAL serialisiert Writes).
+    """
+    try:
+        c = connection.get_connection()
+        with c:
+            c.execute(
+                "UPDATE documents SET extraction_status='error' "
+                "WHERE extraction_status='pending' AND id IN "
+                "(SELECT document_id FROM document_paths WHERE path=?)",
+                (path_str,),
+            )
+        c.close()
+    except Exception as exc:
+        log.warning("Konnte Timeout-Datei nicht als 'error' markieren (%s): %s", path_str, exc)
+
+
 def _process_file(conn, project_id: int, path: Path) -> str:
     try:
         stat = path.stat()
@@ -716,6 +769,34 @@ def _process_file(conn, project_id: int, path: Path) -> str:
             queries.set_extraction_status(conn, doc_id, "listed")
         return "listed"
 
+    # Grosse Dateien NICHT einlesen — schon das SHA256-Hashen liest die GANZE Datei.
+    # Bei als .txt/.eml getarnten Binaer-/Kameradaten (Ordner "Video/Sec" …) oder
+    # riesigen Logs blockiert das Lesen ueber das NAS, bis der Scanner den Worker per
+    # Timeout killt; 8 solche in Folge brechen das ganze Projekt ab. Deshalb hier —
+    # VOR dem Hashen — nur als Dateiname registrieren (Metadaten-Hash, kein Datei-I/O).
+    # PDF hat weiter unten seinen eigenen, groesseren Grenzwert (_MAX_PDF_EXTRACT_MB).
+    size_mb = stat.st_size / (1024 * 1024)
+    if ext != ".pdf" and size_mb > _MAX_EXTRACT_MB:
+        import hashlib as _hl
+        file_hash = "m:" + _hl.sha256(
+            f"{path}:{stat.st_size}:{mtime_iso}".encode()
+        ).hexdigest()
+        log.warning("Datei zu gross fuer Textextraktion (%.0f MB > %d MB): %s — nur gelistet",
+                    size_mb, _MAX_EXTRACT_MB, path.name)
+        with conn:
+            doc_id = queries.upsert_document(conn, {
+                "project_id":  project_id,
+                "hash":        file_hash,
+                "filename":    path.name,
+                "extension":   ext,
+                "filesize":    stat.st_size,
+                "modified_at": mtime_iso,
+                "source_type": "filesystem",
+            })
+            queries.upsert_path(conn, doc_id, str(path), is_primary=True)
+            queries.set_extraction_status(conn, doc_id, "listed")
+        return "listed"
+
     # Text-Formate: SHA256 des Dateiinhalts (für Deduplikation bei Verschiebungen)
     try:
         file_hash = hasher.sha256(path)
@@ -744,20 +825,11 @@ def _process_file(conn, project_id: int, path: Path) -> str:
         doc_id = queries.upsert_document(conn, data)
         queries.upsert_path(conn, doc_id, str(path), is_primary=True)
 
-    size_mb = stat.st_size / (1024 * 1024)
-
-    # Grosse PDFs (Pläne, Scan-Archive) nur registrieren
+    # Grosse PDFs (Pläne, Scan-Archive) nur registrieren. Nicht-PDF-Dateien > _MAX_EXTRACT_MB
+    # sind bereits oben (vor dem Hashen) als 'listed' abgefangen.
     if ext == ".pdf" and size_mb > _MAX_PDF_EXTRACT_MB:
         log.warning("PDF zu gross (%.0f MB > %d MB): %s",
                     size_mb, _MAX_PDF_EXTRACT_MB, path.name)
-        with conn:
-            queries.set_extraction_status(conn, doc_id, "listed")
-        return "listed"
-
-    # Grössencheck: Formate die alles in RAM laden
-    if ext in _SIZE_LIMITED_EXTENSIONS and size_mb > _MAX_EXTRACT_MB:
-        log.warning("Datei zu gross für Extraktion (%.1f MB > %d MB): %s",
-                    size_mb, _MAX_EXTRACT_MB, path.name)
         with conn:
             queries.set_extraction_status(conn, doc_id, "listed")
         return "listed"
