@@ -43,6 +43,13 @@ scanner:
 
 mail_accounts: []
 
+# Rubrica-Integration: spiegelt beim Mail-Scan den vollen Mailtext (inkl. Signatur, die
+# Archivio selbst für die Suche abschneidet) in eine zweite, separate SQLite-Datei, die
+# Rubrica danebenliest. Siehe PROJEKT_STATUS.md "Rubrica-Integration".
+rubrica:
+  enabled: false
+  db_path: ""   # leer = Standard: gleiches Verzeichnis wie archivio.db, Datei "rubrica.db"
+
 logging:
   level: INFO
 

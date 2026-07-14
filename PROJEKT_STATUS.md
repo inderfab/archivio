@@ -4,7 +4,7 @@
 > Sitzung/einem neuen Account nahtlos weitergearbeitet werden kann. Liegt bewusst im Repo,
 > damit sie account-übergreifend verfügbar ist. Ergänzt `CLAUDE.md` (Projektinstruktionen).
 >
-> **Stand: v3.0.5 (Server) · v3.1.0 (Helper) · 2026-07-08**
+> **Stand: v3.0.11 (Server) · v3.1.0 (Helper) · 2026-07-10**
 
 ---
 
@@ -230,3 +230,51 @@ Claude Desktop kann Archivio als lokales **MCP-Tool** nutzen (vollständig lokal
 - **Helper-HTTP `/config`-Endpoint** neu; `_cors_headers(code, body=None)` kann jetzt JSON-Body senden. **404-Fix:** `/open`+`/reveal` senden die HTTP-Antwort VOR `rumps.notification` (die aus dem HTTP-Thread eine Exception werfen kann → vorher leere Antwort statt sauberem 404).
 - **Nach Claude-Desktop-**oder**-`archivio_mcp.py`-Änderung: Claude Desktop neu starten** (lädt den stdio-Subprozess neu). Nach Helper-Änderung (`archivio_helper.py`): Helper-App neu starten.
 - **`mcp`-Paket** ist im eingebetteten Helper-Python (arm64+x86_64) via `helper/build.sh` (Cache-Stamp `rumps+requests+mcp`). Tests: `tests/test_mcp_api.py`.
+
+---
+
+## 18. Rubrica-Integration (Adressvorschläge aus Mail-Signaturen)
+
+**Rubrica** ist eine zweite, separate App (CardDAV-Adressbuch, läuft ebenfalls auf dem iMac). Sie
+leitet aus Mail-Signaturen Kontaktvorschläge ab (Regel u.a.: min. 2 Korrespondenzen mit
+gleichem Sender/Empfänger), sortiert nach Projekt, zur manuellen Review. Archivio schneidet die
+Signatur beim Scannen bewusst ab (`_strip_signature`, `scanner/mail_scanner.py`), um Rauschen in
+der Volltextsuche zu vermeiden — Rubrica braucht aber genau den vollen Text.
+
+- **Zweite, separate SQLite-Datei `rubrica.db`** (Default: gleiches Verzeichnis wie `archivio.db`,
+  Pfad über `rubrica.db_path` in `config.yaml` überschreibbar). Neues Modul `db/rubrica.py`
+  spiegelt `db/connection.py` (WAL, `timeout=30`, idempotentes `CREATE TABLE/INDEX IF NOT EXISTS`
+  bei jedem Connect — kein separates Migrationssystem für die eine Tabelle nötig).
+- **Tabelle `signatur_quelle`** — Spalten: `message_id` (UNIQUE, Dedup-Schlüssel), `absender`
+  (+ `absender_email` rein), `empfaenger`, `cc`, `postfach`, `projekt` (Name, denormalisiert —
+  Rubrica braucht keinen Zugriff auf `archivio.db`), `betreff`, `text` (voller Mailtext INKL.
+  Signatur), `datum`, `status`, `status_updated_at`, `created_at`.
+- **Schreib-Vertrag — strikt eingehalten, da beide Apps in dieselbe Datei schreiben (WAL nötig):**
+  - **Archivio** schreibt AUSSCHLIESSLICH `INSERT OR IGNORE` (nie UPDATE/DELETE), immer mit
+    `status='pending'`.
+  - **Rubrica** schreibt AUSSCHLIESSLICH `status` + `status_updated_at` zurück (`'pending'` →
+    `'processed'`/`'rejected'`), fasst keine andere Spalte an. So kann Rubrica einfach nach
+    `status='pending'` pollen statt jedes Mal den ganzen Bestand zu prüfen, und abgelehnte Zeilen
+    werden nie erneut vorgeschlagen.
+- **Hook:** `scanner/mail_scanner.py::save_mail_to_db` ruft nach dem erfolgreichen
+  Dokument-Insert `db.rubrica.save_signature_source(record, project_name, mailbox_name)` — eigenes
+  try/except, ein Rubrica-DB-Fehler darf den Mail-Scan nie abbrechen. `record["raw_text"]`
+  (voller Text, unbereinigt) wurde in `build_email_record` schon immer berechnet, nur nie
+  persistiert. `project_name` wird einmal pro Postfach in `scan_mailbox` aufgelöst (nicht pro
+  Mail). No-op wenn `rubrica.enabled` (config.yaml) nicht `true` ist — einzige Stelle, die das
+  Flag prüft.
+- **Config (`config.yaml`, NICHT automatisch aus `config.yaml.example` übernommen bei
+  bestehenden Installationen — manuell ergänzen):**
+  ```yaml
+  rubrica:
+    enabled: true
+    db_path: ""   # leer = Standard neben archivio.db
+  ```
+- **Backfill-Altbestand:** ein normaler inkrementeller Scan überspringt bekannte Mails schon beim
+  Header-Fetch (`mail_exists()`-Check) — der volle Body wird für längst indexierte Mails nie
+  erneut geholt. Für den Bestand: `.venv/bin/python scripts/backfill_rubrica.py` (einmalig, manuell
+  im Terminal). Geht unabhängig vom normalen Scan-Pfad nochmal komplett über alle aktiven
+  Postfächer, Dedup gegen `signatur_quelle.message_id` (nicht gegen `archivio.db`) — sicher
+  wiederholt ausführbar.
+- Tests: `tests/test_rubrica.py` (Disabled-No-op, Insert, Dedup, End-to-End: bereinigter Text in
+  `archivio.db` vs. voller Text in `rubrica.db`).
