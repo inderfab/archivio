@@ -98,3 +98,26 @@ def test_save_mail_to_db_mirrors_full_text_while_search_gets_cleaned(tmp_db):
     rconn.close()
     assert "Freundliche Grüsse" in row["text"]
     assert "Strut Architekten AG" in row["text"]
+
+
+def test_settings_toggle_persists_enabled_and_preserves_db_path(tmp_db):
+    """UI-Checkbox 'Mails in Datenbank für Rubrica speichern' (Einstellungen) — POST
+    /dashboard/settings setzt enabled, lässt einen bereits gesetzten db_path unangetastet
+    (settings.save() merged pro Sektion statt zu ersetzen)."""
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    settings.save({"rubrica": {"enabled": False, "db_path": "/custom/path/rubrica.db"}})
+
+    c = TestClient(app)
+    r = c.post("/dashboard/settings", data={
+        "office_name": "Test", "office_language": "de",
+        "server_host": "127.0.0.1", "server_port": "8000",
+        "num_workers": "1",
+        "rubrica_enabled": "1",
+    }, follow_redirects=False)
+    assert r.status_code == 303
+
+    cfg = settings.load_all()
+    assert cfg["rubrica"]["enabled"] is True
+    assert cfg["rubrica"]["db_path"] == "/custom/path/rubrica.db"

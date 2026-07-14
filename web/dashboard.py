@@ -1290,6 +1290,10 @@ async def settings_save(request: Request):
         v.strip() for v in form.getlist("excluded_folder") if v.strip()
     ]
 
+    # Rubrica — nur "enabled" hier gesetzt; db_path bleibt (falls manuell in config.yaml
+    # gesetzt) unangetastet, da settings.save() pro Sektion tief mergt statt zu ersetzen.
+    rubrica_enabled = form.get("rubrica_enabled") == "1"
+
     updates = {
         "office": {
             "name":     office_name,
@@ -1305,6 +1309,7 @@ async def settings_save(request: Request):
             "excluded_folders": excluded_folders,
             "num_workers":      num_workers,
         },
+        "rubrica": {"enabled": rubrica_enabled},
     }
     settings.save(updates)
 

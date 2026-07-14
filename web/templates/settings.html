@@ -275,6 +275,28 @@
       </div>
     </details>
 
+    <details class="settings-section" open>
+      <summary><span class="sec-arrow">▶</span> Rubrica</summary>
+      <div class="settings-body">
+        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; max-width:480px;">
+          <input type="checkbox" name="rubrica_enabled" value="1" style="margin-top:3px;"
+            {% if cfg.get('rubrica', {}).get('enabled', False) %}checked{% endif %}>
+          <span>
+            Mails in Datenbank für Rubrica speichern
+            <span class="hint" style="display:block; margin-top:2px;">
+              Spiegelt beim Mail-Scan den vollen Mailtext inkl. Signatur (die Suche in Archivio
+              nutzt weiterhin die bereinigte Version) in eine separate Datei
+              (<code>rubrica.db</code>), aus der die Rubrica-App Kontaktvorschläge ableitet.
+            </span>
+          </span>
+        </label>
+
+        <div style="padding-top:14px;">
+          <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
+        </div>
+      </div>
+    </details>
+
   </form>
 
   {# ── Diagnose (ausserhalb Form) ── #}
