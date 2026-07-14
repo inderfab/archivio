@@ -201,6 +201,7 @@ git branch -d fix/xyz
 - **Adresse `archivio:8000`** statt `windows.local:8000`: geht über (a) Bonjour LocalHostname `archivio` → `archivio.local:8000`, oder (b) Router-DNS + feste IP → `archivio:8000`. Kein App-Change nötig; ggf. LaunchAgent, der `scutil --set LocalHostName archivio` setzt.
 - **Alte Müll-Dokumente** (Thumbs.db etc. aus früheren Scans) bleiben in der DB, bis manuell bereinigt.
 - **Nacht-Scan (Scheduler 22:00, `web/main.py:_scheduler_loop`)** postet `/api/scan/all`. Bei sehr großen Beständen + Neustarts konvergiert es über mehrere Nächte (stale-first).
+- **Mail-Scan-Banner: „neu"/„unverändert" bleiben bei 0, obwohl der Fortschritt (X/Y Mails) korrekt hochzählt.** Ursache: `scan_mailbox()` (`scanner/mail_scanner.py`) schreibt `total`/`processed` laufend pro Mail in den `progress`-Dict, aber `new`/`skipped` erst als Rückgabewert — `_run_mail_scan` (`web/dashboard.py:1550-1557`) addiert diese erst in `_mail_scan["new"]`/`["skipped"]`, wenn `scan_mailbox()` für das GANZE Postfach zurückkehrt. Bei grossen Postfächern (z.B. 12'684 Mails) zeigt der Banner deshalb lange „0 neu, 0 unverändert". Fix: `new`/`skipped` analog zu `processed` direkt im `progress`-Dict laufend mitzählen statt erst am Ende.
 
 ---
 
