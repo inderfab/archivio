@@ -1,7 +1,7 @@
 import textwrap
 import pytest
 from pathlib import Path
-from db import connection
+from db import connection, rubrica
 from config import settings
 
 
@@ -28,6 +28,7 @@ def tmp_db(tmp_path, monkeypatch):
     monkeypatch.setattr(settings, "_CONFIG_PATH", cfg)
     monkeypatch.setattr(settings, "_settings", {})
     monkeypatch.setattr(connection, "_DB_PATH", None)
+    monkeypatch.setattr(rubrica, "_RUBRICA_DB_PATH", None)
 
     connection.init_schema()
     conn = connection.get_connection()

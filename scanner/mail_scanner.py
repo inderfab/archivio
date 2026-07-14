@@ -211,6 +211,7 @@ def build_email_record(message, mailbox: str) -> dict:
         "message_id":   message_id,
         "mail_date":    parse_mail_date(message.get("Date", "")),
         "sender":       sender,
+        "sender_email": sender_email,
         "recipients":   to_emails,
         "cc":           cc_emails,
         "subject":      subject,
@@ -291,7 +292,8 @@ def mail_exists(conn, message_id: str) -> bool:
     ).fetchone() is not None
 
 
-def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: str = "") -> bool:
+def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: str = "",
+                    project_name: str = "") -> bool:
     """Schreibt Mail in DB inkl. Chunks + Embeddings.
     Jede Stufe hat eigenes try/except — Fehler werden geloggt, Mail wird nicht übersprungen.
     True = neu gespeichert, False = bereits vorhanden.
@@ -331,6 +333,14 @@ def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: st
     except Exception as e:
         log.warning("Mail speichern fehlgeschlagen (%s): %s", subject[:60], e)
         return False
+
+    # Stufe 1b: Volltext INKL. Signatur für Rubrica spiegeln (separate DB, eigene Fehlerkapsel —
+    # darf den Mail-Scan nie beeinträchtigen). No-op wenn rubrica.enabled nicht gesetzt ist.
+    try:
+        from db.rubrica import save_signature_source
+        save_signature_source(record, project_name, mailbox_name)
+    except Exception as e:
+        log.warning("Rubrica-Spiegelung fehlgeschlagen (%s): %s", subject[:60], e)
 
     if not cleaned_text:
         return True
@@ -417,6 +427,11 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int,
     conn   = connection.get_connection()
     new    = skipped = errors = 0
 
+    # Einmal pro Postfach (nicht pro Mail) auflösen — für die Rubrica-Spiegelung, die den
+    # Projektnamen denormalisiert mitspeichert (kein Cross-DB-Join für Rubrica nötig).
+    project_row  = conn.execute("SELECT name FROM projects WHERE id=?", (project_id,)).fetchone()
+    project_name = project_row["name"] if project_row else ""
+
     try:
         uids = _fetch_uids(client, mailbox)
         log.info("Postfach '%s': %d Nachrichten", mailbox, len(uids))
@@ -442,7 +457,7 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int,
                 result_box: list = []
                 def _save(rec=record, mb=mailbox):
                     try:
-                        result_box.append(save_mail_to_db(conn, rec, project_id, mb))
+                        result_box.append(save_mail_to_db(conn, rec, project_id, mb, project_name))
                     except Exception as exc:
                         log.warning("save_mail_to_db Fehler UID %s: %s", uid, exc)
                         result_box.append(False)

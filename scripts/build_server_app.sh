@@ -107,6 +107,10 @@ bash helper/build.sh
 for dir in web scanner db config; do
   cp -r "$dir" "$APP/Contents/Resources/"
 done
+# Nur einzelne, für den Nutzer relevante Admin-Skripte — NICHT den ganzen scripts/-Ordner
+# (der auch Build-/Dev-Tooling wie build_server_app.sh selbst enthält).
+mkdir -p "$APP/Contents/Resources/scripts"
+cp scripts/backfill_rubrica.py "$APP/Contents/Resources/scripts/"
 cp requirements.txt        "$APP/Contents/Resources/"
 cp config.yaml.example     "$APP/Contents/Resources/"
 cp VERSION                 "$APP/Contents/Resources/"
