@@ -272,9 +272,18 @@ der Volltextsuche zu vermeiden — Rubrica braucht aber genau den vollen Text.
   ```
 - **Backfill-Altbestand:** ein normaler inkrementeller Scan überspringt bekannte Mails schon beim
   Header-Fetch (`mail_exists()`-Check) — der volle Body wird für längst indexierte Mails nie
-  erneut geholt. Für den Bestand: `.venv/bin/python scripts/backfill_rubrica.py` (einmalig, manuell
-  im Terminal). Geht unabhängig vom normalen Scan-Pfad nochmal komplett über alle aktiven
-  Postfächer, Dedup gegen `signatur_quelle.message_id` (nicht gegen `archivio.db`) — sicher
-  wiederholt ausführbar.
+  erneut geholt. Für den Bestand: `scripts/backfill_rubrica.py` (einmalig, manuell im Terminal).
+  Geht unabhängig vom normalen Scan-Pfad nochmal komplett über alle aktiven Postfächer, Dedup
+  gegen `signatur_quelle.message_id` (nicht gegen `archivio.db`) — sicher wiederholt ausführbar.
+  - **Dev-Mac:** `.venv/bin/python scripts/backfill_rubrica.py`
+  - **iMac (installierte App, seit Build mit `scripts/`-Bundling):**
+    ```bash
+    ARCHIVIO_DATA_DIR="$HOME/Library/Application Support/Archivio" \
+      "/Applications/Archivio Server.app/Contents/Frameworks/archivio-python-x86_64/bin/python3" \
+      "/Applications/Archivio Server.app/Contents/Resources/scripts/backfill_rubrica.py"
+    ```
+    (`archivio-python-x86_64` beim iMac — Apple Silicon nutzt `-arm64`.) Nur
+    `scripts/backfill_rubrica.py` wird ins Bundle kopiert (`Contents/Resources/scripts/`), nicht
+    der ganze `scripts/`-Ordner (der auch Build-/Dev-Tooling enthält).
 - Tests: `tests/test_rubrica.py` (Disabled-No-op, Insert, Dedup, End-to-End: bereinigter Text in
   `archivio.db` vs. voller Text in `rubrica.db`).
