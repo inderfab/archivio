@@ -315,13 +315,27 @@ def _thread_alert(title: str, message: str):
 
 
 # ── Autostart ─────────────────────────────────────────────────────────────────
+# Login-Item zeigt auf die .app selbst — NICHT auf sys.executable (das eingebettete
+# Python liegt tief in Contents/Frameworks/.../bin/python3). Frueher fehlte ein
+# .parent, das Login-Item zeigte auf den Contents-Ordner statt die .app: macOS kann
+# einen Ordner nicht "starten" und oeffnet stattdessen bei jedem Login ein
+# Finder-Fenster darauf. Deshalb wird ausschliesslich per Pfad (nicht per Name)
+# gematcht — das erfasst auch schon vorhandene kaputte Eintraege (heissen "Contents",
+# nicht "Archivio Helper") und erlaubt eine automatische Reparatur beim naechsten Start.
+
+def _helper_app_path() -> Path:
+    """Pfad der .app selbst, ausgehend vom eingebetteten Python
+    (.../Archivio Helper.app/Contents/Frameworks/archivio-python-ARCH/bin/python3)."""
+    return Path(sys.executable).parent.parent.parent.parent.parent
+
 
 def _autostart_enabled() -> bool:
     try:
+        app_path = str(_helper_app_path())
         r = subprocess.run(
             ["osascript", "-e",
-             'tell application "System Events" to return '
-             '(name of every login item) contains "Archivio Helper"'],
+             f'tell application "System Events" to return '
+             f'(path of every login item) contains "{app_path}"'],
             capture_output=True, text=True, timeout=5,
         )
         return r.stdout.strip().lower() == "true"
@@ -329,14 +343,41 @@ def _autostart_enabled() -> bool:
         return False
 
 
+def _repair_broken_autostart_entries() -> bool:
+    """Entfernt Login-Items, die (durch den frueheren Pfad-Bug) auf den
+    Contents-Unterordner einer Archivio-Helper.app zeigen statt auf die .app selbst.
+    Gibt True zurueck, wenn mind. ein kaputter Eintrag gefunden/entfernt wurde."""
+    try:
+        r = subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to get path of every login item '
+             'whose path contains "Archivio Helper.app/Contents"'],
+            capture_output=True, text=True, timeout=5,
+        )
+        broken = [p.strip() for p in r.stdout.split(",") if p.strip()]
+        if not broken:
+            return False
+        subprocess.run(
+            ["osascript", "-e",
+             'tell application "System Events" to delete '
+             '(every login item whose path contains "Archivio Helper.app/Contents")'],
+            timeout=5,
+        )
+        log.info("Kaputte Autostart-Login-Items entfernt: %s", broken)
+        return True
+    except Exception as e:
+        log.warning("Autostart-Reparatur fehlgeschlagen: %s", e)
+        return False
+
+
 def _set_autostart(enabled: bool):
-    path = str(Path(sys.executable).parent.parent.parent.parent)
+    app_path = str(_helper_app_path())
     if enabled:
         script = (f'tell application "System Events" to make new login item '
-                  f'at end with properties {{path:"{path}", hidden:true}}')
+                  f'at end with properties {{path:"{app_path}", hidden:true}}')
     else:
         script = ('tell application "System Events" to delete '
-                  '(every login item whose name is "Archivio Helper")')
+                  '(every login item whose path contains "Archivio Helper.app")')
     try:
         subprocess.run(["osascript", "-e", script], timeout=5)
     except Exception as e:
@@ -379,6 +420,18 @@ class ArchivioHelper(rumps.App):
             rumps.separator,
             rumps.MenuItem("Beenden", callback=rumps.quit_application),
         ]
+        # Reparatur EINMALIG beim Start — kaputte Login-Items (frueherer Pfad-Bug,
+        # zeigen auf Contents statt die .app, oeffnen bei jedem Login ein
+        # Finder-Fenster) entfernen. Ohne diese Reparatur wuerde ein kaputter Eintrag
+        # NIE von selbst verschwinden: er startet die App ja nicht (nur Finder),
+        # kann also auch keinen eigenen Reparatur-Code ausloesen — erst das manuelle
+        # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
+        if _repair_broken_autostart_entries():
+            rumps.notification(
+                "Archivio Helper",
+                "Fehlerhaften Autostart-Eintrag entfernt",
+                "Bitte bei Bedarf im Menü erneut aktivieren.",
+            )
         self._autostart_item.state = _autostart_enabled()
 
         _start_local_server()
