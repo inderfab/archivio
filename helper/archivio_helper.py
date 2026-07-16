@@ -4,6 +4,7 @@ from __future__ import annotations
 import http.server
 import json
 import logging
+import shutil
 import subprocess
 import sys
 import threading
@@ -305,6 +306,34 @@ def _ensure_mcp_registered():
         log.warning("MCP-Registrierung in Claude Desktop fehlgeschlagen: %s", e)
 
 
+_SERVICES_DIR       = Path.home() / "Library" / "Services"
+_QUICK_ACTION_NAME  = "ArchivioLink.workflow"
+
+
+def _ensure_quick_action_installed():
+    """Installiert/aktualisiert die Finder-Rechtsklick-Option "Archivio-Link kopieren"
+    in ~/Library/Services — idempotent (vergleicht den Inhalt), kein unnoetiges
+    Kopieren bei jedem Start. Baut Links im Format http://localhost:44380/open?path=...
+    (nicht archivio://, damit sie z.B. in Notion als normaler Link funktionieren)."""
+    try:
+        src = Path(__file__).parent / _QUICK_ACTION_NAME
+        if not src.exists():
+            return
+        dst = _SERVICES_DIR / _QUICK_ACTION_NAME
+        src_wflow = src / "Contents" / "document.wflow"
+        dst_wflow = dst / "Contents" / "document.wflow"
+        if dst_wflow.exists() and dst_wflow.read_bytes() == src_wflow.read_bytes():
+            return  # bereits aktuell
+        _SERVICES_DIR.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        subprocess.run(["/System/Library/CoreServices/pbs", "-flush"], timeout=5)
+        log.info("Quick Action 'Archivio-Link kopieren' installiert/aktualisiert")
+    except Exception as e:
+        log.warning("Quick-Action-Installation fehlgeschlagen: %s", e)
+
+
 # ── Update ────────────────────────────────────────────────────────────────────
 
 def _check_update() -> tuple[str, str] | None:
@@ -461,6 +490,7 @@ class ArchivioHelper(rumps.App):
         _start_local_server()
         _register_url_handler()
         _ensure_mcp_registered()
+        _ensure_quick_action_installed()
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
         threading.Thread(target=self._delayed_update_check, daemon=True).start()

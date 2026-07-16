@@ -125,32 +125,78 @@ def _handle_archivio_url(url_str: str):
 
 
 class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
+    # Identische Logik wie helper/archivio_helper.py — Einzelnutzer, die nur den
+    # Archivio Server (ohne separaten Helper) installiert haben, sollen dieselbe
+    # Datei-Öffnen-Funktionalität bekommen. Kein /config-Endpoint hier (anders als
+    # beim Helper): der hat dort einen Verwender (MCP fragt danach), hier keinen.
     def do_OPTIONS(self):
-        self._reply(200)
+        self._cors_headers(200)
 
     def do_GET(self):
         parsed = urlparse(self.path)
         params = parse_qs(parsed.query)
         path   = unquote(params.get("path", [""])[0])
-        if parsed.path == "/open" and path and Path(path).exists():
-            subprocess.run(["open", path], timeout=5)
-            self._reply(200)
-        elif parsed.path == "/reveal" and path and Path(path).exists():
-            subprocess.run(["open", "-R", path], timeout=5)
-            self._reply(200)
-        elif parsed.path == "/ping":
-            self._reply(200)
-        else:
-            self._reply(404)
 
-    def _reply(self, code: int):
+        if parsed.path == "/open" and path:
+            if "://" in path and not path.startswith("/"):
+                subprocess.run(["open", path], timeout=5)
+                self._html_response(200, "✓ Wird geöffnet …")
+            else:
+                p = Path(path)
+                if p.exists():
+                    subprocess.run(["open", str(p)], timeout=5)
+                    self._html_response(200, "✓ Wird geöffnet …")
+                else:
+                    self._not_found(path)
+
+        elif parsed.path == "/reveal" and path:
+            p = Path(path)
+            if p.exists():
+                subprocess.run(["open", "-R", str(p)], timeout=5)
+                self._html_response(200, "✓ Im Finder angezeigt")
+            else:
+                self._not_found(path)
+
+        elif parsed.path == "/ping":
+            self._cors_headers(200)
+
+        else:
+            self._cors_headers(400)
+
+    def _not_found(self, path: str):
+        log.warning("Datei nicht gefunden: %s", path)
+        self._html_response(404, f"⚠ Datei nicht gefunden: {path}", autoclose=False)
+
+    def _html_response(self, code: int, message: str, autoclose: bool = True):
+        close_script = (
+            "<script>setTimeout(function(){ window.close(); }, 300);</script>"
+            if autoclose else ""
+        )
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Archivio Server</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
+          justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
+  .box {{ text-align:center; }}
+  .hint {{ color:#888; font-size:13px; margin-top:8px; }}
+</style></head>
+<body><div class="box"><div>{message}</div>
+<div class="hint">Dieser Tab kann geschlossen werden.</div></div>
+{close_script}
+</body></html>"""
+        self._cors_headers(code, html.encode("utf-8"), "text/html")
+
+    def _cors_headers(self, code: int, body: bytes | None = None, content_type: str = "text/plain"):
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Private-Network", "true")
-        self.send_header("Content-Type", "text/plain")
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.end_headers()
-        self.wfile.write(b"ok" if code == 200 else b"error")
+        if body is not None:
+            self.wfile.write(body)
+        else:
+            self.wfile.write(b"ok" if code == 200 else b"error")
 
     def log_message(self, *args):
         pass
@@ -189,6 +235,34 @@ def _register_url_handler():
         log.info("URL scheme handler registered")
     except Exception as e:
         log.warning("URL scheme handler not available: %s", e)
+
+
+_SERVICES_DIR       = Path.home() / "Library" / "Services"
+_QUICK_ACTION_NAME  = "ArchivioLink.workflow"
+
+
+def _ensure_quick_action_installed():
+    """Installiert/aktualisiert die Finder-Rechtsklick-Option "Archivio-Link kopieren"
+    in ~/Library/Services — idempotent (vergleicht den Inhalt), kein unnoetiges
+    Kopieren bei jedem Start. So bekommen auch Einzelnutzer, die nur den Archivio
+    Server (ohne separaten Helper) installiert haben, dieselbe Link-Funktion."""
+    try:
+        src = Path(__file__).parent / _QUICK_ACTION_NAME
+        if not src.exists():
+            return
+        dst = _SERVICES_DIR / _QUICK_ACTION_NAME
+        src_wflow = src / "Contents" / "document.wflow"
+        dst_wflow = dst / "Contents" / "document.wflow"
+        if dst_wflow.exists() and dst_wflow.read_bytes() == src_wflow.read_bytes():
+            return  # bereits aktuell
+        _SERVICES_DIR.mkdir(parents=True, exist_ok=True)
+        if dst.exists():
+            shutil.rmtree(dst)
+        shutil.copytree(src, dst)
+        subprocess.run(["/System/Library/CoreServices/pbs", "-flush"], timeout=5)
+        log.info("Quick Action 'Archivio-Link kopieren' installiert/aktualisiert")
+    except Exception as e:
+        log.warning("Quick-Action-Installation fehlgeschlagen: %s", e)
 
 
 def _stop_ollama():
@@ -646,6 +720,7 @@ class ArchivioServer(rumps.App):
 
         _start_local_server()
         _register_url_handler()
+        _ensure_quick_action_installed()
         threading.Thread(target=self._boot, daemon=True).start()
 
     def _boot(self):
