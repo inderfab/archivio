@@ -134,8 +134,9 @@ LAUNCHER
 chmod +x "$APP/Contents/MacOS/Archivio Helper"
 
 # Python-Script und Ressourcen
-cp helper/archivio_helper.py  "$APP/Contents/Resources/"
-cp helper/archivio_mcp.py     "$APP/Contents/Resources/"
+cp helper/archivio_helper.py    "$APP/Contents/Resources/"
+cp helper/archivio_mcp.py       "$APP/Contents/Resources/"
+cp shared/menubar_bridge.py     "$APP/Contents/Resources/"
 cp helper/config.json         "$APP/Contents/Resources/"
 cp helper/requirements.txt    "$APP/Contents/Resources/"
 cp helper/icon.png            "$APP/Contents/Resources/"

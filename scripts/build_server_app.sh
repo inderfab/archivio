@@ -32,7 +32,7 @@ _build_python() {
     local PY_BASE="$DIST/.python-base-$ARCH_TAG"
     local PY_INSTALLED="$DIST/.python-installed-$ARCH_TAG"
     local STAMP="$DIST/.python-stamp-$ARCH_TAG"
-    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH:mcp"
 
     if [ "$(cat "$STAMP" 2>/dev/null)" = "$EXPECTED" ] && [ -x "$PY_INSTALLED/bin/python3" ]; then
         echo "  $ARCH_TAG: Cache gültig"
@@ -85,7 +85,7 @@ for a in rel['assets']:
     $PIP_CMD -m pip install --prefer-binary -q \
         --no-warn-script-location \
         -r requirements.txt \
-        rumps requests
+        rumps requests mcp
 
     echo "$EXPECTED" > "$STAMP"
     echo "  $ARCH_TAG: Pakete installiert"
@@ -112,6 +112,8 @@ done
 mkdir -p "$APP/Contents/Resources/scripts"
 cp scripts/backfill_rubrica.py "$APP/Contents/Resources/scripts/"
 cp -r helper/ArchivioLink.workflow "$APP/Contents/Resources/"
+cp helper/archivio_mcp.py  "$APP/Contents/Resources/"
+cp shared/menubar_bridge.py "$APP/Contents/Resources/"
 cp requirements.txt        "$APP/Contents/Resources/"
 cp config.yaml.example     "$APP/Contents/Resources/"
 cp VERSION                 "$APP/Contents/Resources/"
@@ -240,13 +242,13 @@ if [ ! -d "$VENV" ]; then
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip -q
   "$VENV/bin/pip" install --prefer-binary -r "$RESOURCES/requirements.txt" -q
-  "$VENV/bin/pip" install --prefer-binary rumps requests -q
+  "$VENV/bin/pip" install --prefer-binary rumps requests mcp -q
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Installation abgeschlossen"
 elif [ "$(cat $VERSION_STAMP 2>/dev/null)" != "$CURRENT_VERSION" ]; then
   echo "$(date): Neue Version $CURRENT_VERSION – Abhängigkeiten aktualisieren"
   "$VENV/bin/pip" install -q --prefer-binary -r "$RESOURCES/requirements.txt" >/dev/null 2>&1 || true
-  "$VENV/bin/pip" install -q --prefer-binary rumps requests >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q --prefer-binary rumps requests mcp >/dev/null 2>&1 || true
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
 fi
 

@@ -1,7 +1,6 @@
 """Archivio Server – macOS Menubar-App. Startet und verwaltet den FastAPI-Server."""
 from __future__ import annotations
 
-import http.server
 import logging
 import os
 import shutil
@@ -9,16 +8,16 @@ import subprocess
 import sys
 import threading
 import time
-import zipfile
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
 
 import requests
 import rumps
 
+import menubar_bridge as bridge
+
 OLLAMA_EMBED_MODEL = "nomic-embed-text"
 OLLAMA_LLM_MODEL   = "llama3.2:3b"
-HELPER_PORT        = 44380
+HELPER_PORT        = bridge.HELPER_PORT
 
 # ── Pfade ────────────────────────────────────────────────────────────────────
 
@@ -105,164 +104,6 @@ def _start_ollama():
                     break
         except Exception as e:
             log.error("Ollama start fehlgeschlagen: %s", e)
-
-
-def _handle_archivio_url(url_str: str):
-    try:
-        parsed = urlparse(url_str)
-        if parsed.scheme != "archivio":
-            return
-        path = unquote(parse_qs(parsed.query).get("path", [""])[0])
-        if not path:
-            return
-        if parsed.hostname == "open":
-            subprocess.run(["open", path], timeout=5)
-        elif parsed.hostname == "reveal":
-            if Path(path).exists():
-                subprocess.run(["open", "-R", path], timeout=5)
-    except Exception as e:
-        log.error("URL handling error: %s", e)
-
-
-class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
-    # Identische Logik wie helper/archivio_helper.py — Einzelnutzer, die nur den
-    # Archivio Server (ohne separaten Helper) installiert haben, sollen dieselbe
-    # Datei-Öffnen-Funktionalität bekommen. Kein /config-Endpoint hier (anders als
-    # beim Helper): der hat dort einen Verwender (MCP fragt danach), hier keinen.
-    def do_OPTIONS(self):
-        self._cors_headers(200)
-
-    def do_GET(self):
-        parsed = urlparse(self.path)
-        params = parse_qs(parsed.query)
-        path   = unquote(params.get("path", [""])[0])
-
-        if parsed.path == "/open" and path:
-            if "://" in path and not path.startswith("/"):
-                subprocess.run(["open", path], timeout=5)
-                self._html_response(200, "✓ Wird geöffnet …")
-            else:
-                p = Path(path)
-                if p.exists():
-                    subprocess.run(["open", str(p)], timeout=5)
-                    self._html_response(200, "✓ Wird geöffnet …")
-                else:
-                    self._not_found(path)
-
-        elif parsed.path == "/reveal" and path:
-            p = Path(path)
-            if p.exists():
-                subprocess.run(["open", "-R", str(p)], timeout=5)
-                self._html_response(200, "✓ Im Finder angezeigt")
-            else:
-                self._not_found(path)
-
-        elif parsed.path == "/ping":
-            self._cors_headers(200)
-
-        else:
-            self._cors_headers(400)
-
-    def _not_found(self, path: str):
-        log.warning("Datei nicht gefunden: %s", path)
-        self._html_response(404, f"⚠ Datei nicht gefunden: {path}", autoclose=False)
-
-    def _html_response(self, code: int, message: str, autoclose: bool = True):
-        close_script = (
-            "<script>setTimeout(function(){ window.close(); }, 300);</script>"
-            if autoclose else ""
-        )
-        html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>Archivio Server</title>
-<style>
-  body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
-          justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
-  .box {{ text-align:center; }}
-  .hint {{ color:#888; font-size:13px; margin-top:8px; }}
-</style></head>
-<body><div class="box"><div>{message}</div>
-<div class="hint">Dieser Tab kann geschlossen werden.</div></div>
-{close_script}
-</body></html>"""
-        self._cors_headers(code, html.encode("utf-8"), "text/html")
-
-    def _cors_headers(self, code: int, body: bytes | None = None, content_type: str = "text/plain"):
-        self.send_response(code)
-        self.send_header("Access-Control-Allow-Origin", "*")
-        self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
-        self.send_header("Access-Control-Allow-Private-Network", "true")
-        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
-        self.end_headers()
-        if body is not None:
-            self.wfile.write(body)
-        else:
-            self.wfile.write(b"ok" if code == 200 else b"error")
-
-    def log_message(self, *args):
-        pass
-
-
-def _start_local_server():
-    try:
-        srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), _LocalHTTPHandler)
-        threading.Thread(target=srv.serve_forever, daemon=True).start()
-        log.info("Lokaler Helper-Server auf localhost:%d", HELPER_PORT)
-    except OSError as e:
-        log.warning("Helper-Server Port %d belegt: %s", HELPER_PORT, e)
-
-
-def _register_url_handler():
-    try:
-        from Foundation import NSAppleEventManager, NSObject
-        kInternetEventClass = 0x4755524C
-        kAEGetURL           = 0x4755524C
-        keyDirectObject     = 0x2D2D2D2D
-
-        class _Handler(NSObject):
-            def handleGetURLEvent_withReplyEvent_(self, event, reply):
-                url = str(event.paramDescriptorForKeyword_(keyDirectObject).stringValue())
-                _handle_archivio_url(url)
-
-        handler = _Handler.alloc().init()
-        _register_url_handler._handler = handler
-        NSAppleEventManager.sharedAppleEventManager() \
-            .setEventHandler_andSelector_forEventClass_andEventID_(
-                handler,
-                "handleGetURLEvent:withReplyEvent:",
-                kInternetEventClass,
-                kAEGetURL,
-            )
-        log.info("URL scheme handler registered")
-    except Exception as e:
-        log.warning("URL scheme handler not available: %s", e)
-
-
-_SERVICES_DIR       = Path.home() / "Library" / "Services"
-_QUICK_ACTION_NAME  = "ArchivioLink.workflow"
-
-
-def _ensure_quick_action_installed():
-    """Installiert/aktualisiert die Finder-Rechtsklick-Option "Archivio-Link kopieren"
-    in ~/Library/Services — idempotent (vergleicht den Inhalt), kein unnoetiges
-    Kopieren bei jedem Start. So bekommen auch Einzelnutzer, die nur den Archivio
-    Server (ohne separaten Helper) installiert haben, dieselbe Link-Funktion."""
-    try:
-        src = Path(__file__).parent / _QUICK_ACTION_NAME
-        if not src.exists():
-            return
-        dst = _SERVICES_DIR / _QUICK_ACTION_NAME
-        src_wflow = src / "Contents" / "document.wflow"
-        dst_wflow = dst / "Contents" / "document.wflow"
-        if dst_wflow.exists() and dst_wflow.read_bytes() == src_wflow.read_bytes():
-            return  # bereits aktuell
-        _SERVICES_DIR.mkdir(parents=True, exist_ok=True)
-        if dst.exists():
-            shutil.rmtree(dst)
-        shutil.copytree(src, dst)
-        subprocess.run(["/System/Library/CoreServices/pbs", "-flush"], timeout=5)
-        log.info("Quick Action 'Archivio-Link kopieren' installiert/aktualisiert")
-    except Exception as e:
-        log.warning("Quick-Action-Installation fehlgeschlagen: %s", e)
 
 
 def _stop_ollama():
@@ -590,88 +431,6 @@ def _check_update() -> tuple[str, str] | None:
         return None
 
 
-def _thread_alert(title: str, message: str):
-    """Dialog aus Background-Thread — rumps.alert nur Main-Thread sicher."""
-    msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
-    subprocess.run(["osascript", "-e",
-                    f'display alert "{title}" message "{msg}"'],
-                   timeout=60)
-
-
-
-
-# ── Autostart ─────────────────────────────────────────────────────────────────
-# Login-Item zeigt auf die .app selbst — NICHT auf sys.executable (das eingebettete
-# Python liegt tief in Contents/Frameworks/.../bin/python3). Frueher fehlte ein
-# .parent, das Login-Item zeigte auf den Contents-Ordner statt die .app: macOS kann
-# einen Ordner nicht "starten" und oeffnet stattdessen bei jedem Login ein
-# Finder-Fenster darauf. Deshalb wird ausschliesslich per Pfad (nicht per Name)
-# gematcht — das erfasst auch schon vorhandene kaputte Eintraege (heissen "Contents",
-# nicht "Archivio Server") und erlaubt eine automatische Reparatur beim naechsten Start.
-# (Identischer Bug/Fix wie in helper/archivio_helper.py — beide Menubar-Apps hatten
-# unabhaengige Kopien desselben Codes.)
-
-def _server_app_path() -> Path:
-    """Pfad der .app selbst, ausgehend vom eingebetteten Python
-    (.../Archivio Server.app/Contents/Frameworks/archivio-python-ARCH/bin/python3)."""
-    return Path(sys.executable).parent.parent.parent.parent.parent
-
-
-def _autostart_enabled() -> bool:
-    try:
-        app_path = str(_server_app_path())
-        r = subprocess.run(
-            ["osascript", "-e",
-             f'tell application "System Events" to return '
-             f'(path of every login item) contains "{app_path}"'],
-            capture_output=True, text=True, timeout=5,
-        )
-        return r.stdout.strip().lower() == "true"
-    except Exception:
-        return False
-
-
-def _repair_broken_autostart_entries() -> bool:
-    """Entfernt Login-Items, die (durch den frueheren Pfad-Bug) auf den
-    Contents-Unterordner einer Archivio-Server.app zeigen statt auf die .app selbst.
-    Gibt True zurueck, wenn mind. ein kaputter Eintrag gefunden/entfernt wurde."""
-    try:
-        r = subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to get path of every login item '
-             'whose path contains "Archivio Server.app/Contents"'],
-            capture_output=True, text=True, timeout=5,
-        )
-        broken = [p.strip() for p in r.stdout.split(",") if p.strip()]
-        if not broken:
-            return False
-        subprocess.run(
-            ["osascript", "-e",
-             'tell application "System Events" to delete '
-             '(every login item whose path contains "Archivio Server.app/Contents")'],
-            timeout=5,
-        )
-        log.info("Kaputte Autostart-Login-Items entfernt: %s", broken)
-        return True
-    except Exception as e:
-        log.warning("Autostart-Reparatur fehlgeschlagen: %s", e)
-        return False
-
-
-def _set_autostart(enabled: bool):
-    app_path = str(_server_app_path())
-    if enabled:
-        script = (f'tell application "System Events" to make new login item '
-                  f'at end with properties {{path:"{app_path}", hidden:true}}')
-    else:
-        script = ('tell application "System Events" to delete '
-                  '(every login item whose path contains "Archivio Server.app")')
-    try:
-        subprocess.run(["osascript", "-e", script], timeout=5)
-    except Exception as e:
-        log.error("Autostart fehlgeschlagen: %s", e)
-
-
 # ── App ───────────────────────────────────────────────────────────────────────
 
 _ICON = str(_HERE / "icon.png")
@@ -710,17 +469,20 @@ class ArchivioServer(rumps.App):
         # NIE von selbst verschwinden: er startet die App ja nicht (nur Finder),
         # kann also auch keinen eigenen Reparatur-Code ausloesen — erst das manuelle
         # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
-        if _repair_broken_autostart_entries():
-            rumps.notification(
-                "Archivio Server",
-                "Fehlerhaften Autostart-Eintrag entfernt",
-                "Bitte bei Bedarf im Menü erneut aktivieren.",
-            )
-        self._autostart_item.state = _autostart_enabled()
+        bridge.repair_broken_autostart_entries("Archivio Server", log)
+        self._autostart_item.state = bridge.autostart_enabled()
 
-        _start_local_server()
-        _register_url_handler()
-        _ensure_quick_action_installed()
+        # config_provider liefert die eigene Adresse — dieselbe fest verdrahtete
+        # localhost:8000, die dieser Prozess an anderen Stellen (_wait_for_server,
+        # _server_responds) bereits verwendet. Ermoeglicht archivio_mcp.py, das jetzt
+        # auch im Server-Bundle liegt, sich selbst darueber aufzuloesen.
+        bridge.start_local_server(
+            "Archivio Server", log,
+            config_provider=lambda: "http://127.0.0.1:8000",
+        )
+        bridge.register_url_handler(log)
+        bridge.ensure_mcp_registered("Archivio Server", log)
+        bridge.ensure_quick_action_installed(log)
         threading.Thread(target=self._boot, daemon=True).start()
 
     def _boot(self):
@@ -758,7 +520,7 @@ class ArchivioServer(rumps.App):
 
     def toggle_autostart(self, sender):
         new_state = sender.state != 1
-        _set_autostart(new_state)
+        bridge.set_autostart(new_state, log)
         sender.state = new_state
 
     def _ki_action(self, _):
