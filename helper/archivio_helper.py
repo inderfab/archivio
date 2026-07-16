@@ -147,12 +147,12 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
             # URL-Schemas (z.B. message://, mailto:) direkt öffnen ohne Datei-Check
             if "://" in path and not path.startswith("/"):
                 subprocess.run(["open", path], timeout=5)
-                self._cors_headers(200)
+                self._html_response(200, "✓ Wird geöffnet …")
             else:
                 p = Path(path)
                 if p.exists():
                     subprocess.run(["open", str(p)], timeout=5)
-                    self._cors_headers(200)
+                    self._html_response(200, "✓ Wird geöffnet …")
                 else:
                     self._not_found(path)
 
@@ -160,7 +160,7 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
             p = Path(path)
             if p.exists():
                 subprocess.run(["open", "-R", str(p)], timeout=5)
-                self._cors_headers(200)
+                self._html_response(200, "✓ Im Finder angezeigt")
             else:
                 self._not_found(path)
 
@@ -172,7 +172,7 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
             # ab (Single Source of Truth — dieselbe config.json, die das Menü pflegt).
             cfg = _load_config()
             body = json.dumps({"server_url": cfg.get("server_url", "")}).encode("utf-8")
-            self._cors_headers(200, body)
+            self._cors_headers(200, body, "application/json")
 
         else:
             self._cors_headers(400)
@@ -182,19 +182,43 @@ class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         # (Nicht-Haupt-)Thread eine Exception werfen; passierte das vor dem
         # Senden, käme beim Aufrufer eine leere Antwort statt eines sauberen 404.
         log.warning("Datei nicht gefunden: %s", path)
-        self._cors_headers(404)
+        self._html_response(404, f"⚠ Datei nicht gefunden: {path}", autoclose=False)
         try:
             rumps.notification("Archivio Helper", "Datei nicht gefunden", path)
         except Exception as e:
             log.warning("Notification fehlgeschlagen: %s", e)
 
-    def _cors_headers(self, code: int, body: bytes | None = None):
+    def _html_response(self, code: int, message: str, autoclose: bool = True):
+        # Wird angezeigt, wenn jemand /open oder /reveal als reinen http(s)-Link
+        # aufruft (z.B. aus Notion oder Mail eingefügt, statt über fetch() aus der
+        # Archivio-Weboberfläche) — dabei öffnet der Browser zwangsläufig einen Tab.
+        # window.close() klappt nur bei Tabs, die per Skript geöffnet wurden (Browser-
+        # Sicherheitsregel) — bei per Klick geöffneten Tabs bleibt der Versuch wirkungslos,
+        # zeigt aber wenigstens eine saubere Meldung statt nacktem "ok"/"error"-Text.
+        close_script = (
+            "<script>setTimeout(function(){ window.close(); }, 300);</script>"
+            if autoclose else ""
+        )
+        html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>Archivio Helper</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
+          justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
+  .box {{ text-align:center; }}
+  .hint {{ color:#888; font-size:13px; margin-top:8px; }}
+</style></head>
+<body><div class="box"><div>{message}</div>
+<div class="hint">Dieser Tab kann geschlossen werden.</div></div>
+{close_script}
+</body></html>"""
+        self._cors_headers(code, html.encode("utf-8"), "text/html")
+
+    def _cors_headers(self, code: int, body: bytes | None = None, content_type: str = "text/plain"):
         self.send_response(code)
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, OPTIONS")
         self.send_header("Access-Control-Allow-Private-Network", "true")
-        ctype = "application/json" if body is not None else "text/plain"
-        self.send_header("Content-Type", f"{ctype}; charset=utf-8")
+        self.send_header("Content-Type", f"{content_type}; charset=utf-8")
         self.end_headers()
         if body is not None:
             self.wfile.write(body)
