@@ -1,6 +1,7 @@
 """Archivio Server – macOS Menubar-App. Startet und verwaltet den FastAPI-Server."""
 from __future__ import annotations
 
+import json
 import logging
 import os
 import shutil
@@ -14,6 +15,7 @@ import requests
 import rumps
 
 import menubar_bridge as bridge
+import updater
 
 OLLAMA_EMBED_MODEL = "nomic-embed-text"
 OLLAMA_LLM_MODEL   = "llama3.2:3b"
@@ -29,9 +31,7 @@ _DATA_DIR   = (Path.home() / "Library" / "Application Support" / "Archivio") if 
 _VENV       = _DATA_DIR / ".venv" if _IN_BUNDLE else _CODE_ROOT / ".venv"
 _VERSION    = _HERE / "VERSION" if _IN_BUNDLE else _CODE_ROOT / "VERSION"
 _EXAMPLE    = _CODE_ROOT / "config.yaml.example"
-
-GITHUB_REPO = "inderfab/archivio"
-ASSET_NAME  = "archivio-server"
+_UPDATE_STATE = _DATA_DIR / "update_state.json"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 
@@ -408,27 +408,31 @@ def _local_version() -> str:
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
-def _check_update() -> tuple[str, str] | None:
-    """Prüft GitHub Releases. Gibt (version, download_url) zurück oder None."""
+def _last_notified_version() -> str | None:
     try:
-        resp = requests.get(
-            f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
-            timeout=10,
-            headers={"Accept": "application/vnd.github+json"},
-        )
-        if resp.status_code != 200:
-            return None
-        data       = resp.json()
-        remote_ver = data.get("tag_name", "").lstrip("v")
-        if not remote_ver or remote_ver == _local_version():
-            return None
-        for asset in data.get("assets", []):
-            if ASSET_NAME in asset["name"]:
-                return remote_ver, asset["browser_download_url"]
+        return json.loads(_UPDATE_STATE.read_text()).get("notified_version")
+    except Exception:
         return None
+
+
+def _remember_notified_version(version: str):
+    try:
+        _UPDATE_STATE.parent.mkdir(parents=True, exist_ok=True)
+        _UPDATE_STATE.write_text(json.dumps({"notified_version": version}))
     except Exception as e:
-        log.warning("Update-Check fehlgeschlagen: %s", e)
-        return None
+        log.warning("Update-Status konnte nicht gespeichert werden: %s", e)
+
+
+def _update_watchdog(app: "ArchivioServer"):
+    time.sleep(60)
+    while True:
+        try:
+            info = updater.pruefe_update(_local_version(), log)
+            if info:
+                app._on_update_found(info)
+        except Exception as e:
+            log.warning("Update-Watchdog: %s", e)
+        time.sleep(24 * 60 * 60)
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
@@ -447,6 +451,9 @@ class ArchivioServer(rumps.App):
         self._ki_item       = rumps.MenuItem("⬤  KI-Suche …", callback=self._ki_action)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
+        self._update_item = rumps.MenuItem(
+            "Update verfügbar", callback=self._install_pending_update)
+        self._pending_update_info: updater.UpdateInfo | None = None
 
         self.menu = [
             self._title_item,
@@ -463,6 +470,8 @@ class ArchivioServer(rumps.App):
             rumps.separator,
             rumps.MenuItem("Beenden", callback=self.quit_app),
         ]
+        self.menu.insert_before("Archivio Server", self._update_item)
+        self._update_item.hidden = True
         # Reparatur EINMALIG beim Start — kaputte Login-Items (frueherer Pfad-Bug,
         # zeigen auf Contents statt die .app, oeffnen bei jedem Login ein
         # Finder-Fenster) entfernen. Ohne diese Reparatur wuerde ein kaputter Eintrag
@@ -490,6 +499,7 @@ class ArchivioServer(rumps.App):
         threading.Thread(target=_ensure_ollama_models, daemon=True).start()
         threading.Thread(target=_server_memory_watchdog, daemon=True).start()
         threading.Thread(target=_probe_permissions, daemon=True).start()
+        threading.Thread(target=_update_watchdog, args=(self,), daemon=True).start()
         time.sleep(3)
         self._status_loop()
 
@@ -532,33 +542,44 @@ class ArchivioServer(rumps.App):
 
     def check_update(self, _):
         current = _local_version()
-        try:
-            resp = requests.get(
-                f"https://api.github.com/repos/{GITHUB_REPO}/releases/latest",
-                timeout=10,
-                headers={"Accept": "application/vnd.github+json"},
-            )
-            if resp.status_code != 200:
-                rumps.alert(f"Update-Check fehlgeschlagen (HTTP {resp.status_code}).")
-                return
-            data       = resp.json()
-            remote_ver = data.get("tag_name", "").lstrip("v")
-            log.info("Update-Check: lokal=%s github=%s", current, remote_ver)
-            if not remote_ver:
-                rumps.alert("Kein Release auf GitHub gefunden.")
-                return
-            if remote_ver == current:
-                rumps.alert(f"Archivio Server {current} ist aktuell.")
-                return
+        info = updater.pruefe_update(current, log)
+        log.info("Update-Check (manuell): lokal=%s gefunden=%s", current,
+                  info.version if info else None)
+        if not info:
+            rumps.alert(f"Archivio Server {current} ist aktuell oder Prüfung nicht möglich.")
+            return
+        self._offer_install(info)
+
+    def _on_update_found(self, info: updater.UpdateInfo):
+        self._update_item.title = f"⬆ Update auf v{info.version} verfügbar"
+        self._update_item.hidden = False
+        self._pending_update_info = info
+        if _last_notified_version() != info.version:
+            _notify(f"Update auf v{info.version} verfügbar")
+            _remember_notified_version(info.version)
+
+    def _offer_install(self, info: updater.UpdateInfo):
+        if not rumps.alert(
+            title="Update verfügbar",
+            message=f"Version {info.version} verfügbar (aktuell: {_local_version()}).\n"
+                    f"Jetzt herunterladen und installieren?",
+            ok="Installieren", cancel="Abbrechen",
+        ):
+            return
+        pkg = updater.lade_und_pruefe(info, log)
+        if not pkg:
             if rumps.alert(
-                title="Update verfügbar",
-                message=f"Version {remote_ver} verfügbar (aktuell: {current}).\nZur Download-Seite öffnen?",
+                title="Update fehlgeschlagen",
+                message="Download oder Signaturprüfung fehlgeschlagen.\nZur Download-Seite öffnen?",
                 ok="Zur Download-Seite", cancel="Abbrechen",
             ):
                 subprocess.run(["open", "https://inderfab.github.io/archivio/index.html"])
-        except Exception as e:
-            log.warning("Update-Check fehlgeschlagen: %s", e)
-            rumps.alert(f"Update-Check fehlgeschlagen:\n{e}")
+            return
+        updater.installiere(pkg)
+
+    def _install_pending_update(self, _):
+        if self._pending_update_info:
+            self._offer_install(self._pending_update_info)
 
     def quit_app(self, _):
         _stop_server()

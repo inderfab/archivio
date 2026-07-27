@@ -154,6 +154,30 @@ einmalig pro Mac und wird lokal gecacht — jede weitere Installation/jeder weit
 derselben Maschine ist wieder so schnell wie vorher. Bestätigt am 2026-07-27 auf einem
 Intel-iMac: erste `.pkg`-Installation ~10 Min, zweite Installation direkt danach wieder <1 Min.
 
+### Automatische Updates (Server) — Kapitel 2
+
+`menubar/updater.py` prüft im Hintergrund (60s nach Start, danach alle 24h) über die
+GitHub-Releases-API (`GITHUB_REPO = "inderfab/archivio"`), ob eine neuere Server-Version
+existiert (`packaging.version.Version`-Vergleich statt String-`==`). Kein Sparkle, keine
+eigene Kryptografie — Sicherheitsanker ist ausschließlich Apples eigene Signaturkette:
+heruntergeladene `.pkg`-Dateien werden per `pkgutil --check-signature` (Signer-Typ
+"Developer ID Installer" + Team-ID `2USYCLVGTM`) und zusätzlich `spctl -a -t install`
+verifiziert, bevor der Installer angeboten wird. Jede fehlgeschlagene Prüfung löscht die
+Datei sofort und bietet stattdessen die Download-Seite an. Installation ist bewusst nicht
+still: `open <pkg>` öffnet den normalen System-Installer, kein Root-Install im Hintergrund
+(kein `SMJobBless`, keine privilegierte Helper-Instanz).
+
+Im Menü erscheint bei gefundenem Update ein zunächst verstecktes Item ganz oben
+("⬆ Update auf vX.X.X verfügbar", via `rumps`-`insert_before`/`.hidden`), plus einmalige
+Benachrichtigung pro Version (`~/Library/Application Support/Archivio/update_state.json`
+verhindert Wiederholung bei jedem Tages-Check). Der bestehende manuelle Menüpunkt
+"Auf Updates prüfen…" nutzt dieselbe Logik.
+
+Das Postinstall-Skript (`scripts/build_server_app.sh`) deckt den Update-Fall bereits ab,
+unverändert seit Kapitel 1: `launchctl bootout` → `pkill` alte Instanz → `launchctl
+bootstrap`/`load` neu — die App startet ihr eigenes `.pkg` also auch **während sie noch
+läuft** sauber neu.
+
 ---
 
 ## 5. Zuverlässigkeit / Auto-Restart (zwei Ebenen)

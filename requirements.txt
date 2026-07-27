@@ -21,3 +21,4 @@ numpy>=1.26
 
 # System
 psutil>=5.9
+packaging>=23.0        # Versionsvergleich für den Server-Auto-Updater
