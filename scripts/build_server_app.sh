@@ -3,6 +3,7 @@
 # Aufruf: bash scripts/build_server_app.sh
 set -e
 cd "$(dirname "$0")/.."
+source scripts/sign_lib.sh
 
 DIST="dist"
 APP_NAME="Archivio Server"
@@ -98,7 +99,6 @@ _build_python "x86_64-apple-darwin"  "x86_64"
 # ── Bundle-Struktur ────────────────────────────────────────────────────────────
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
-mkdir -p "$APP/Contents/Frameworks"
 
 # Helper zuerst bauen (wird als Download angeboten)
 bash helper/build.sh
@@ -107,6 +107,9 @@ bash helper/build.sh
 for dir in web scanner db config; do
   cp -r "$dir" "$APP/Contents/Resources/"
 done
+# entitlements.plist ist ein Build-Zeit-Artefakt fuer die Signierung (sign_lib.sh), gehoert
+# nicht in Resources/config/ (Python-Settings-Modul) hinein.
+rm -f "$APP/Contents/Resources/config/entitlements.plist"
 # Nur einzelne, für den Nutzer relevante Admin-Skripte — NICHT den ganzen scripts/-Ordner
 # (der auch Build-/Dev-Tooling wie build_server_app.sh selbst enthält).
 mkdir -p "$APP/Contents/Resources/scripts"
@@ -131,10 +134,17 @@ mkdir -p "$APP/Contents/Resources/dist"
 cp "dist/archivio-helper-${HELPER_VERSION}.zip" "$APP/Contents/Resources/dist/"
 
 # Python-Umgebungen ins Bundle kopieren und bereinigen
+# Liegt bewusst unter Resources/, NICHT Frameworks/: codesign behandelt jedes Verzeichnis
+# direkt unter Contents/Frameworks/ als vermeintliches Nested-Framework-Bundle und lehnt es
+# ohne gueltige Framework-Struktur (Versions/, eigenes Info.plist) mit "bundle format
+# unrecognized" ab -- das verhindert jede Signierung des Gesamtbundles. Unter Resources/
+# gilt der Inhalt als normale Ressourcen, sign_inner signiert die einzelnen Mach-O-Dateien
+# trotzdem korrekt. app_path() in shared/menubar_bridge.py bleibt unveraendert: Resources/
+# liegt auf derselben Verschachtelungstiefe wie Frameworks/ unter Contents/.
 _install_python_to_bundle() {
     local ARCH_TAG="$1"
     local SRC="$DIST/.python-installed-$ARCH_TAG"
-    local DST="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+    local DST="$APP/Contents/Resources/archivio-python-$ARCH_TAG"
 
     if [ ! -x "$SRC/bin/python3" ]; then
         echo "  ⚠  $ARCH_TAG: kein Python — wird übersprungen"
@@ -158,26 +168,13 @@ echo "→ Python-Umgebungen ins Bundle kopieren…"
 _install_python_to_bundle "arm64"
 _install_python_to_bundle "x86_64"
 
-# ── Ad-hoc Code-Signierung ────────────────────────────────────────────────────
-# Erforderlich damit macOS Gatekeeper die nativen Bibliotheken (.so, .dylib) zulässt.
-if command -v codesign &>/dev/null; then
-    echo "→ Ad-hoc Code-Signierung…"
-    for ARCH_TAG in arm64 x86_64; do
-        PF="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
-        [ -d "$PF" ] || continue
-        # .so und .dylib signieren (inner-to-outer)
-        find "$PF" \( -name "*.so" -o -name "*.dylib" \) -type f \
-            | while read -r f; do
-                codesign -s - --force "$f" 2>/dev/null || true
-            done
-        # Python-Binary signieren
-        find "$PF/bin" -type f \
-            | while read -r f; do
-                codesign -s - --force "$f" 2>/dev/null || true
-            done
-    done
-    echo "  Signierung abgeschlossen (nur Binaries, nicht Bundle)"
-fi
+# ── Code-Signierung der eingebetteten Python-Umgebungen ─────────────────────────
+# sign_inner (scripts/sign_lib.sh) signiert mit ARCHIVIO_SIGN_APP falls gesetzt, sonst
+# ad-hoc wie bisher — lokale Entwicklung ohne Zertifikat bleibt unveraendert moeglich.
+echo "→ Code-Signierung (Frameworks)…"
+for ARCH_TAG in arm64 x86_64; do
+    sign_inner "$APP/Contents/Resources/archivio-python-$ARCH_TAG"
+done
 
 # ── Launcher-Script ────────────────────────────────────────────────────────────
 cat > "$APP/Contents/MacOS/Archivio Server" <<'LAUNCHER'
@@ -190,7 +187,7 @@ echo "$(date): Archivio Server v$(cat "$RESOURCES/VERSION" 2>/dev/null) starting
 
 # ── 1. Eingebettetes Python (immer bevorzugt — FDA über App-Bundle) ───────────
 ARCH=$(uname -m)
-EMBEDDED_PY="$BUNDLE/Frameworks/archivio-python-$ARCH/bin/python3"
+EMBEDDED_PY="$RESOURCES/archivio-python-$ARCH/bin/python3"
 if [ -x "$EMBEDDED_PY" ]; then
     echo "$(date): Eingebettetes Python ($ARCH): $("$EMBEDDED_PY" --version 2>&1)"
     exec "$EMBEDDED_PY" "$RESOURCES/archivio_server.py"
@@ -302,6 +299,12 @@ PLIST
 
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
+# ── Bundle signieren + notarisieren (vor dem ZIP — Staple in ein fertiges Zip
+#    funktioniert nicht, siehe scripts/sign_lib.sh) ─────────────────────────────
+echo "→ Code-Signierung (Bundle)…"
+sign_bundle "$APP"
+notarize_and_staple "$APP"
+
 # ── ZIP (für Self-Update) ─────────────────────────────────────────────────────
 cd "$DIST"
 zip -r "archivio-server-${VERSION}.zip" "$APP_NAME.app" \
@@ -398,13 +401,23 @@ exit 0
 POSTINSTALL
 chmod +x "$PKG_SCRIPTS/postinstall"
 
+PKGBUILD_SIGN_ARGS=()
+if [ -n "$ARCHIVIO_SIGN_INSTALLER" ]; then
+  PKGBUILD_SIGN_ARGS=(--sign "$ARCHIVIO_SIGN_INSTALLER")
+else
+  echo "⚠️  ARCHIVIO_SIGN_INSTALLER nicht gesetzt — .pkg bleibt unsigniert"
+fi
+
 pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \
   --identifier "io.archivio.server" \
   --version "$VERSION" \
   --install-location "/" \
+  "${PKGBUILD_SIGN_ARGS[@]}" \
   "$PKG"
 
 rm -rf "$PKG_ROOT" "$PKG_SCRIPTS"
 echo "✓ $PKG erstellt"
+
+notarize_and_staple "$PKG"
