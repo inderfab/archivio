@@ -31,10 +31,18 @@ sign_inner() {
     local ROOT="$1"
     [ -d "$ROOT" ] || return 0
     if [ -n "$ARCHIVIO_SIGN_APP" ]; then
+        # --entitlements ist hier zwingend, nicht nur kosmetisch: Der Launcher ist ein
+        # Bash-Skript, das per `exec` direkt in den eingebetteten python3-Prozess wechselt.
+        # Entitlements gelten pro Mach-O-Datei, nicht vererbt ueber exec hinweg — ohne sie
+        # hier hat der tatsaechlich laufende python3-Prozess Hardened Runtime OHNE die
+        # noetigen Ausnahmen (disable-library-validation, allow-unsigned-executable-memory)
+        # und wird vom Kernel beim ersten Versuch, ausfuehrbaren Speicher zu allozieren
+        # (numpy/cryptography/lxml/pymupdf), sofort und ohne jede Fehlermeldung getoetet.
         find "$ROOT" \( -name "*.so" -o -name "*.dylib" -o -perm +111 \) -type f -print0 \
             | while IFS= read -r -d '' f; do
                 file "$f" | grep -q 'Mach-O' || continue
                 codesign --force --timestamp --options runtime \
+                         --entitlements config/entitlements.plist \
                          --sign "$ARCHIVIO_SIGN_APP" "$f" 2>/dev/null || true
             done
     else

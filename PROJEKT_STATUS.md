@@ -127,6 +127,33 @@ Python-Umgebungen liegen jetzt unter `Contents/Resources/archivio-python-{arch}/
 Verschachtelungstiefe, `app_path()` in `shared/menubar_bridge.py` musste dafür nicht
 geändert werden). `Contents/Frameworks/` wird seither gar nicht mehr angelegt.
 
+**Zweite harte Falle (iMac-Akzeptanztest, stiller Absturz ohne jede Fehlermeldung):**
+`sign_inner` in `scripts/sign_lib.sh` signierte alle inneren Mach-O-Dateien (inkl. des
+eingebetteten `python3`-Interpreters selbst) mit `--options runtime` (Hardened Runtime AN),
+aber **ohne `--entitlements`**. Der Launcher ist ein Bash-Skript, das per `exec` direkt in
+den `python3`-Prozess wechselt — Entitlements gelten pro Mach-O-Datei, nicht vererbt über
+`exec` hinweg. Der tatsächlich laufende `python3`-Prozess hatte damit Hardened Runtime OHNE
+die nötigen Ausnahmen (`disable-library-validation`, `allow-unsigned-executable-memory`) und
+wurde vom Kernel beim ersten Versuch, ausführbaren Speicher zu allozieren
+(numpy/cryptography/lxml/pymupdf u.a.), sofort per SIGKILL getötet — **noch bevor Python
+irgendeine Ausgabe schreiben konnte**. Symptom: App startet laut Log ("Archivio Server vX.X.X
+starting", Python-Version wird geprintet), dann nichts mehr — kein Traceback, kein Fehler,
+kein Dock-Hüpfen. macOS zeigt ggf. "kann nicht geöffnet werden, weil es nicht reagiert" unter
+Datenschutz & Sicherheit. Fix: `--entitlements config/entitlements.plist` auch beim inneren
+Signieren (`sign_inner`) mitgeben, nicht nur beim äußeren Bundle (`sign_bundle`).
+**Lehre:** bei allem, was per `exec` in einen eingebetteten Interpreter wechselt, müssen die
+Entitlements auf der tatsächlich exec'ten Binary sitzen, nicht nur auf dem Launcher/Bundle.
+
+**Erwartetes (kein Bug!) Verhalten: erste Installation auf einem neuen Mac dauert ~10 Minuten.**
+Vorher (ad-hoc-signiert) prüfte Gatekeeper praktisch nichts → Installation quasi instant. Mit
+echter Signatur + Notarisierung validiert macOS bei der `.pkg`-Installation die Codesignatur
+**jeder einzelnen** Mach-O-Datei im Bundle gegen die Zertifikatskette — und die zwei
+eingebetteten Python-Umgebungen (arm64 + x86_64) enthalten hunderte kompilierte `.so`/`.dylib`
+(numpy, cryptography, lxml, pymupdf, tcl/tk …), jede einzeln signiert. Diese Tiefenprüfung ist
+einmalig pro Mac und wird lokal gecacht — jede weitere Installation/jeder weitere Start auf
+derselben Maschine ist wieder so schnell wie vorher. Bestätigt am 2026-07-27 auf einem
+Intel-iMac: erste `.pkg`-Installation ~10 Min, zweite Installation direkt danach wieder <1 Min.
+
 ---
 
 ## 5. Zuverlässigkeit / Auto-Restart (zwei Ebenen)
