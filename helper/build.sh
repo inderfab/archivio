@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 # Baut Archivio Helper.app als macOS Bundle und packt sie als ZIP.
 # Enthaelt ein eingebettetes Python (rumps + requests + mcp) — kein Xcode/pip beim Nutzer noetig.
+# Laeuft immer mit cwd = Repo-Wurzel (direkt aufgerufen oder von build_server_app.sh aus).
 set -e
+source scripts/sign_lib.sh
 
 DIST="dist"
 APP_NAME="Archivio Helper"
@@ -16,7 +18,6 @@ mkdir -p "$DIST"
 rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS"
 mkdir -p "$APP/Contents/Resources"
-mkdir -p "$APP/Contents/Frameworks"
 
 # ── Minimales eingebettetes Python (rumps + requests + mcp) ─────────────────────
 # Basis-Python wird vom Server-Build (.python-base-*) wiederverwendet, sonst geladen.
@@ -67,8 +68,12 @@ for a in rel['assets']:
         echo "  $ARCH_TAG: Cache gültig"
     fi
 
-    # ins Bundle kopieren + bereinigen
-    local DST="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
+    # ins Bundle kopieren + bereinigen. Bewusst Resources/, nicht Frameworks/: codesign
+    # behandelt jedes Verzeichnis direkt unter Contents/Frameworks/ als vermeintliches
+    # Nested-Framework-Bundle und lehnt es ohne gueltige Framework-Struktur ab ("bundle
+    # format unrecognized") — das verhindert jede Signierung des Gesamtbundles. app_path()
+    # in shared/menubar_bridge.py bleibt unveraendert: gleiche Verschachtelungstiefe.
+    local DST="$APP/Contents/Resources/archivio-python-$ARCH_TAG"
     cp -r "$PY_HELPER" "$DST"
     find "$DST" -name "__pycache__" -type d -exec rm -rf {} + 2>/dev/null || true
     find "$DST" -name "*.pyc"  -delete 2>/dev/null || true
@@ -80,19 +85,11 @@ echo "→ Helper-Python vorbereiten…"
 _build_helper_python "aarch64-apple-darwin" "arm64"
 _build_helper_python "x86_64-apple-darwin"  "x86_64"
 
-# Ad-hoc Code-Signierung der nativen Bibliotheken (Gatekeeper)
-if command -v codesign &>/dev/null; then
-    for ARCH_TAG in arm64 x86_64; do
-        PF="$APP/Contents/Frameworks/archivio-python-$ARCH_TAG"
-        [ -d "$PF" ] || continue
-        find "$PF" \( -name "*.so" -o -name "*.dylib" \) -type f | while read -r f; do
-            codesign -s - --force "$f" 2>/dev/null || true
-        done
-        find "$PF/bin" -type f | while read -r f; do
-            codesign -s - --force "$f" 2>/dev/null || true
-        done
-    done
-fi
+# Code-Signierung der nativen Bibliotheken (ARCHIVIO_SIGN_APP falls gesetzt, sonst ad-hoc
+# wie bisher — siehe scripts/sign_lib.sh)
+for ARCH_TAG in arm64 x86_64; do
+    sign_inner "$APP/Contents/Resources/archivio-python-$ARCH_TAG"
+done
 
 # ── Launcher: eingebettetes Python bevorzugen, venv nur als Fallback ────────────
 cat > "$APP/Contents/MacOS/Archivio Helper" <<'LAUNCHER'
@@ -105,7 +102,7 @@ echo "$(date): Archivio Helper starting"
 
 # 1. Eingebettetes Python (kein Xcode/pip noetig)
 ARCH=$(uname -m)
-EMBEDDED_PY="$BUNDLE/Frameworks/archivio-python-$ARCH/bin/python3"
+EMBEDDED_PY="$DIR/archivio-python-$ARCH/bin/python3"
 if [ -x "$EMBEDDED_PY" ]; then
     echo "$(date): Eingebettetes Python ($ARCH): $("$EMBEDDED_PY" --version 2>&1)"
     exec "$EMBEDDED_PY" "$DIR/archivio_helper.py"
@@ -190,10 +187,12 @@ PLIST
 
 echo -n "APPL????" > "$APP/Contents/PkgInfo"
 
-# App-Bundle ad-hoc signieren (nach allen Änderungen)
-if command -v codesign &>/dev/null; then
-    codesign -s - --force --deep "$APP" 2>/dev/null || true
-fi
+# Bundle signieren + notarisieren (vor dem ZIP — Staple in ein fertiges Zip
+# funktioniert nicht, siehe scripts/sign_lib.sh). --deep bewusst nicht mehr verwendet
+# (von Apple deprecated, war nie der richtige Weg) — sign_bundle signiert von innen nach
+# aussen selbst.
+sign_bundle "$APP"
+notarize_and_staple "$APP"
 
 # ── ZIP ────────────────────────────────────────────────────────────────────────
 cd "$DIST"

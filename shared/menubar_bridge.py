@@ -32,7 +32,7 @@ CLAUDE_CONFIG_PATH = (
 
 def app_path() -> Path:
     """.app-Bundle-Pfad, abgeleitet vom eingebetteten Python — funktioniert für Server
-    und Helper gleichermassen (identische Bundle-Tiefe: .../Contents/Frameworks/
+    und Helper gleichermassen (identische Bundle-Tiefe: .../Contents/Resources/
     archivio-python-<arch>/bin/python3)."""
     return Path(sys.executable).parent.parent.parent.parent.parent
 
