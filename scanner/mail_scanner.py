@@ -23,10 +23,12 @@ log = logging.getLogger(__name__)
 # ── IMAP-Verbindung ───────────────────────────────────────────────────────────
 
 def connect_imap(password: str | None = None) -> imaplib.IMAP4_SSL:
-    host     = settings.get("mail.host",     "imap.mail.hostpoint.ch")
+    host     = settings.get("mail.host", "")
     port     = int(settings.get("mail.port", 993))
     username = settings.get("mail.username", "")
     pw       = password or settings.get("mail.password", "")
+    if not host:
+        raise ValueError("Kein IMAP-Server konfiguriert (mail.host fehlt)")
     # Socket-Timeout: hängende IMAP-Operationen nach 30s abbrechen
     client   = imaplib.IMAP4_SSL(host, port)
     client.socket().settimeout(30)

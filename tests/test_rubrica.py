@@ -5,13 +5,13 @@ from config import settings
 from db.rubrica import get_rubrica_connection, save_signature_source
 
 
-def _record(message_id="m1", raw_text="Hallo\n\nFreundliche Grüsse\nFabio Indergand\n052 214 20 37"):
+def _record(message_id="m1", raw_text="Hallo\n\nFreundliche Grüsse\nMax Muster\n052 000 00 00"):
     return {
         "message_id":   message_id,
         "mail_date":    "2026-01-02T10:00:00+01:00",
-        "sender":       "Fabio Indergand <fi@strut.ch>",
-        "sender_email": "fi@strut.ch",
-        "recipients":   "pk@strut.ch",
+        "sender":       "Max Muster <max@example.com>",
+        "sender_email": "max@example.com",
+        "recipients":   "empfang@example.com",
         "cc":           "",
         "subject":      "Grundriss Rückmeldung",
         "raw_text":     raw_text,
@@ -43,8 +43,8 @@ def test_enabled_inserts_pending_row(tmp_db):
 
     assert row is not None
     assert row["status"] == "pending"
-    assert row["absender_email"] == "fi@strut.ch"
-    assert row["empfaenger"] == "pk@strut.ch"
+    assert row["absender_email"] == "max@example.com"
+    assert row["empfaenger"] == "empfang@example.com"
     assert row["projekt"] == "215 Flurhofstrasse St-Gallen"
     assert row["postfach"] == "INBOX"
     assert "Freundliche Grüsse" in row["text"]
@@ -77,7 +77,7 @@ def test_save_mail_to_db_mirrors_full_text_while_search_gets_cleaned(tmp_db):
 
     record = _record(
         message_id="m2",
-        raw_text="Sehr geehrte Damen und Herren\n\nFreundliche Grüsse\nFabio Indergand\nStrut Architekten AG",
+        raw_text="Sehr geehrte Damen und Herren\n\nFreundliche Grüsse\nMax Muster\nBeispiel Architektur AG",
     )
     ok = save_mail_to_db(tmp_db, record, project_id, "INBOX", "P")
     assert ok is True
@@ -97,7 +97,7 @@ def test_save_mail_to_db_mirrors_full_text_while_search_gets_cleaned(tmp_db):
     row = rconn.execute("SELECT text FROM signatur_quelle WHERE message_id='m2'").fetchone()
     rconn.close()
     assert "Freundliche Grüsse" in row["text"]
-    assert "Strut Architekten AG" in row["text"]
+    assert "Beispiel Architektur AG" in row["text"]
 
 
 def test_settings_toggle_persists_enabled_and_preserves_db_path(tmp_db):

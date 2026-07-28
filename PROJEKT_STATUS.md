@@ -10,9 +10,8 @@
 
 ## 1. Was ist Archivio
 
-Vollständig **lokale** Dokumenten- und Mail-Suchplattform für das Architekturbüro (Peter Kunz
-Architektur / Strut Architekten). Keine Cloud. Läuft auf einem iMac im Büronetz, indexiert
-Dateien vom NAS und Mails per IMAP.
+Vollständig **lokale** Dokumenten- und Mail-Suchplattform für ein Architekturbüro. Keine
+Cloud. Läuft auf einem Mac im Büronetz, indexiert Dateien vom NAS und Mails per IMAP.
 
 - **Stack:** Python 3.13 (eingebettet), FastAPI, SQLite + FTS5, HTMX + Jinja2, rumps (Menubar-App), Ollama (Embeddings `nomic-embed-text` + LLM `llama3.2:3b`)
 - **Repo:** https://github.com/inderfab/archivio (GitHub-User: `inderfab`)
@@ -23,7 +22,7 @@ Dateien vom NAS und Mails per IMAP.
 
 ## 2. Infrastruktur
 
-**iMac — Produktions-Server (User `pas`, Intel):**
+**iMac — Produktions-Server (Intel):**
 - LAN: `http://windows.local:8000` (Gerätename ist „Windows"). Kann per Bonjour-LocalHostname zu `archivio.local` gemacht werden, oder per Router-DNS zu `archivio:8000`.
 - App: `/Applications/Archivio Server.app/` (per `.pkg` installiert)
 - DATA_DIR: `~/Library/Application Support/Archivio/` (DB, config.yaml, Helper-ZIP)
@@ -32,8 +31,8 @@ Dateien vom NAS und Mails per IMAP.
 - Ollama läuft dort (Port 11434)
 - **Autostart:** LaunchAgent `~/Library/LaunchAgents/io.archivio.server.plist` (siehe §5)
 
-**Dev-Mac (User `fi`, Apple Silicon) — hier wird entwickelt & gebaut:**
-- Pfad: `/Users/fi/archivio`
+**Dev-Mac (Apple Silicon) — hier wird entwickelt & gebaut:**
+- Pfad: lokaler Checkout des Repos (Repo-Wurzel)
 - venv: `.venv` (Python 3.9 — nur für Tests/lokalen Lauf; **psutil ggf. nachinstallieren**: `pip install psutil`, wird für walker-Tests gebraucht)
 - Lokaler Lauf: `.venv/bin/uvicorn web.main:app --reload --port 8000`
 - Build: `bash scripts/build_server_app.sh` (baut Server **und** Helper)
@@ -42,11 +41,11 @@ Dateien vom NAS und Mails per IMAP.
 **Mac Studio (Mitarbeiter, Apple Silicon):** Nur Helper installiert.
 
 **NAS (config.yaml, gitignored):**
-- Projekte: `/Volumes/Groups/Peter Kunz Architektur/Projekte`
-- Office: `/Volumes/Groups/Peter Kunz Architektur/Office`
-- Geteilt: `/Volumes/geteilte Projekte`
+- Projekte: `/Volumes/Groups/<Büro>/Projekte`
+- Office: `/Volumes/Groups/<Büro>/Office`
+- Geteilt: `/Volumes/<geteilter Ordner>`
 
-**Mail:** IMAP hostpoint, Konto `projekte@strut.ch`. **Passwort steht in `config.yaml` (gitignored) — DARF NIE nach GitHub.**
+**Mail:** IMAP, Konto siehe `config.yaml`. **Passwort steht in `config.yaml` (gitignored) — DARF NIE nach GitHub.**
 
 ---
 
