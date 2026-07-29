@@ -12,7 +12,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter, Form, Query, Request
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse, StreamingResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel
 
 from config import settings
@@ -160,10 +160,11 @@ async def retry_errors(request: Request):
 
 @router.get("/download/helper")
 async def download_helper():
-    """Liefert die Helper-ZIP aus — mit der server_url in config.json vorausgefuellt auf
-    die Adresse, unter der DIESER Server gerade erreichbar ist (dieselbe Funktion, die
-    auch den Hinweistext auf der Einstellungsseite berechnet — eine Quelle der Wahrheit).
-    Bleibt im Helper-Menü weiterhin änderbar, nur der Startwert ändert sich."""
+    """Liefert die Helper-ZIP unveraendert aus. Die server_url wird NICHT mehr hier
+    vorbelegt (patchte frueher config.json innerhalb der bereits signierten+notarisierten
+    Zip -- das bricht die Codesignatur, macOS zeigt dann "beschaedigt" statt der App.
+    Der Helper sucht den Server stattdessen selbst per mDNS (menubar_bridge.discover_servers),
+    siehe helper/archivio_helper.py)."""
     _, version = _helper_info()
     fname = f"archivio-helper-{version}.zip"
     src_path = None
@@ -175,44 +176,7 @@ async def download_helper():
     if not src_path:
         return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
 
-    import io
-    import zipfile
-
-    server_url = _helper_url_hint(settings.load_all())
-
-    def _patch_zip() -> bytes:
-        buf = io.BytesIO()
-        with zipfile.ZipFile(src_path, "r") as zin, \
-             zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zout:
-            for item in zin.infolist():
-                data = zin.read(item.filename)
-                if item.filename.endswith("Contents/Resources/config.json"):
-                    try:
-                        cfg_json = json.loads(data)
-                        cfg_json["server_url"] = server_url
-                        data = json.dumps(cfg_json, indent=2, ensure_ascii=False).encode("utf-8")
-                    except Exception:
-                        pass  # bei Parse-Fehler unveraendert durchreichen
-                # ZipInfo neu statt wiederverwenden — external_attr (u.a. Ausfuehr-Rechte
-                # des Launcher-Skripts) MUSS explizit kopiert werden, sonst verliert die
-                # gepatchte ZIP diese Rechte beim Neuschreiben.
-                new_item = zipfile.ZipInfo(item.filename, date_time=item.date_time)
-                new_item.external_attr = item.external_attr
-                new_item.compress_type = zipfile.ZIP_DEFLATED
-                zout.writestr(new_item, data)
-        return buf.getvalue()
-
-    try:
-        patched = _patch_zip()
-    except Exception as e:
-        log.warning("Helper-ZIP-Patch fehlgeschlagen, liefere Original: %s", e)
-        return FileResponse(src_path, media_type="application/zip", filename=fname)
-
-    return StreamingResponse(
-        iter([patched]),
-        media_type="application/zip",
-        headers={"Content-Disposition": f'attachment; filename="{fname}"'},
-    )
+    return FileResponse(src_path, media_type="application/zip", filename=fname)
 
 
 @router.get("/download/server")

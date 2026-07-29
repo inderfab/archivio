@@ -33,7 +33,8 @@ _build_python() {
     local PY_BASE="$DIST/.python-base-$ARCH_TAG"
     local PY_INSTALLED="$DIST/.python-installed-$ARCH_TAG"
     local STAMP="$DIST/.python-stamp-$ARCH_TAG"
-    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH:mcp"
+    local EXTRAS="rumps requests mcp zeroconf"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH:$EXTRAS"
 
     if [ "$(cat "$STAMP" 2>/dev/null)" = "$EXPECTED" ] && [ -x "$PY_INSTALLED/bin/python3" ]; then
         echo "  $ARCH_TAG: Cache gültig"
@@ -86,7 +87,7 @@ for a in rel['assets']:
     $PIP_CMD -m pip install --prefer-binary -q \
         --no-warn-script-location \
         -r requirements.txt \
-        rumps requests mcp
+        $EXTRAS
 
     echo "$EXPECTED" > "$STAMP"
     echo "  $ARCH_TAG: Pakete installiert"
@@ -240,13 +241,13 @@ if [ ! -d "$VENV" ]; then
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip -q
   "$VENV/bin/pip" install --prefer-binary -r "$RESOURCES/requirements.txt" -q
-  "$VENV/bin/pip" install --prefer-binary rumps requests mcp -q
+  "$VENV/bin/pip" install --prefer-binary rumps requests mcp zeroconf -q
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Installation abgeschlossen"
 elif [ "$(cat $VERSION_STAMP 2>/dev/null)" != "$CURRENT_VERSION" ]; then
   echo "$(date): Neue Version $CURRENT_VERSION – Abhängigkeiten aktualisieren"
   "$VENV/bin/pip" install -q --prefer-binary -r "$RESOURCES/requirements.txt" >/dev/null 2>&1 || true
-  "$VENV/bin/pip" install -q --prefer-binary rumps requests mcp >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q --prefer-binary rumps requests mcp zeroconf >/dev/null 2>&1 || true
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
 fi
 
@@ -307,7 +308,14 @@ sign_bundle "$APP"
 notarize_and_staple "$APP"
 
 # ── ZIP (für Self-Update) ─────────────────────────────────────────────────────
+# rm -f zwingend: "zip -r" auf ein bereits vorhandenes Zip (z. B. erneuter Build
+# derselben Version) aktualisiert nur geaenderte Eintraege und laesst inzwischen
+# geloeschte Dateien im Archiv zurueck -- das Ergebnis ist dann eine Mischung aus
+# altem und neuem Bundle-Inhalt, die nicht mehr zur gerade erst berechneten
+# Codesignatur passt ("ist beschaedigt" beim Endnutzer trotz gueltig signiertem
+# Bundle auf der Platte).
 cd "$DIST"
+rm -f "archivio-server-${VERSION}.zip"
 zip -r "archivio-server-${VERSION}.zip" "$APP_NAME.app" \
     -x "**/__pycache__/*" -x "**/*.pyc"
 cd ..

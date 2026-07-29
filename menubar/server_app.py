@@ -454,6 +454,7 @@ class ArchivioServer(rumps.App):
         self._update_item = rumps.MenuItem(
             "Update verfügbar", callback=self._install_pending_update)
         self._pending_update_info: updater.UpdateInfo | None = None
+        self._zc = self._zc_info = None
 
         self.menu = [
             self._title_item,
@@ -500,6 +501,7 @@ class ArchivioServer(rumps.App):
         threading.Thread(target=_server_memory_watchdog, daemon=True).start()
         threading.Thread(target=_probe_permissions, daemon=True).start()
         threading.Thread(target=_update_watchdog, args=(self,), daemon=True).start()
+        self._zc, self._zc_info = bridge.advertise_service(8000, log)
         time.sleep(3)
         self._status_loop()
 
@@ -582,6 +584,7 @@ class ArchivioServer(rumps.App):
             self._offer_install(self._pending_update_info)
 
     def quit_app(self, _):
+        bridge.stop_advertising(self._zc, self._zc_info, log)
         _stop_server()
         _stop_ollama()
         # Agent entladen, sonst startet KeepAlive=true die App sofort neu.

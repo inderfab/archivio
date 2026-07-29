@@ -29,7 +29,8 @@ _build_helper_python() {
     local PY_BASE="$DIST/.python-base-$ARCH_TAG"
     local PY_HELPER="$DIST/.python-helper-$ARCH_TAG"
     local STAMP="$DIST/.python-helper-stamp-$ARCH_TAG"
-    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:rumps+requests+mcp"
+    local EXTRAS="rumps requests mcp zeroconf"
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$EXTRAS"
 
     # Basis-Python sicherstellen
     if [ "$(cat "$PY_BASE/.version" 2>/dev/null)" != "$PYTHON_VERSION:$PBS_ARCH" ]; then
@@ -62,7 +63,7 @@ for a in rel['assets']:
         if [ "$ARCH_TAG" = "x86_64" ] && [ "$(uname -m)" = "arm64" ]; then
             PIP="arch -x86_64 $PY_HELPER/bin/python3"
         fi
-        $PIP -m pip install --prefer-binary -q --no-warn-script-location rumps requests mcp
+        $PIP -m pip install --prefer-binary -q --no-warn-script-location $EXTRAS
         echo "$EXPECTED" > "$STAMP"
     else
         echo "  $ARCH_TAG: Cache gültig"
@@ -124,7 +125,7 @@ if [ ! -d "$VENV" ]; then
   osascript -e 'display notification "Erstinstallation läuft, bitte warten…" with title "Archivio Helper"'
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip
-  "$VENV/bin/pip" install rumps requests mcp
+  "$VENV/bin/pip" install rumps requests mcp zeroconf
 fi
 exec "$VENV/bin/python3" "$DIR/archivio_helper.py"
 LAUNCHER
@@ -195,7 +196,14 @@ sign_bundle "$APP"
 notarize_and_staple "$APP"
 
 # ── ZIP ────────────────────────────────────────────────────────────────────────
+# rm -f zwingend: "zip -r" auf ein bereits vorhandenes Zip (z. B. erneuter Build
+# derselben Version) aktualisiert nur geaenderte Eintraege und laesst inzwischen
+# geloeschte Dateien im Archiv zurueck -- das Ergebnis ist dann eine Mischung aus
+# altem und neuem Bundle-Inhalt, die nicht mehr zur gerade erst berechneten
+# Codesignatur passt ("ist beschaedigt" beim Endnutzer trotz gueltig signiertem
+# Bundle auf der Platte).
 cd "$DIST"
+rm -f "archivio-helper-${VERSION}.zip"
 zip -qr "archivio-helper-${VERSION}.zip" "$APP_NAME.app" \
     -x "**/__pycache__/*" -x "**/*.pyc"
 cd ..

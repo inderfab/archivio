@@ -304,6 +304,116 @@ def ensure_mcp_registered(app_name: str, log) -> None:
         log.warning("MCP-Registrierung in Claude Desktop fehlgeschlagen: %s", e)
 
 
+# ── Netzwerk-Discovery (mDNS/Bonjour via zeroconf) ────────────────────────────
+# Server meldet sich per advertise_service() im LAN an, Helper findet ihn per
+# discover_servers() -- ersetzt das fruehere Vorbelegen der server_url beim
+# Zip-Download (brach dort die Codesignatur, siehe PROJEKT_STATUS.md).
+
+SERVICE_TYPE = "_archivio._tcp.local."
+
+
+def _local_ip() -> str:
+    import socket
+    s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    try:
+        s.connect(("8.8.8.8", 80))
+        return s.getsockname()[0]
+    except Exception:
+        return "127.0.0.1"
+    finally:
+        s.close()
+
+
+def advertise_service(port: int, log) -> tuple[object, object] | tuple[None, None]:
+    """Meldet diesen Mac als Archivio-Server per mDNS an. Rueckgabe (zeroconf, info)
+    wird fuer stop_advertising() gebraucht; (None, None) bei jedem Fehler --
+    Discovery darf den Serverstart nie verhindern."""
+    try:
+        import socket
+        from zeroconf import ServiceInfo, Zeroconf
+
+        hostname = socket.gethostname()
+        info = ServiceInfo(
+            SERVICE_TYPE,
+            f"Archivio Server auf {hostname}.{SERVICE_TYPE}",
+            addresses=[socket.inet_aton(_local_ip())],
+            port=port,
+            server=f"{hostname}.local.",
+        )
+        zc = Zeroconf()
+        zc.register_service(info)
+        log.info("mDNS-Dienst angemeldet: %s:%d", hostname, port)
+        return zc, info
+    except Exception as e:
+        log.warning("mDNS-Anmeldung fehlgeschlagen: %s", e)
+        return None, None
+
+
+def stop_advertising(zc, info, log) -> None:
+    if not zc:
+        return
+    try:
+        if info:
+            zc.unregister_service(info)
+        zc.close()
+        log.info("mDNS-Dienst abgemeldet")
+    except Exception as e:
+        log.warning("mDNS-Abmeldung fehlgeschlagen: %s", e)
+
+
+def discover_servers(timeout: float, log) -> list[tuple[str, int]]:
+    """Sucht `timeout` Sekunden nach Archivio-Servern im LAN. Gibt Liste von
+    (host, port) zurueck, leer wenn keiner gefunden wurde oder bei Fehler."""
+    try:
+        import socket
+        import time as _time
+        from zeroconf import ServiceBrowser, Zeroconf
+
+        found: list[tuple[str, int]] = []
+
+        class _Listener:
+            def add_service(self, zc, type_, name):
+                try:
+                    info = zc.get_service_info(type_, name)
+                    if info and info.addresses:
+                        host = socket.inet_ntoa(info.addresses[0])
+                        found.append((host, info.port))
+                except Exception as e:
+                    log.warning("mDNS-Service-Aufloesung fehlgeschlagen: %s", e)
+
+            def remove_service(self, zc, type_, name):
+                pass
+
+            def update_service(self, zc, type_, name):
+                pass
+
+        zc = Zeroconf()
+        try:
+            ServiceBrowser(zc, SERVICE_TYPE, _Listener())
+            _time.sleep(timeout)
+        finally:
+            zc.close()
+        found = list(dict.fromkeys(found))  # add_service kann pro Dienst mehrfach feuern
+        log.info("mDNS-Suche abgeschlossen: %d Server gefunden", len(found))
+        return found
+    except Exception as e:
+        log.warning("mDNS-Suche fehlgeschlagen: %s", e)
+        return []
+
+
+def resolve_discovery(found: list[tuple[str, int]]) -> tuple[str, str | None]:
+    """Reine Entscheidungslogik fuer discover_servers()-Ergebnisse, ohne rumps/GUI-
+    Abhaengigkeit (damit ohne die menubar-App importierbar/testbar). Gibt
+    (decision, url) zurueck: decision in {"none", "one", "multiple"}, url nur bei
+    "one" gesetzt."""
+    if len(found) == 1:
+        host, port = found[0]
+        return "one", f"http://{host}:{port}"
+    if len(found) > 1:
+        return "multiple", None
+    return "none", None
+
+
 def thread_alert(title: str, message: str) -> None:
     msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
     subprocess.run(["osascript", "-e", f'display alert "{title}" message "{msg}"'], timeout=60)

@@ -95,6 +95,14 @@ def _mark_update_notified(version: str):
     _save_state(state)
 
 
+# ── Server-Discovery (mDNS) ───────────────────────────────────────────────────
+# Ersetzt das fruehere Vorbelegen der server_url beim Zip-Download (brach dort die
+# Codesignatur). Der Helper sucht stattdessen selbst im LAN -- meist gibt es nur
+# einen Archivio Server pro Buero.
+
+_DEFAULT_SERVER_URLS = {"http://localhost:8000", "http://127.0.0.1:8000"}
+
+
 # ── Update ────────────────────────────────────────────────────────────────────
 
 def _check_update() -> tuple[str, str] | None:
@@ -138,6 +146,8 @@ class ArchivioHelper(rumps.App):
                                               callback=self._update_action)
         self._server_item    = rumps.MenuItem(
             f"Server: {self._server_url}", callback=self.change_server)
+        self._search_item    = rumps.MenuItem(
+            "Server suchen", callback=self.search_server)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
 
@@ -149,6 +159,7 @@ class ArchivioHelper(rumps.App):
             self._update_item,
             rumps.separator,
             self._server_item,
+            self._search_item,
             self._autostart_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen", callback=self.open_browser),
@@ -174,7 +185,67 @@ class ArchivioHelper(rumps.App):
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
         threading.Thread(target=self._delayed_update_check, daemon=True).start()
+        # Automatische Server-Suche nur wenn server_url noch der Auslieferungs-Default
+        # ist -- eine bereits manuell/automatisch gesetzte Adresse wird nie ungefragt
+        # ueberschrieben.
+        if self._server_url in _DEFAULT_SERVER_URLS:
+            threading.Thread(target=self._auto_discover, daemon=True).start()
         log.info("ArchivioHelper ready")
+
+    def _auto_discover(self):
+        found = bridge.discover_servers(timeout=4, log=log)
+        decision, url = bridge.resolve_discovery(found)
+        if decision == "one":
+            self._apply_server_url(url)
+            rumps.notification("Archivio Helper", "Automatisch verbunden",
+                                f"Server gefunden: {url}")
+            log.info("Automatisch verbunden: %s", url)
+        elif decision == "multiple":
+            log.info("Mehrere Server gefunden, keine automatische Auswahl: %s", found)
+            rumps.notification(
+                "Archivio Helper", "Mehrere Archivio-Server gefunden",
+                "Bitte im Menü unter «Server suchen» manuell auswählen.",
+            )
+        else:
+            log.info("Keine Archivio-Server im Netz gefunden")
+
+    def _apply_server_url(self, url: str):
+        self._server_url = url
+        self._server_item.title = f"Server: {url}"
+        cfg = _load_config()
+        cfg["server_url"] = url
+        _save_config(cfg)
+
+    def search_server(self, _):
+        found = bridge.discover_servers(timeout=4, log=log)
+        decision, url = bridge.resolve_discovery(found)
+        if decision == "none":
+            rumps.alert("Kein Archivio Server im Netzwerk gefunden.")
+            return
+        if decision == "one":
+            self._apply_server_url(url)
+            rumps.alert(f"Verbunden mit Archivio Server: {self._server_url}")
+            return
+        # Mehrere gefunden: change_server()-Fenster oeffnen, vorbelegt mit dem ersten
+        # Treffer, Alternativen in der Meldung auflisten -- kein natives Dropdown in rumps.
+        alternatives = "\n".join(f"http://{h}:{p}" for h, p in found)
+        host, port = found[0]
+        win = rumps.Window(
+            message=f"Mehrere Server gefunden:\n{alternatives}\n\nServer-URL wählen:",
+            title="Archivio Server",
+            default_text=f"http://{host}:{port}",
+            ok="Verbinden",
+            cancel="Abbrechen",
+            dimensions=(300, 22),
+        )
+        resp = win.run()
+        if not resp.clicked:
+            return
+        url = resp.text.strip().rstrip("/")
+        if not url.startswith("http"):
+            rumps.alert("Bitte eine gültige URL eingeben, z. B. http://localhost:8000")
+            return
+        self._apply_server_url(url)
 
     def _delayed_update_check(self):
         import time
@@ -268,11 +339,7 @@ class ArchivioHelper(rumps.App):
         if not url.startswith("http"):
             rumps.alert("Bitte eine gültige URL eingeben, z. B. http://localhost:8000")
             return
-        self._server_url = url
-        self._server_item.title = f"Server: {url}"
-        cfg = _load_config()
-        cfg["server_url"] = url
-        _save_config(cfg)
+        self._apply_server_url(url)
 
     def toggle_autostart(self, sender):
         new_state = sender.state != 1  # 1 = aktiv → deaktivieren, sonst aktivieren
