@@ -275,9 +275,23 @@ def ensure_quick_action_installed(log) -> None:
         log.warning("Quick-Action-Installation fehlgeschlagen: %s", e)
 
 
+_CLAUDE_APP_PATH = Path("/Applications/Claude.app")
+
+
 def ensure_mcp_registered(app_name: str, log) -> None:
     if not CLAUDE_CONFIG_PATH.parent.exists():
-        return
+        # Ordner existiert erst, sobald Claude Desktop mindestens einmal geoeffnet
+        # wurde -- ohne diesen Fallback bleibt die Registrierung fuer jeden, der
+        # Claude Desktop installiert aber noch nie gestartet hat, dauerhaft und
+        # unbemerkt aus (kein Fehler, keine Meldung). Ist die App gar nicht
+        # installiert, gibt es nichts zu tun.
+        if not _CLAUDE_APP_PATH.exists():
+            return
+        try:
+            CLAUDE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+        except Exception as e:
+            log.warning("Claude-Konfigurationsordner konnte nicht angelegt werden: %s", e)
+            return
     try:
         try:
             cfg = json.loads(CLAUDE_CONFIG_PATH.read_text())

@@ -33,8 +33,13 @@ _build_python() {
     local PY_BASE="$DIST/.python-base-$ARCH_TAG"
     local PY_INSTALLED="$DIST/.python-installed-$ARCH_TAG"
     local STAMP="$DIST/.python-stamp-$ARCH_TAG"
-    local EXTRAS="rumps requests mcp zeroconf"
-    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH:$EXTRAS"
+    # mcp<2 gepinnt: mcp 2.0.0 hat mcp.server.fastmcp entfernt/umgebaut (Breaking
+    # Change), das archivio_mcp.py braucht -- ohne Pin installiert pip bei jedem
+    # frischen Build stillschweigend "latest", was den MCP-Server unbemerkt kaputt
+    # macht ("ModuleNotFoundError: No module named 'mcp.server.fastmcp'" erst beim
+    # Start durch Claude Desktop sichtbar, nicht beim Build).
+    local EXTRAS=(rumps requests "mcp<2" zeroconf)
+    local EXPECTED="$PYTHON_VERSION:$PBS_ARCH:$REQ_HASH:${EXTRAS[*]}"
 
     if [ "$(cat "$STAMP" 2>/dev/null)" = "$EXPECTED" ] && [ -x "$PY_INSTALLED/bin/python3" ]; then
         echo "  $ARCH_TAG: Cache gültig"
@@ -87,7 +92,7 @@ for a in rel['assets']:
     $PIP_CMD -m pip install --prefer-binary -q \
         --no-warn-script-location \
         -r requirements.txt \
-        $EXTRAS
+        "${EXTRAS[@]}"
 
     echo "$EXPECTED" > "$STAMP"
     echo "  $ARCH_TAG: Pakete installiert"
@@ -241,13 +246,13 @@ if [ ! -d "$VENV" ]; then
   "$PYTHON" -m venv "$VENV"
   "$VENV/bin/pip" install --upgrade pip -q
   "$VENV/bin/pip" install --prefer-binary -r "$RESOURCES/requirements.txt" -q
-  "$VENV/bin/pip" install --prefer-binary rumps requests mcp zeroconf -q
+  "$VENV/bin/pip" install --prefer-binary rumps requests "mcp<2" zeroconf -q
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
   echo "$(date): Installation abgeschlossen"
 elif [ "$(cat $VERSION_STAMP 2>/dev/null)" != "$CURRENT_VERSION" ]; then
   echo "$(date): Neue Version $CURRENT_VERSION – Abhängigkeiten aktualisieren"
   "$VENV/bin/pip" install -q --prefer-binary -r "$RESOURCES/requirements.txt" >/dev/null 2>&1 || true
-  "$VENV/bin/pip" install -q --prefer-binary rumps requests mcp zeroconf >/dev/null 2>&1 || true
+  "$VENV/bin/pip" install -q --prefer-binary rumps requests "mcp<2" zeroconf >/dev/null 2>&1 || true
   echo "$CURRENT_VERSION" > "$VERSION_STAMP"
 fi
 
