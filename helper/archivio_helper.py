@@ -150,6 +150,8 @@ class ArchivioHelper(rumps.App):
             "Server suchen", callback=self.search_server)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
+        self._link_action_item = rumps.MenuItem(
+            self._link_action_title(), callback=self.toggle_link_action)
 
         self.menu = [
             self._title_item,
@@ -161,6 +163,7 @@ class ArchivioHelper(rumps.App):
             self._server_item,
             self._search_item,
             self._autostart_item,
+            self._link_action_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen", callback=self.open_browser),
             rumps.separator,
@@ -173,11 +176,12 @@ class ArchivioHelper(rumps.App):
         # kann also auch keinen eigenen Reparatur-Code ausloesen — erst das manuelle
         # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
         bridge.repair_broken_autostart_entries("Archivio Helper", log)
-        self._autostart_item.state = bridge.autostart_enabled()
+        self._autostart_item.state = bridge.ensure_autostart_default(log, STATE_PATH)
 
         bridge.start_local_server(
             "Archivio Helper", log,
             config_provider=lambda: _load_config().get("server_url", ""),
+            link_action_provider=lambda: _load_config().get("link_action", "open"),
         )
         bridge.register_url_handler(log)
         bridge.ensure_mcp_registered("Archivio Helper", log)
@@ -344,7 +348,24 @@ class ArchivioHelper(rumps.App):
     def toggle_autostart(self, sender):
         new_state = sender.state != 1  # 1 = aktiv → deaktivieren, sonst aktivieren
         bridge.set_autostart(new_state, log)
+        bridge.save_autostart_preference(STATE_PATH, new_state, log)
         sender.state = new_state
+
+    def _link_action_title(self) -> str:
+        action = _load_config().get("link_action", "open")
+        return ("Archivio-Links: Direkt öffnen" if action == "open"
+                else "Archivio-Links: Zum Pfad gehen")
+
+    def toggle_link_action(self, sender):
+        """Wechselt das Standardverhalten fuer per Quick Action kopierte Links (Landing
+        Page unter /link, siehe shared/menubar_bridge.py _link_landing_page) zwischen
+        Direkt-Oeffnen und Im-Finder-Zeigen."""
+        cfg = _load_config()
+        current = cfg.get("link_action", "open")
+        new_action = "reveal" if current == "open" else "open"
+        cfg["link_action"] = new_action
+        _save_config(cfg)
+        sender.title = self._link_action_title()
 
 
 if __name__ == "__main__":

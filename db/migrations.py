@@ -23,6 +23,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "007_extraction_status_listed", _m007)
     _apply(conn, "008_fts_doc_delete_trigger", _m008)
     _apply(conn, "009_projects_last_scanned_at", _m009)
+    _apply(conn, "010_photo_ratings", _m010)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -255,3 +256,21 @@ def _m009(conn: sqlite3.Connection):
     except Exception as e:
         if "duplicate column" not in str(e).lower():
             raise
+
+
+def _m010(conn: sqlite3.Connection):
+    """Sternebewertung für Fotos (Foto-Browser, 1-5 Sterne, dokumentweit/global).
+
+    Hängt am Dokument (Hash), nicht am Pfad: Archivios Dateiidentität ist der
+    SHA256-Hash. Ein Foto in mehreren Projektordnern ist bewertungsmässig überall
+    dasselbe. Keine "unbewertet"-Zeile (0) -- Entfernen der Bewertung löscht die
+    Zeile statt sie auf 0 zu setzen.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS photo_ratings (
+            document_id INTEGER PRIMARY KEY REFERENCES documents(id) ON DELETE CASCADE,
+            rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
+            rated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+    """)
+    conn.commit()

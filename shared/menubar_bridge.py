@@ -18,7 +18,7 @@ import subprocess
 import sys
 import threading
 from pathlib import Path
-from urllib.parse import parse_qs, unquote, urlparse
+from urllib.parse import parse_qs, quote, unquote, urlparse
 
 HELPER_PORT = 44380
 
@@ -76,11 +76,40 @@ def _html_page(app_name: str, message: str, autoclose: bool) -> bytes:
     return html.encode("utf-8")
 
 
-def make_local_http_handler(app_name: str, log, config_provider=None):
+def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
+    """Zwischenseite fuer per Quick Action kopierte Archivio-Links: GET auf /link loest
+    NIE direkt eine Aktion aus (im Unterschied zu /open, /reveal) -- sonst reicht ein
+    Link-Preview/Unfurling der Ziel-App (z.B. Mail.app faengt beim Einfuegen automatisch
+    an, eine Vorschau des Links zu laden) um die Datei ungewollt zu oeffnen. Erst der
+    tatsaechliche Klick auf den Button hier loest /open bzw. /reveal aus -- ein
+    automatisierter Preview-Fetch klickt nichts."""
+    action = action if action in ("open", "reveal") else "open"
+    label  = "Datei öffnen" if action == "open" else "Im Finder zeigen"
+    enc    = quote(path, safe="")
+    html = f"""<!DOCTYPE html>
+<html><head><meta charset="utf-8"><title>{app_name}</title>
+<style>
+  body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
+          justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
+  .box {{ text-align:center; }}
+  .path {{ color:#888; font-size:12px; margin-bottom:16px; word-break:break-all; max-width:400px; }}
+  a.btn {{ display:inline-block; padding:10px 22px; background:#2563eb; color:#fff;
+           text-decoration:none; border-radius:6px; font-size:14px; }}
+</style></head>
+<body><div class="box">
+<div class="path">{path}</div>
+<a class="btn" href="/{action}?path={enc}">{label}</a>
+</div></body></html>"""
+    return html.encode("utf-8")
+
+
+def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None):
     """config_provider: optionales Callable[[], str], das server_url für den
     /config-Endpoint liefert. Helper übergibt einen Reader auf sein config.json,
     Server übergibt einen fest verdrahteten "http://127.0.0.1:8000" (dieselbe Adresse,
-    die server_app.py an anderen Stellen bereits hardcoded verwendet)."""
+    die server_app.py an anderen Stellen bereits hardcoded verwendet).
+    link_action_provider: optionales Callable[[], str] ("open"/"reveal"), liefert das
+    im Menü eingestellte Standardverhalten für /link (Quick-Action-Links)."""
 
     class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         def do_OPTIONS(self):
@@ -91,7 +120,10 @@ def make_local_http_handler(app_name: str, log, config_provider=None):
             params = parse_qs(parsed.query)
             path = unquote(params.get("path", [""])[0])
 
-            if parsed.path == "/open" and path:
+            if parsed.path == "/link" and path:
+                action = link_action_provider() if link_action_provider else "open"
+                self._cors_headers(200, _link_landing_page(app_name, path, action), "text/html; charset=utf-8")
+            elif parsed.path == "/open" and path:
                 if "://" in path and not path.startswith("/"):
                     subprocess.run(["open", path], timeout=5)
                     self._html_response(200, "✓ Wird geöffnet …")
@@ -125,7 +157,7 @@ def make_local_http_handler(app_name: str, log, config_provider=None):
             self._html_response(404, f"⚠ Datei nicht gefunden: {path}", autoclose=False)
 
         def _html_response(self, code, message, autoclose=True):
-            self._cors_headers(code, _html_page(app_name, message, autoclose), "text/html")
+            self._cors_headers(code, _html_page(app_name, message, autoclose), "text/html; charset=utf-8")
 
         def _cors_headers(self, code, body=None, content_type="text/plain"):
             self.send_response(code)
@@ -141,8 +173,8 @@ def make_local_http_handler(app_name: str, log, config_provider=None):
     return _LocalHTTPHandler
 
 
-def start_local_server(app_name: str, log, config_provider=None) -> None:
-    handler_cls = make_local_http_handler(app_name, log, config_provider)
+def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None) -> None:
+    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider)
     try:
         srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), handler_cls)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
@@ -253,6 +285,41 @@ def set_autostart(enabled: bool, log) -> None:
         subprocess.run(["osascript", "-e", script], timeout=5)
     except Exception as e:
         log.error("Autostart umschalten fehlgeschlagen: %s", e)
+
+
+def ensure_autostart_default(log, state_path: Path) -> bool:
+    """Stellt sicher, dass Autostart aktiv ist, ausser der Nutzer hat es bewusst
+    abgeschaltet. Noetig weil eine .pkg-Neuinstallation den kompletten .app-Ordner
+    ersetzt -- macOS' Login-Item-Mechanismus (System Events) verwirft dabei den Alias
+    auf die alte Datei, autostart_enabled() faellt nach jedem Update stillschweigend
+    auf False zurueck, obwohl der Nutzer nichts geaendert hat. Die Praeferenz wird
+    deshalb separat persistiert (state_path, JSON, Key "autostart_preference") statt
+    sich nur auf den fluechtigen macOS-Zustand zu verlassen. Frischer Erststart ohne
+    gespeicherte Praeferenz => Default an. Gibt den finalen Zustand fuer die
+    Menu-Checkbox zurueck."""
+    try:
+        pref = json.loads(state_path.read_text()).get("autostart_preference", True)
+    except Exception:
+        pref = True
+    actual = autostart_enabled()
+    if pref and not actual:
+        set_autostart(True, log)
+        actual = True
+    return actual
+
+
+def save_autostart_preference(state_path: Path, enabled: bool, log) -> None:
+    """Merged die Praeferenz in state_path, ohne andere dort gespeicherte Keys
+    anzutasten (Server nutzt dieselbe Datei z.B. auch fuer Update-Benachrichtigungen)."""
+    try:
+        state = {}
+        if state_path.exists():
+            state = json.loads(state_path.read_text())
+        state["autostart_preference"] = enabled
+        state_path.parent.mkdir(parents=True, exist_ok=True)
+        state_path.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+    except Exception as e:
+        log.warning("Autostart-Praeferenz konnte nicht gespeichert werden: %s", e)
 
 
 def ensure_quick_action_installed(log) -> None:

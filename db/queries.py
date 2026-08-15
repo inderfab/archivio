@@ -34,6 +34,20 @@ def upsert_path(conn: sqlite3.Connection, document_id: int, path: str, is_primar
         "SELECT document_id FROM document_paths WHERE path = ?", (path,)
     ).fetchone()
 
+    # Invariante: hoechstens EIN is_primary=1-Pfad pro Dokument. Ohne das kann ein
+    # Dokument mit mehreren physischen Kopien (z.B. "_1-500.pdf" und "_1-500-1.pdf",
+    # identischer Hash) zwei gleichzeitig als primaer markierte Pfade bekommen -- der
+    # LEFT JOIN document_paths ... AND is_primary=1 in der Suche multipliziert dann
+    # jede Trefferzeile fuer dieses Dokument (gleiche ID taucht mehrfach mit
+    # unterschiedlichem Pfad auf). Vor dem Setzen eines neuen primaeren Pfads werden
+    # deshalb alle bisherigen primaeren Pfade desselben Dokuments demotet.
+    if is_primary:
+        conn.execute(
+            "UPDATE document_paths SET is_primary = 0 "
+            "WHERE document_id = ? AND path != ? AND is_primary = 1",
+            (document_id, path),
+        )
+
     conn.execute(
         """
         INSERT INTO document_paths (document_id, path, is_primary)
@@ -96,6 +110,32 @@ def save_chunks(conn: sqlite3.Connection, document_id: int, chunks: list[dict]):
         "INSERT INTO document_chunks (document_id, page_number, chunk_index, content) VALUES (?, ?, ?, ?)",
         [(document_id, c["page_number"], c["chunk_index"], c["content"]) for c in chunks],
     )
+
+
+def get_photo_rating(conn: sqlite3.Connection, document_id: int) -> int:
+    row = conn.execute(
+        "SELECT rating FROM photo_ratings WHERE document_id = ?", (document_id,)
+    ).fetchone()
+    return row["rating"] if row else 0
+
+
+def set_photo_rating(conn: sqlite3.Connection, document_id: int, rating: int) -> None:
+    """rating 0 entfernt die Bewertung (keine Zeile = unbewertet)."""
+    if rating <= 0:
+        conn.execute("DELETE FROM photo_ratings WHERE document_id = ?", (document_id,))
+    else:
+        rating = min(rating, 5)
+        conn.execute(
+            """
+            INSERT INTO photo_ratings (document_id, rating, rated_at)
+            VALUES (?, ?, strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+            ON CONFLICT(document_id) DO UPDATE SET
+                rating   = excluded.rating,
+                rated_at = excluded.rated_at
+            """,
+            (document_id, rating),
+        )
+    conn.commit()
 
 
 def get_project_by_path(conn: sqlite3.Connection, path: str) -> sqlite3.Row | None:

@@ -54,23 +54,24 @@ async def status():
 async def mcp_search(
     q: str = "",
     project_id: str = "",
-    search_in: str = "docs,filenames",
+    search_in: str = "docs,filenames,folders",
     limit: int = 20,
 ):
     """Read-only JSON-Suche für den MCP-Server (Archivio Helper) — reine Textantwort statt HTML.
     Nutzt dieselbe Such-Logik wie /search (main.py), nur ohne die Zusatzfilter (Datum, Absender, …).
     """
-    from web.main import _build_filters, _search, _search_folders
+    from web.main import _build_filters, _prefer_project_path, _run_scoped_search, _search_folders
 
     q = q.strip()
-    scope = set(search_in.split(",")) if search_in else {"docs", "filenames"}
+    scope = set(search_in.split(",")) if search_in else {"docs", "filenames", "folders"}
 
     conn = connection.get_connection()
     try:
         results: list = []
         if q:
             filters_str, filter_params = _build_filters(project_id, "")
-            results, _error = _search(conn, q, filters_str, filter_params)
+            results, _error = _run_scoped_search(conn, q, filters_str, filter_params, scope)
+            _prefer_project_path(conn, results, project_id)
         folders = _search_folders(conn, q, project_id) if q and "folders" in scope else []
     finally:
         conn.close()
@@ -126,6 +127,7 @@ async def mcp_semantic_search(
             "page_number":  s.get("page_number"),
             "content":      s.get("content"),
             "score":        s.get("score"),
+            "match_type":   s.get("match_type"),
         }
         for s in (sources or [])[:limit]
     ]
@@ -167,6 +169,16 @@ async def mcp_document(document_id: int):
         return JSONResponse(result)
     finally:
         conn.close()
+
+
+@router.get("/mcp/base-folders")
+async def mcp_base_folders():
+    """Gibt die konfigurierten NAS-Wurzelpfade zurück — der MCP-Server (list_folder)
+    prüft damit lokal, dass ein angefragter Pfad innerhalb eines erlaubten Bereichs
+    liegt, bevor er ihn auflistet. Reine Config-Auskunft, kein Filesystem-Zugriff hier."""
+    base_folders = settings.get("scanner.base_folders", [])
+    folders = [f.get("path") for f in base_folders if f.get("path")]
+    return JSONResponse({"folders": folders})
 
 
 @router.post("/scan/all")

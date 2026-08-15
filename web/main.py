@@ -44,6 +44,7 @@ from db import connection
 from web.shared import templates
 from web.dashboard import router as dashboard_router
 from web.api import router as api_router
+from web.gallery import router as gallery_router
 
 
 # ── Scheduler ─────────────────────────────────────────────────────────────────
@@ -136,6 +137,7 @@ app = FastAPI(title="Archivio", lifespan=lifespan)
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
 app.include_router(api_router)
+app.include_router(gallery_router)
 
 # ── KI-Suche ──────────────────────────────────────────────────────────────────
 
@@ -369,26 +371,11 @@ async def search(
             date_from, date_to, filesize, duplicates_only,
             filter_plans=filter_plans,
         )
-        if search_docs and search_filenames:
-            results, error = _search(conn, q.strip(), filters_str, filter_params)
-        elif search_docs:
-            if q.strip():
-                results, error = _search_fts(conn, q.strip(), filters_str, filter_params)
-                if not results and not error:
-                    results, error = _search_like(conn, q.strip(), filters_str, filter_params)
-                    for r in results:
-                        r["fallback"] = True
-            else:
-                results, error = _search_filtered(conn, filters_str, filter_params)
-        elif search_filenames:
-            if q.strip():
-                results = _search_filename(conn, q.strip(), filters_str, filter_params)
-                results.sort(key=lambda r: _filename_score(r.get("filename", ""), q.strip()), reverse=True)
-                error = None
-            else:
-                results, error = _search_filtered(conn, filters_str, filter_params)
+        results, error = _run_scoped_search(conn, q.strip(), filters_str, filter_params,
+                                             content_scope)
         if search_folders and q.strip():
             folder_results = _search_folders(conn, q.strip(), project_id)
+        _prefer_project_path(conn, results, project_id)
         total = len(results)
         conn.close()
     return templates.TemplateResponse("search_results.html", {
@@ -541,6 +528,7 @@ def _search(conn, q: str, filters: str, filter_params: list):
     seen = {r["id"] for r in results}
     for r in fname_results:
         if r["id"] not in seen:
+            seen.add(r["id"])  # sonst koennen Duplikate INNERHALB von fname_results durchrutschen
             results.append(r)
     # Filename-Treffer nach oben schieben
     results.sort(key=lambda r: _filename_score(r.get("filename", ""), q), reverse=True)
@@ -550,6 +538,73 @@ def _search(conn, q: str, filters: str, filter_params: list):
     for r in results:
         r["fallback"] = True
     return results, error
+
+
+def _run_scoped_search(conn, q: str, filters: str, filter_params: list, scope: set):
+    """Führt die Dokument-/Dateinamen-Suche gemäß scope aus (Teilmenge von
+    {"docs", "filenames"} -- weitere Werte wie "folders"/"plans" werden ignoriert, die
+    behandelt der jeweilige Aufrufer separat). Gemeinsame Logik für die /search-Route
+    und /api/mcp/search: vorher ignorierte der MCP-Endpoint search_in komplett und
+    führte immer die volle Kombisuche aus, unabhängig vom angeforderten scope."""
+    search_docs      = "docs" in scope
+    search_filenames = "filenames" in scope
+    if search_docs and search_filenames:
+        return _search(conn, q, filters, filter_params)
+    if search_docs:
+        if q:
+            results, error = _search_fts(conn, q, filters, filter_params)
+            if not results and not error:
+                results, error = _search_like(conn, q, filters, filter_params)
+                for r in results:
+                    r["fallback"] = True
+            return results, error
+        return _search_filtered(conn, filters, filter_params)
+    if search_filenames:
+        if q:
+            results = _search_filename(conn, q, filters, filter_params)
+            results.sort(key=lambda r: _filename_score(r.get("filename", ""), q), reverse=True)
+            return results, None
+        return _search_filtered(conn, filters, filter_params)
+    return [], None
+
+
+def _prefer_project_path(conn, results: list[dict], project_id: str) -> None:
+    """Korrigiert Pfad/Projektname von Ergebnissen für die Anzeige, wenn ein Projektfilter
+    aktiv ist: Dateiidentität läuft über SHA256-Hash, nicht Pfad — dieselbe physische Datei
+    kann (z. B. als kopierte Vorlage) in mehreren Projektordnern liegen. Der Filter matcht
+    dann zurecht (eine Kopie liegt wirklich im gefilterten Projekt), aber die Anzeige
+    verwendet sonst immer den EINEN "primären" Pfad des Dokuments, der aus einem ganz
+    anderen Projekt stammen kann — wirkt dann wie ein Filter-Leck, ist aber keins. Biegt
+    Pfad + Projektname auf die Kopie um, die tatsächlich im gefilterten Projekt liegt.
+    Mutiert `results` in place, kein Rückgabewert."""
+    if not project_id or project_id.startswith("mailbox:"):
+        return
+    try:
+        pid = int(project_id)
+    except ValueError:
+        return
+    prow = conn.execute("SELECT path, name FROM projects WHERE id=?", (pid,)).fetchone()
+    if not prow or not prow["path"] or str(prow["path"]).startswith("mailbox:"):
+        return
+    prefix = str(prow["path"]).rstrip("/") + "/"
+
+    mismatched = [r for r in results if r.get("filepath") and not r["filepath"].startswith(prefix)]
+    if not mismatched:
+        return
+    doc_ids = [r["id"] for r in mismatched]
+    placeholders = ",".join("?" * len(doc_ids))
+    rows = conn.execute(
+        f"SELECT document_id, path FROM document_paths "
+        f"WHERE document_id IN ({placeholders}) AND path LIKE ?",
+        doc_ids + [prefix + "%"],
+    ).fetchall()
+    best_path: dict[int, str] = {}
+    for row in rows:
+        best_path.setdefault(row["document_id"], row["path"])  # erster Treffer reicht
+    for r in mismatched:
+        if r["id"] in best_path:
+            r["filepath"]     = best_path[r["id"]]
+            r["project_name"] = prow["name"]
 
 
 _TYPE_CATEGORIES: dict[str, list[str]] = {
@@ -657,9 +712,15 @@ def _search_filtered(conn, filters: str, filter_params: list):
     """
     try:
         rows = conn.execute(sql, filter_params).fetchall()
+        seen    = set()
         results = []
         for r in rows:
             d = dict(r)
+            # Siehe _search_filename(): mehrfach "primaere" Pfade desselben Dokuments
+            # koennen den LEFT JOIN sonst vervielfachen.
+            if d["id"] in seen:
+                continue
+            seen.add(d["id"])
             d["fallback"]    = False
             d["page_number"] = None
             d["excerpt"]     = d.pop("raw_content") or ""
@@ -744,9 +805,15 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
     """
     try:
         rows    = conn.execute(sql, like_params + filter_params).fetchall()
+        seen    = set()
         results = []
         for r in rows:
             d = dict(r)
+            # Siehe _search_filename(): mehrfach "primaere" Pfade desselben Dokuments
+            # koennen den LEFT JOIN sonst vervielfachen.
+            if d["id"] in seen:
+                continue
+            seen.add(d["id"])
             d["fallback"]    = True
             d["page_number"] = None
             d["excerpt"]     = _excerpt(d.pop("raw_content") or "", q)
@@ -818,9 +885,16 @@ def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[di
     """
     try:
         rows = conn.execute(sql, [fts_q] + filter_params).fetchall()
+        seen    = set()
         results = []
         for r in rows:
             d = dict(r)
+            # Verteidigung gegen mehrfach als "primaer" markierte Pfade desselben
+            # Dokuments (siehe upsert_path()) -- der LEFT JOIN ... is_primary=1 kann
+            # sonst dieselbe Dokument-ID mit unterschiedlichem Pfad mehrfach liefern.
+            if d["id"] in seen:
+                continue
+            seen.add(d["id"])
             d["fallback"] = False
             d["excerpt"]  = ""
             d.pop("raw_content", None)
@@ -923,11 +997,18 @@ def _make_fts_query(q: str) -> str:
 
     # Deutsche Komposita: "fenster liste" und "liste fenster" finden beide "Fensterliste".
     # Benachbarte Wortpaare in beiden Reihenfolgen zusammenkleben + vollständige Konkatenation.
+    # Nur bis 3 Woerter -- die Heuristik macht bei 4+ Woertern kaum noch treffende Vorschlaege
+    # (z.B. "GrauenergieCO2" bei "Grauenergie CO2 Amortisation Solskin"), erzeugt aber pro
+    # Wort zwei zusaetzliche OR-Zweige, die FTS5 alle einzeln scannen muss -- bei laengeren
+    # Mehrwort-Queries spuerbar langsamer, ohne realistischen Nutzen.
     extras: list[str] = []
-    for i in range(len(words) - 1):
-        extras.append(f"{words[i]}{words[i + 1]}*")        # vorwärts
-        extras.append(f"{words[i + 1]}{words[i]}*")        # rückwärts
-    if len(words) > 2:
-        extras.append("".join(words) + "*")
+    if len(words) <= 3:
+        for i in range(len(words) - 1):
+            extras.append(f"{words[i]}{words[i + 1]}*")        # vorwärts
+            extras.append(f"{words[i + 1]}{words[i]}*")        # rückwärts
+        if len(words) > 2:
+            extras.append("".join(words) + "*")
 
+    if not extras:
+        return and_query
     return "(" + and_query + ") OR " + " OR ".join(extras)

@@ -183,6 +183,7 @@ def vector_search(
     for i in top_idx:
         r = dict(rows[i])
         r["score"] = float(scores[i])
+        r["match_type"] = "semantic"
         r.pop("embedding", None)
         if r["id"] in next_chunks:
             r["content"] = r["content"].rstrip() + "\n" + next_chunks[r["id"]]
@@ -212,7 +213,7 @@ _CHUNK_SELECT = """
     SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
            d.filename, d.extension, d.project_id,
            dp.path AS filepath, p.name AS project_name,
-           {score} AS score
+           {score} AS score, '{match_type}' AS match_type
     FROM {from_clause}
     JOIN documents d ON d.id = dc.document_id
     JOIN projects  p ON p.id = d.project_id
@@ -260,7 +261,7 @@ def keyword_search_chunks(
     fts_rows: list = []
     try:
         fts_rows = conn.execute(
-            _CHUNK_SELECT.format(score="0.95", from_clause="chunks_fts JOIN document_chunks dc ON chunks_fts.rowid = dc.id") +
+            _CHUNK_SELECT.format(score="0.82", match_type="fts", from_clause="chunks_fts JOIN document_chunks dc ON chunks_fts.rowid = dc.id") +
             f" WHERE chunks_fts MATCH ? {proj_clause} ORDER BY rank LIMIT ?",
             [fts_q] + proj_params + [limit * 3]
         ).fetchall()
@@ -282,7 +283,7 @@ def keyword_search_chunks(
     like_rows: list = []
     try:
         like_rows = conn.execute(
-            _CHUNK_SELECT.format(score="0.90", from_clause="document_chunks dc") +
+            _CHUNK_SELECT.format(score="0.72", match_type="like_and", from_clause="document_chunks dc") +
             f" WHERE {like_clauses_and} {proj_clause} ORDER BY length(dc.content) LIMIT ?",
             [f"%{w}%" for w in norm_words] + proj_params + [limit * 2]
         ).fetchall()
@@ -297,7 +298,7 @@ def keyword_search_chunks(
         like_clauses_or = " OR ".join(f"{_norm_sql_expr('dc.content')} LIKE ?" for _ in long_words)
         try:
             like_or_rows = conn.execute(
-                _CHUNK_SELECT.format(score="0.80", from_clause="document_chunks dc") +
+                _CHUNK_SELECT.format(score="0.60", match_type="like_or", from_clause="document_chunks dc") +
                 f" WHERE ({like_clauses_or}) {proj_clause} ORDER BY length(dc.content) LIMIT ?",
                 [f"%{w}%" for w in long_words] + proj_params + [limit]
             ).fetchall()
@@ -312,7 +313,7 @@ def keyword_search_chunks(
         for w in words:
             for variant in {w.upper(), _de_umlaut(w).upper()}:
                 heading_rows += conn.execute(
-                    _CHUNK_SELECT.format(score="0.99", from_clause="document_chunks dc") +
+                    _CHUNK_SELECT.format(score="0.90", match_type="heading", from_clause="document_chunks dc") +
                     f" WHERE INSTR(dc.content, ?) > 0 {proj_clause}"
                     f" ORDER BY length(dc.content) LIMIT ?",
                     [variant] + proj_params + [limit]

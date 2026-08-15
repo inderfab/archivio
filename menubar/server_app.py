@@ -451,6 +451,8 @@ class ArchivioServer(rumps.App):
         self._ki_item       = rumps.MenuItem("⬤  KI-Suche …", callback=self._ki_action)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
+        self._link_action_item = rumps.MenuItem(
+            self._link_action_title(), callback=self.toggle_link_action)
         self._update_item = rumps.MenuItem(
             "Update verfügbar", callback=self._install_pending_update)
         self._pending_update_info: updater.UpdateInfo | None = None
@@ -465,6 +467,7 @@ class ArchivioServer(rumps.App):
             self._ki_item,
             rumps.separator,
             self._autostart_item,
+            self._link_action_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen",    callback=self.open_browser),
             rumps.MenuItem("Auf Updates prüfen", callback=self.check_update),
@@ -480,7 +483,7 @@ class ArchivioServer(rumps.App):
         # kann also auch keinen eigenen Reparatur-Code ausloesen — erst das manuelle
         # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
         bridge.repair_broken_autostart_entries("Archivio Server", log)
-        self._autostart_item.state = bridge.autostart_enabled()
+        self._autostart_item.state = bridge.ensure_autostart_default(log, _UPDATE_STATE)
 
         # config_provider liefert die eigene Adresse — dieselbe fest verdrahtete
         # localhost:8000, die dieser Prozess an anderen Stellen (_wait_for_server,
@@ -489,6 +492,7 @@ class ArchivioServer(rumps.App):
         bridge.start_local_server(
             "Archivio Server", log,
             config_provider=lambda: "http://127.0.0.1:8000",
+            link_action_provider=self._link_action,
         )
         bridge.register_url_handler(log)
         bridge.ensure_mcp_registered("Archivio Server", log)
@@ -533,7 +537,34 @@ class ArchivioServer(rumps.App):
     def toggle_autostart(self, sender):
         new_state = sender.state != 1
         bridge.set_autostart(new_state, log)
+        bridge.save_autostart_preference(_UPDATE_STATE, new_state, log)
         sender.state = new_state
+
+    def _link_action(self) -> str:
+        try:
+            return json.loads(_UPDATE_STATE.read_text()).get("link_action", "open")
+        except Exception:
+            return "open"
+
+    def _link_action_title(self) -> str:
+        return ("Archivio-Links: Direkt öffnen" if self._link_action() == "open"
+                else "Archivio-Links: Zum Pfad gehen")
+
+    def toggle_link_action(self, sender):
+        """Wechselt das Standardverhalten fuer per Quick Action kopierte Links (Landing
+        Page unter /link, siehe shared/menubar_bridge.py _link_landing_page) zwischen
+        Direkt-Oeffnen und Im-Finder-Zeigen."""
+        new_action = "reveal" if self._link_action() == "open" else "open"
+        try:
+            state = {}
+            if _UPDATE_STATE.exists():
+                state = json.loads(_UPDATE_STATE.read_text())
+            state["link_action"] = new_action
+            _UPDATE_STATE.parent.mkdir(parents=True, exist_ok=True)
+            _UPDATE_STATE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        except Exception as e:
+            log.warning("Link-Verhalten konnte nicht gespeichert werden: %s", e)
+        sender.title = self._link_action_title()
 
     def _ki_action(self, _):
         if not _ollama_available():
@@ -568,15 +599,23 @@ class ArchivioServer(rumps.App):
             ok="Installieren", cancel="Abbrechen",
         ):
             return
+        # Download+Verifikation im Hintergrund -- lade_und_pruefe() kann je nach
+        # Verbindung mehrere Sekunden bis Minuten dauern; ohne eigenen Thread blockiert
+        # das den Menü-Callback (Hauptthread) und die App wirkt eingefroren.
+        self._update_item.title = f"⬇  v{info.version} wird heruntergeladen…"
+        threading.Thread(target=self._download_and_install, args=(info,), daemon=True).start()
+
+    def _download_and_install(self, info: updater.UpdateInfo):
         pkg = updater.lade_und_pruefe(info, log)
         if not pkg:
-            if rumps.alert(
-                title="Update fehlgeschlagen",
-                message="Download oder Signaturprüfung fehlgeschlagen.\nZur Download-Seite öffnen?",
-                ok="Zur Download-Seite", cancel="Abbrechen",
-            ):
-                subprocess.run(["open", "https://inderfab.github.io/archivio/index.html"])
+            # rumps.alert() braucht den Hauptthread -- hier stattdessen der bestehende
+            # thread-sichere _notify()-Helper (osascript). Menü-Item bleibt sichtbar
+            # und klickbar, ein erneuter Versuch ist über das Menü jederzeit möglich.
+            self._update_item.title = f"⬆ Update auf v{info.version} verfügbar"
+            _notify(f"Update-Download für v{info.version} fehlgeschlagen — erneut über das Menü versuchen")
+            log.warning("Update-Download/-Verifikation fehlgeschlagen: v%s", info.version)
             return
+        self._update_item.title = f"✓  v{info.version} wird installiert…"
         updater.installiere(pkg)
 
     def _install_pending_update(self, _):

@@ -89,7 +89,7 @@ fi
 links=""
 for p in "$@"; do
   enc=$(urlencode "$p")
-  link="http://localhost:44380/open?path=$enc"
+  link="http://localhost:44380/link?path=$enc"
   if [ -z "$links" ]; then
     links="$link"
   else

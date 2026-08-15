@@ -19,6 +19,10 @@ cryptography>=42.0     # AES-verschlüsselte PDFs (pypdf braucht es, sonst „AE
 # KI-Suche
 numpy>=1.26
 
+# Foto-Browser (Galerie, Thumbnails)
+pillow>=11.1
+pillow-heif>=0.19
+
 # System
 psutil>=5.9
 packaging>=23.0        # Versionsvergleich für den Server-Auto-Updater

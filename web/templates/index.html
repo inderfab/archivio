@@ -4,30 +4,16 @@
 {% block content %}
 <div id="search-form">
 
-  <div class="search-wrap">
-    <input class="search-input" id="q" name="q" type="search"
-      placeholder="Dokumente und Mails durchsuchen…"
-      autocomplete="off" autofocus
-      hx-get="/search" hx-trigger="input changed delay:300ms, search"
-      hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
-
-    <label class="ai-toggle-wrap" title="Zwischen normaler Suche und KI-Suche wechseln">
-      <span class="ai-toggle-label ai-toggle-left">Suche</span>
-      <span class="ai-toggle-track">
-        <input type="checkbox" id="ai-toggle" style="display:none"
-          onchange="switchSearchMode(this.checked)">
-        <span class="ai-toggle-thumb"></span>
-      </span>
-      <span class="ai-toggle-label ai-toggle-right">KI-Suche <span style="font-size:10px; color:var(--text-3); font-weight:400;">(experimentell)</span></span>
-    </label>
+  <div class="mode-switch">
+    <button type="button" class="mode-btn active" id="mode-btn-search" onclick="switchMode('search')">Suche</button>
+    <button type="button" class="mode-btn" id="mode-btn-gallery" onclick="switchMode('gallery')">Galerie</button>
   </div>
 
-  {# ── Basis-Filter ── #}
-  <div class="filters-basic">
-    <select name="project_id"
+  <div class="shared-filter-row" style="display:flex; align-items:center; gap:8px; max-width:none;">
+    <select name="project_id" id="project_id_select" style="max-width:320px;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
-      onchange="updateChips()">
+      onchange="updateChips(); if (currentMode === 'gallery') { refreshOrdnerTags(); reloadGallery(); }">
       <option value="">Alle Projekte</option>
       {% for p in projects %}
         {% if p.children %}
@@ -51,7 +37,34 @@
       </optgroup>
       {% endif %}
     </select>
+    <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
+      style="display:none;" onclick="toggleGalleryFilterPanel()">Filter</button>
+    <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn"
+      style="display:none;" onclick="selectAllVisible()">Alle sichtbaren auswählen</button>
+  </div>
 
+  <div id="search-mode-block">
+
+  <div class="search-wrap">
+    <input class="search-input" id="q" name="q" type="search"
+      placeholder="Dokumente und Mails durchsuchen…"
+      autocomplete="off" autofocus
+      hx-get="/search" hx-trigger="input changed delay:300ms, search"
+      hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
+
+    <label class="ai-toggle-wrap" title="Zwischen normaler Suche und KI-Suche wechseln">
+      <span class="ai-toggle-label ai-toggle-left">Suche</span>
+      <span class="ai-toggle-track">
+        <input type="checkbox" id="ai-toggle" style="display:none"
+          onchange="switchSearchMode(this.checked)">
+        <span class="ai-toggle-thumb"></span>
+      </span>
+      <span class="ai-toggle-label ai-toggle-right">KI-Suche <span style="font-size:10px; color:var(--text-3); font-weight:400;">(experimentell)</span></span>
+    </label>
+  </div>
+
+  {# ── Basis-Filter ── #}
+  <div class="filters-basic">
     <select name="type"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
@@ -227,7 +240,70 @@
   {# ── Aktive Filter als Chips ── #}
   <div id="active-chips"></div>
 
-</div>
+  </div>{# /search-mode-block #}
+
+  <div id="gallery-mode-block" style="display:none;">
+   <div id="gallery-filter-panel" class="mehr-filter-panel" style="display:none;">
+    <div class="search-scope-row">
+      <div class="search-scope-group">
+        <span class="search-scope-label">Bewertung:</span>
+        <button type="button" class="scope-btn active" data-sterne="" onclick="setSterneFilter('')">Alle</button>
+        <button type="button" class="scope-btn" data-sterne="5" onclick="setSterneFilter('5')">≥5 ⭐</button>
+        <button type="button" class="scope-btn" data-sterne="4" onclick="setSterneFilter('4')">≥4 ⭐</button>
+        <button type="button" class="scope-btn" data-sterne="3" onclick="setSterneFilter('3')">≥3 ⭐</button>
+        <button type="button" class="scope-btn" data-sterne="2" onclick="setSterneFilter('2')">≥2 ⭐</button>
+        <button type="button" class="scope-btn" data-sterne="1" onclick="setSterneFilter('1')">≥1 ⭐</button>
+        <button type="button" class="scope-btn" data-sterne="unbewertet" onclick="setSterneFilter('unbewertet')">Unbewertet</button>
+      </div>
+    </div>
+
+    <div class="search-scope-row">
+      <div class="search-scope-group">
+        <span class="search-scope-label">Format:</span>
+        <button type="button" class="scope-btn format-btn active" data-format="jpg" onclick="toggleFormat('jpg')">JPG</button>
+        <button type="button" class="scope-btn format-btn active" data-format="png" onclick="toggleFormat('png')">PNG</button>
+        <button type="button" class="scope-btn format-btn active" data-format="heic" onclick="toggleFormat('heic')">HEIC</button>
+        <button type="button" class="scope-btn format-btn active" data-format="gif" onclick="toggleFormat('gif')">GIF</button>
+        <button type="button" class="scope-btn format-btn active" data-format="bmp" onclick="toggleFormat('bmp')">BMP</button>
+        <button type="button" class="scope-btn format-btn active" data-format="webp" onclick="toggleFormat('webp')">WEBP</button>
+        <button type="button" class="scope-btn format-btn active" data-format="tiff" onclick="toggleFormat('tiff')">TIFF</button>
+      </div>
+    </div>
+
+    <div class="filter-row-2" style="max-width:320px;">
+      <div>
+        <label class="filter-label">Datum von</label>
+        <input type="date" id="gallery_date_from" class="filter-input" onchange="reloadGallery()">
+      </div>
+      <div>
+        <label class="filter-label">Datum bis</label>
+        <input type="date" id="gallery_date_to" class="filter-input" onchange="reloadGallery()">
+      </div>
+    </div>
+
+    <div id="gallery-ordner-row" style="display:none;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <span class="search-scope-label">Ordner:</span>
+        <button type="button" class="scope-btn active" data-ordner="" onclick="setOrdnerFilter('')">Alle</button>
+        <input type="text" id="gallery-ordner-search" class="filter-input" style="width:220px;"
+          placeholder="Ordner filtern…" oninput="filterOrdnerTags()">
+        <span id="gallery-ordner-count" style="font-size:11px; color:var(--text-3);"></span>
+      </div>
+      <div id="gallery-ordner-tags" class="ordner-tags-scroll"></div>
+    </div>
+
+    <div class="search-scope-row">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
+        <input type="checkbox" id="gallery-show-stars" checked onchange="toggleStarsVisibility()">
+        Sterne ein-/ausblenden
+      </label>
+    </div>
+
+   </div>{# /gallery-filter-panel #}
+    <input type="hidden" name="sterne" id="sterne_input" value="">
+  </div>
+
+</div>{# /search-form #}
 
 <div id="spinner" class="spinner htmx-indicator">Suche…</div>
 
@@ -241,6 +317,33 @@
     {% else %}
     <p>Suchbegriff eingeben um Dokumente zu finden.</p>
     {% endif %}
+  </div>
+</div>
+
+<div id="gallery-results" style="display:none;"></div>
+
+<div id="gallery-selection-bar" class="gallery-selection-bar">
+  <span id="gallery-selection-count"></span>
+  <button type="button" class="btn btn-primary" onclick="openKontaktbogen()">Kontaktbogen erstellen</button>
+  <button type="button" class="btn" onclick="clearSelection()">Auswahl aufheben</button>
+</div>
+
+<div id="gallery-context-menu" class="context-menu">
+  <button type="button" onclick="contextMenuAction('open')">Öffnen</button>
+  <button type="button" onclick="contextMenuAction('reveal')">Im Finder zeigen</button>
+</div>
+
+<div id="loupe-overlay" class="loupe-overlay" style="display:none;" onclick="if(event.target===this) closeLoupe();">
+  <button type="button" class="loupe-close" onclick="closeLoupe()">✕</button>
+  <button type="button" class="loupe-nav loupe-prev" onclick="loupeStep(-1)">‹</button>
+  <img id="loupe-img" class="loupe-img" src="" alt="">
+  <button type="button" class="loupe-nav loupe-next" onclick="loupeStep(1)">›</button>
+  <div class="loupe-footer">
+    <div class="loupe-stars" id="loupe-stars"></div>
+    <label class="loupe-auto">
+      <input type="checkbox" id="loupe-autoadvance" onchange="loupeAutoAdvance=this.checked">
+      Auto-Weiter nach Bewertung
+    </label>
   </div>
 </div>
 
@@ -413,5 +516,354 @@ function copyPath(btn, text) {
     setTimeout(function() { btn.textContent = orig; }, 1500);
   });
 }
+
+// ── Galerie / Foto-Browser ──────────────────────────────────────────────────
+var currentMode        = 'search';
+var galleryLoaded       = false;
+var galleryPhotoIds     = [];
+var galleryFocusIdx     = -1;
+var loupeOpen           = false;
+var loupeCurrentId      = null;
+var loupeAutoAdvance    = false;
+
+function switchMode(mode) {
+  if (mode === currentMode) return;
+  currentMode = mode;
+  document.getElementById('mode-btn-search').classList.toggle('active', mode === 'search');
+  document.getElementById('mode-btn-gallery').classList.toggle('active', mode === 'gallery');
+  document.getElementById('search-mode-block').style.display = mode === 'search' ? '' : 'none';
+  document.getElementById('gallery-mode-block').style.display = mode === 'gallery' ? '' : 'none';
+  document.getElementById('results').style.display = mode === 'search' ? '' : 'none';
+  document.getElementById('gallery-results').style.display = mode === 'gallery' ? '' : 'none';
+  document.getElementById('gallery-filter-btn').style.display = mode === 'gallery' ? '' : 'none';
+  document.getElementById('gallery-select-all-btn').style.display = mode === 'gallery' ? '' : 'none';
+  if (mode === 'gallery' && !galleryLoaded) {
+    galleryLoaded = true;
+    reloadGallery();
+    refreshOrdnerTags();
+  }
+}
+
+function toggleStarsVisibility() {
+  var show = document.getElementById('gallery-show-stars').checked;
+  document.getElementById('gallery-results').classList.toggle('hide-stars', !show);
+}
+
+// ── Auswahl + Kontaktbogen ──────────────────────────────────────────────────
+var gallerySelection = new Set();
+
+function toggleSelect(id, evt) {
+  if (evt) evt.stopPropagation();
+  var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+  if (gallerySelection.has(id)) {
+    gallerySelection.delete(id);
+    if (tile) tile.classList.remove('selected');
+  } else {
+    gallerySelection.add(id);
+    if (tile) tile.classList.add('selected');
+  }
+  var cb = tile ? tile.querySelector('.photo-select input') : null;
+  if (cb) cb.checked = gallerySelection.has(id);
+  updateSelectionBar();
+}
+
+function selectAllVisible() {
+  document.querySelectorAll('#gallery-results .photo-tile').forEach(function(tile) {
+    var id = parseInt(tile.dataset.id, 10);
+    gallerySelection.add(id);
+    tile.classList.add('selected');
+    var cb = tile.querySelector('.photo-select input');
+    if (cb) cb.checked = true;
+  });
+  updateSelectionBar();
+}
+
+function clearSelection() {
+  gallerySelection.forEach(function(id) {
+    var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+    if (tile) {
+      tile.classList.remove('selected');
+      var cb = tile.querySelector('.photo-select input');
+      if (cb) cb.checked = false;
+    }
+  });
+  gallerySelection.clear();
+  updateSelectionBar();
+}
+
+function updateSelectionBar() {
+  var bar = document.getElementById('gallery-selection-bar');
+  var count = gallerySelection.size;
+  bar.style.display = count > 0 ? 'flex' : 'none';
+  document.getElementById('gallery-selection-count').textContent = count + ' ausgewählt';
+}
+
+function openKontaktbogen() {
+  if (!gallerySelection.size) return;
+  var ids = Array.from(gallerySelection).join(',');
+  window.open('/galerie/kontaktbogen?ids=' + encodeURIComponent(ids), '_blank');
+}
+
+// ── Rechtsklick-Kontextmenü (Öffnen / Im Finder zeigen) ─────────────────────
+var contextMenuPath = null;
+
+document.addEventListener('contextmenu', function(e) {
+  var tile = e.target.closest('.photo-tile');
+  if (!tile || currentMode !== 'gallery') return;
+  e.preventDefault();
+  contextMenuPath = tile.dataset.path;
+  var menu = document.getElementById('gallery-context-menu');
+  var x = Math.min(e.clientX, window.innerWidth - 190);
+  var y = Math.min(e.clientY, window.innerHeight - 90);
+  menu.style.left = x + 'px';
+  menu.style.top = y + 'px';
+  menu.style.display = 'block';
+});
+
+document.addEventListener('click', function(e) {
+  var menu = document.getElementById('gallery-context-menu');
+  if (menu.style.display === 'block' && !menu.contains(e.target)) menu.style.display = 'none';
+});
+
+function contextMenuAction(action) {
+  var menu = document.getElementById('gallery-context-menu');
+  menu.style.display = 'none';
+  if (!contextMenuPath) return;
+  if (action === 'open') helperOpen(contextMenuPath);
+  else if (action === 'reveal') helperReveal(contextMenuPath);
+}
+
+function toggleGalleryFilterPanel() {
+  var panel = document.getElementById('gallery-filter-panel');
+  var btn   = document.getElementById('gallery-filter-btn');
+  var open  = panel.style.display !== 'none';
+  panel.style.display = open ? 'none' : 'block';
+  btn.classList.toggle('active', !open);
+}
+
+function activeFormats() {
+  return Array.prototype.map.call(
+    document.querySelectorAll('.format-btn.active'),
+    function(b) { return b.dataset.format; }
+  );
+}
+
+function reloadGallery() {
+  var pid      = document.getElementById('project_id_select').value;
+  var sterne   = document.getElementById('sterne_input').value;
+  var ordner   = document.getElementById('gallery-ordner-row').dataset.selected || '';
+  var dateFrom = document.getElementById('gallery_date_from').value;
+  var dateTo   = document.getElementById('gallery_date_to').value;
+  var formats  = activeFormats();
+  var allFormats = document.querySelectorAll('.format-btn').length;
+  var formate = formats.length === allFormats ? '' : formats.join(',');
+  var params = new URLSearchParams({
+    project_id: pid, sterne: sterne, ordner: ordner,
+    date_from: dateFrom, date_to: dateTo, formate: formate,
+  });
+  htmx.ajax('GET', '/galerie?' + params.toString(), { target: '#gallery-results', swap: 'innerHTML' });
+}
+
+function setSterneFilter(v) {
+  document.getElementById('sterne_input').value = v;
+  document.querySelectorAll('#gallery-mode-block .scope-btn[data-sterne]').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.sterne === v);
+  });
+  reloadGallery();
+}
+
+function toggleFormat(fmt) {
+  var btn = document.querySelector('.format-btn[data-format="' + fmt + '"]');
+  btn.classList.toggle('active');
+  var anyActive = activeFormats().length > 0;
+  if (!anyActive) btn.classList.add('active');  // mindestens ein Format muss aktiv bleiben
+  reloadGallery();
+}
+
+function setOrdnerFilter(tag) {
+  var row = document.getElementById('gallery-ordner-row');
+  row.dataset.selected = tag;
+  row.querySelectorAll('.scope-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.ordner === tag);
+  });
+  reloadGallery();
+}
+
+function refreshOrdnerTags() {
+  var pid      = document.getElementById('project_id_select').value;
+  var row      = document.getElementById('gallery-ordner-row');
+  var tagsEl   = document.getElementById('gallery-ordner-tags');
+  var searchEl = document.getElementById('gallery-ordner-search');
+  var countEl  = document.getElementById('gallery-ordner-count');
+  row.dataset.selected = '';
+  searchEl.value = '';
+  countEl.textContent = '';
+  if (!pid) { row.style.display = 'none'; tagsEl.innerHTML = ''; return; }
+  fetch('/galerie/ordner-tags?project_id=' + encodeURIComponent(pid))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.tags || !d.tags.length) { row.style.display = 'none'; tagsEl.innerHTML = ''; return; }
+      row.style.display = '';
+      document.querySelector('#gallery-ordner-row .scope-btn[data-ordner=""]').classList.add('active');
+      tagsEl.innerHTML = d.tags.map(function(t) {
+        return '<button type="button" class="scope-btn" data-ordner="' + t.replace(/"/g, '&quot;') + '" '
+          + 'onclick="setOrdnerFilter(\'' + t.replace(/'/g, "\\'") + '\')">' + t + '</button>';
+      }).join('');
+      countEl.textContent = d.tags.length + ' Ordner';
+    });
+}
+
+function filterOrdnerTags() {
+  var q = document.getElementById('gallery-ordner-search').value.trim().toLowerCase();
+  var shown = 0;
+  document.querySelectorAll('#gallery-ordner-tags .scope-btn').forEach(function(b) {
+    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    b.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  var total = document.querySelectorAll('#gallery-ordner-tags .scope-btn').length;
+  var countEl = document.getElementById('gallery-ordner-count');
+  countEl.textContent = q ? (shown + ' von ' + total + ' Ordnern') : (total + ' Ordner');
+}
+
+function refreshGalleryPhotoIds() {
+  galleryPhotoIds = Array.prototype.map.call(
+    document.querySelectorAll('#gallery-results .photo-tile'),
+    function(el) { return parseInt(el.dataset.id, 10); }
+  );
+}
+
+document.body.addEventListener('htmx:afterSwap', function() { refreshGalleryPhotoIds(); });
+
+function focusTile(id) {
+  document.querySelectorAll('.photo-tile.focused').forEach(function(el) { el.classList.remove('focused'); });
+  var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+  if (tile) { tile.classList.add('focused'); tile.focus(); }
+  refreshGalleryPhotoIds();
+  galleryFocusIdx = galleryPhotoIds.indexOf(id);
+}
+
+function gridColumns() {
+  var tiles = document.querySelectorAll('#gallery-results .photo-tile');
+  if (!tiles.length) return 1;
+  var firstTop = tiles[0].offsetTop;
+  var n = 0;
+  for (var i = 0; i < tiles.length; i++) {
+    if (tiles[i].offsetTop !== firstTop) break;
+    n++;
+  }
+  return n || 1;
+}
+
+function moveFocus(delta) {
+  if (!galleryPhotoIds.length) return;
+  var base = galleryFocusIdx < 0 ? 0 : galleryFocusIdx;
+  var newIdx = Math.min(Math.max(base + delta, 0), galleryPhotoIds.length - 1);
+  focusTile(galleryPhotoIds[newIdx]);
+  var tile = document.querySelector('.photo-tile[data-id="' + galleryPhotoIds[newIdx] + '"]');
+  if (tile) tile.scrollIntoView({ block: 'nearest' });
+}
+
+function ratePhoto(id, n, evt) {
+  if (evt) evt.stopPropagation();
+  var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+  var current = tile ? parseInt(tile.dataset.rating || '0', 10) : 0;
+  submitRating(id, n === current ? 0 : n);  // Klick auf denselben Stern = löschen
+}
+
+function bumpRating(id, delta) {
+  if (id === null || id === undefined) return;
+  var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+  var current = tile ? parseInt(tile.dataset.rating || '0', 10) : 0;
+  submitRating(id, Math.min(5, Math.max(0, current + delta)));
+}
+
+function submitRating(id, rating) {
+  if (id === null || id === undefined) return;
+  fetch('/foto/' + id + '/bewertung', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ rating: rating }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) return;
+    updateTileRating(id, d.rating);
+  });
+}
+
+function updateTileRating(id, rating) {
+  var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+  if (tile) {
+    tile.dataset.rating = rating;
+    tile.querySelectorAll('.photo-stars .star').forEach(function(s, i) {
+      s.classList.toggle('filled', (i + 1) <= rating);
+    });
+  }
+  if (loupeOpen && loupeCurrentId === id) updateLoupeStars(rating);
+}
+
+function openLoupe(id) {
+  loupeOpen = true;
+  loupeCurrentId = id;
+  refreshGalleryPhotoIds();
+  document.getElementById('loupe-overlay').style.display = 'flex';
+  renderLoupe();
+}
+
+function closeLoupe() {
+  loupeOpen = false;
+  document.getElementById('loupe-overlay').style.display = 'none';
+}
+
+function renderLoupe() {
+  document.getElementById('loupe-img').src = '/foto/' + loupeCurrentId + '/ansicht';
+  var tile = document.querySelector('.photo-tile[data-id="' + loupeCurrentId + '"]');
+  updateLoupeStars(tile ? parseInt(tile.dataset.rating || '0', 10) : 0);
+}
+
+function updateLoupeStars(rating) {
+  var el = document.getElementById('loupe-stars');
+  var html = '';
+  for (var i = 1; i <= 5; i++) {
+    html += '<span class="star ' + (i <= rating ? 'filled' : '') + '" onclick="ratePhoto(' + loupeCurrentId + ',' + i + ')">★</span>';
+  }
+  el.innerHTML = html;
+}
+
+function loupeStep(delta) {
+  var idx = galleryPhotoIds.indexOf(loupeCurrentId);
+  var next = idx + delta;
+  if (next < 0 || next >= galleryPhotoIds.length) return;
+  loupeCurrentId = galleryPhotoIds[next];
+  renderLoupe();
+}
+
+function handleLoupeKey(e) {
+  if (e.key === 'Escape') { closeLoupe(); e.preventDefault(); }
+  else if (e.key === 'ArrowRight') { loupeStep(1); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { loupeStep(-1); e.preventDefault(); }
+  else if (/^[0-5]$/.test(e.key)) {
+    var wasAdvance = loupeAutoAdvance && e.key !== '0';
+    submitRating(loupeCurrentId, parseInt(e.key, 10));
+    if (wasAdvance) loupeStep(1);
+    e.preventDefault();
+  } else if (e.key === '[') { bumpRating(loupeCurrentId, -1); e.preventDefault(); }
+  else if (e.key === ']') { bumpRating(loupeCurrentId, 1); e.preventDefault(); }
+}
+
+document.addEventListener('keydown', function(e) {
+  if (loupeOpen) { handleLoupeKey(e); return; }
+  if (currentMode !== 'gallery') return;
+  var tag = (document.activeElement && document.activeElement.tagName) || '';
+  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (galleryFocusIdx < 0 && !['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
+  if (e.key === 'ArrowRight') { moveFocus(1); e.preventDefault(); }
+  else if (e.key === 'ArrowLeft') { moveFocus(-1); e.preventDefault(); }
+  else if (e.key === 'ArrowDown') { moveFocus(gridColumns()); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { moveFocus(-gridColumns()); e.preventDefault(); }
+  else if (e.key === 'Enter') { openLoupe(galleryPhotoIds[galleryFocusIdx]); e.preventDefault(); }
+  else if (/^[0-5]$/.test(e.key)) { submitRating(galleryPhotoIds[galleryFocusIdx], parseInt(e.key, 10)); }
+  else if (e.key === '[') { bumpRating(galleryPhotoIds[galleryFocusIdx], -1); }
+  else if (e.key === ']') { bumpRating(galleryPhotoIds[galleryFocusIdx], 1); }
+});
 </script>
 {% endblock %}

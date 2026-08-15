@@ -13,8 +13,18 @@ from urllib.parse import quote
 
 import requests
 from mcp.server.fastmcp import FastMCP
+from mcp.types import ToolAnnotations
 
 CONFIG_PATH = Path(__file__).parent / "config.json"
+
+# Alle Archivio-Tools sind read-only (keine Aenderung an Dokumenten/DB) und arbeiten
+# ausschliesslich auf dem lokalen NAS/Server, nicht "open world". Als Tool-Annotation
+# mitgegeben, damit MCP-Clients (Claude Desktop/Claude.ai) das bei der Standard-
+# Berechtigung beruecksichtigen koennen -- ohne das mussten Nutzer jedes Tool manuell
+# in den Connector-Einstellungen von "Jedes Mal fragen" auf "Immer erlauben" umstellen.
+_READ_ONLY = ToolAnnotations(
+    readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
+)
 
 # Lokaler HTTP-Server der Archivio-Helper-Menubar-App (siehe archivio_helper.py).
 # Läuft auf derselben Station wie dieser MCP-Server; öffnet Dateien mit den
@@ -69,16 +79,56 @@ def _helper_action(action: str, path: str) -> str:
     return f"Helper-Fehler ({resp.status_code}) bei «{action}» für {path}"
 
 
+def _allowed_base_folders() -> list[str] | None:
+    """Holt die erlaubten NAS-Wurzelpfade vom Server. None bei Fehler (Aufrufer muss
+    dann ablehnen, nicht offen lassen -- kein Fallback auf "alles erlaubt")."""
+    base = _server_url()
+    try:
+        resp = requests.get(f"{base}/api/mcp/base-folders", timeout=5)
+        resp.raise_for_status()
+        return resp.json().get("folders", [])
+    except Exception:
+        return None
+
+
+def _check_path_allowed(path: str) -> tuple[Path | None, str | None]:
+    """Prüft, ob `path` innerhalb eines konfigurierten Archivio-Projektordners liegt --
+    gemeinsame Sicherheitsgrenze für JEDES Tool, das eine Datei/einen Ordner ausserhalb
+    des MCP-Suchindex direkt anfasst (list_folder, open_file, reveal_file). Gibt bei
+    Erfolg (aufgelöster Pfad, None) zurück, sonst (None, Fehlermeldung) -- der Aufrufer
+    gibt die Fehlermeldung dann direkt als Tool-Ergebnis zurück, statt fortzufahren."""
+    allowed = _allowed_base_folders()
+    if allowed is None:
+        return None, f"Konnte erlaubte Ordner nicht vom Archivio-Server abfragen ({_server_url()})."
+    if not allowed:
+        return None, "Keine NAS-Ordner in Archivio konfiguriert."
+    try:
+        target = Path(path).resolve()
+    except Exception as e:
+        return None, f"Ungültiger Pfad «{path}»: {e}"
+    if not any(target == Path(a).resolve() or Path(a).resolve() in target.parents
+               for a in allowed):
+        return None, f"Pfad ausserhalb der erlaubten Archivio-Ordner: {path}"
+    return target, None
+
+
 mcp = FastMCP("archivio")
 
 
-@mcp.tool()
-def search(query: str, project: str = "", scope: str = "docs,filenames") -> str:
-    """Durchsucht Archivio per Volltextsuche (Dokumente, Dateinamen, Mails, Ordner).
+@mcp.tool(annotations=_READ_ONLY)
+def search(query: str, project: str = "", scope: str = "docs,filenames,folders") -> str:
+    """Durchsucht Archivio per Volltextsuche (Dokumente, Dateinamen, Mails, Ordnernamen).
+
+    IMMER dieses Tool zuerst versuchen, wenn ein Dateiname, Ordnername, Aktenzeichen,
+    BKP-Nummer oder ein exakter Fachbegriff bekannt/vermutet wird — auch wenn der Begriff
+    nur im Datei- oder Ordnernamen steht (nicht im Dokumentinhalt), findet dieses Tool ihn.
+    semantic_search() nur nachschieben, wenn hier nichts Passendes dabei ist oder die Frage
+    inhaltlich/sinngemäss ist statt nach einem bekannten Namen zu suchen.
 
     query: Suchbegriff(e).
     project: optionale Projekt-ID zum Einschränken.
-    scope: Komma-getrennt, z.B. "docs,filenames" oder "docs,filenames,folders".
+    scope: Komma-getrennt aus "docs" (Dokumentinhalt), "filenames" (Dateinamen),
+    "folders" (Ordnernamen) — standardmässig alle drei aktiv.
 
     Jeder Treffer hat eine [ID nnn]: mit read_document(nnn) den Volltext laden,
     mit open_file(pfad) die Datei extern öffnen.
@@ -88,7 +138,8 @@ def search(query: str, project: str = "", scope: str = "docs,filenames") -> str:
         resp = requests.get(
             f"{base}/api/mcp/search",
             params={"q": query, "project_id": project, "search_in": scope, "limit": 20},
-            timeout=15,
+            timeout=40,  # Mehrwort-Queries mit vielen FTS-OR-Zweigen koennen auf grossen
+                         # Indizes mehrere Sekunden dauern -- 15s war knapp bemessen.
         )
         resp.raise_for_status()
     except Exception as e:
@@ -121,10 +172,13 @@ def search(query: str, project: str = "", scope: str = "docs,filenames") -> str:
     return "\n".join(lines)
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def semantic_search(query: str, project: str = "") -> str:
     """Semantische Suche (KI-Suche) über Dokument-Inhalte — findet auch sinngemäße Treffer,
-    die die Volltextsuche verpasst. Gibt Text-Auszüge zurück; die Antwort formuliert Claude selbst.
+    die die Volltextsuche verpasst (z.B. Umschreibungen, Synonyme, "worum geht es in..."-
+    Fragen). Für bekannte Datei-/Ordnernamen oder exakte Fachbegriffe stattdessen zuerst
+    search() nutzen, das ist dafür zuverlässiger. Gibt Text-Auszüge zurück; die Antwort
+    formuliert Claude selbst.
 
     query: Frage oder Suchbegriff.
     project: optionale Projekt-ID zum Einschränken.
@@ -147,27 +201,49 @@ def semantic_search(query: str, project: str = "") -> str:
     if not sources:
         return data.get("error") or f"Keine relevanten Inhalte für «{query}» gefunden."
 
+    # match_type erklärt, WIE der Treffer gefunden wurde — wichtig, damit der Score
+    # nicht als exakte, über alle Treffer hinweg vergleichbare Zahl missverstanden wird
+    # (Volltext-Treffer bekommen einen plausiblen Näherungswert, kein echtes Embedding-Mass).
+    _MATCH_LABELS = {
+        "heading":  "Überschrift/Norm-Definition, Volltext-Treffer",
+        "fts":      "Volltext-Treffer",
+        "like_and": "Volltext-Treffer (unscharf)",
+        "like_or":  "Volltext-Treffer (unscharf, Teilbegriff)",
+        "semantic": "semantischer Treffer",
+    }
     lines = []
     for s in sources:
-        proj = s.get("project_name") or "—"
-        page = f", Seite {s['page_number']}" if s.get("page_number") else ""
+        proj  = s.get("project_name") or "—"
+        page  = f", Seite {s['page_number']}" if s.get("page_number") else ""
+        label = _MATCH_LABELS.get(s.get("match_type"), "")
+        score_str = f"Score {s.get('score', 0):.2f}" + (f", {label}" if label else "")
         lines.append(
-            f"- [ID {s.get('document_id')}] {s['filename']} [{proj}{page}] (Score {s.get('score', 0):.2f})\n"
+            f"- [ID {s.get('document_id')}] {s['filename']} [{proj}{page}] ({score_str})\n"
             f"  Pfad: {s.get('filepath') or '—'}\n"
             f"  Inhalt: {(s.get('content') or '').strip()[:500]}"
         )
     return "\n".join(lines)
 
 
-@mcp.tool()
-def read_document(document_id: int) -> str:
-    """Lädt den extrahierten Text-Inhalt eines Dokuments in die Unterhaltung — damit Claude
-    ihn direkt lesen, zusammenfassen, umschreiben, übersetzen oder Fragen dazu beantworten kann.
+_READ_DOCUMENT_BLOCK_SIZE = 8000
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def read_document(document_id: int, offset: int = 0) -> str:
+    """Lädt den extrahierten Text-Inhalt eines Dokuments blockweise in die Unterhaltung —
+    damit Claude ihn direkt lesen, zusammenfassen, umschreiben, übersetzen oder Fragen dazu
+    beantworten kann.
 
     Für Text-Dokumente: Mails, PDFs, Word, Textdateien. Für Bilder/Pläne stattdessen
     open_file benutzen (die öffnet die Datei extern zum Anschauen).
 
+    Liefert jeweils EINEN Textblock. Ist das Dokument länger, endet die Antwort mit einem
+    Hinweis inkl. des offsets für den nächsten Block — falls die gesuchte Information im
+    ersten Block nicht dabei ist, read_document mit diesem offset erneut aufrufen, um
+    weiterzulesen (statt anzunehmen, das Dokument sei bereits vollständig gelesen).
+
     document_id: die Zahl aus der [ID nnn] eines Suchergebnisses.
+    offset: Zeichen-Position, ab der gelesen werden soll (0 = Anfang, Standard).
     """
     base = _server_url()
     try:
@@ -202,34 +278,92 @@ def read_document(document_id: int) -> str:
             "Zum Anschauen open_file benutzen.)"
         )
 
-    MAX = 40000
-    if len(content) > MAX:
-        content = content[:MAX] + f"\n\n… (gekürzt — {len(content)} Zeichen gesamt)"
-    return "\n".join(header) + "\n\n" + content
+    total = len(content)
+    if offset >= total:
+        return f"Kein weiterer Inhalt ab Zeichen {offset} (Dokument hat {total} Zeichen)."
+
+    block       = content[offset:offset + _READ_DOCUMENT_BLOCK_SIZE]
+    next_offset = offset + len(block)
+    footer = ""
+    if next_offset < total:
+        footer = (
+            f"\n\n… (Zeichen {offset}–{next_offset} von {total} — weiterer Inhalt vorhanden, "
+            f"bei Bedarf read_document({document_id}, offset={next_offset}) aufrufen)"
+        )
+
+    prefix = "\n".join(header) + "\n\n" if offset == 0 else ""
+    return prefix + block + footer
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def open_file(path: str) -> str:
     """Öffnet eine Datei aus Archivio in der zugehörigen App (z.B. Bild, PDF) auf dem Mac.
 
     Nutzt den lokalen Archivio Helper — funktioniert nur auf der Station, auf der
-    Claude Desktop + Archivio Helper laufen und die die Datei erreichen kann.
+    Claude Desktop + Archivio Helper laufen und die die Datei erreichen kann. Aus
+    Sicherheitsgründen nur innerhalb der konfigurierten Archivio-Projektordner.
 
     path: absoluter Dateipfad, exakt wie in den Suchergebnissen unter "Pfad" angegeben
           (z.B. "/Volumes/Groups/.../Attika_rechts_Event.jpg").
     """
+    _, guard_err = _check_path_allowed(path)
+    if guard_err:
+        return guard_err
     err = _helper_action("open", path)
     return err if err else f"Datei wird geöffnet: {path}"
 
 
-@mcp.tool()
+@mcp.tool(annotations=_READ_ONLY)
 def reveal_file(path: str) -> str:
     """Zeigt eine Datei im Finder (markiert sie in ihrem Ordner) via Archivio Helper.
+    Aus Sicherheitsgründen nur innerhalb der konfigurierten Archivio-Projektordner.
 
     path: absoluter Dateipfad wie in den Suchergebnissen unter "Pfad".
     """
+    _, guard_err = _check_path_allowed(path)
+    if guard_err:
+        return guard_err
     err = _helper_action("reveal", path)
     return err if err else f"Im Finder angezeigt: {path}"
+
+
+@mcp.tool(annotations=_READ_ONLY)
+def list_folder(path: str) -> str:
+    """Listet den Inhalt eines Ordners (Unterordner + Dateien) — nützlich wenn der
+    ungefähre Speicherort bekannt ist (z.B. aus einem vorherigen Suchtreffer), aber der
+    genaue Dateiname nicht. Läuft direkt auf dieser Station (derselbe NAS-Zugriff wie der
+    Archivio-Server), aus Sicherheitsgründen nur innerhalb der konfigurierten
+    Archivio-Projektordner.
+
+    path: absoluter Ordnerpfad, z.B. aus dem "Pfad"-Feld eines Suchtreffers (Elternordner).
+    """
+    target, guard_err = _check_path_allowed(path)
+    if guard_err:
+        return guard_err
+    if not target.exists():
+        return f"Ordner nicht gefunden: {path}"
+    if not target.is_dir():
+        return f"Kein Ordner (sondern eine Datei): {path}"
+
+    try:
+        entries = sorted(target.iterdir(), key=lambda p: (not p.is_dir(), p.name.lower()))
+    except Exception as e:
+        return f"Ordner konnte nicht gelesen werden ({e}): {path}"
+
+    if not entries:
+        return f"Ordner ist leer: {path}"
+
+    lines = [f"Inhalt von {path}:"]
+    for entry in entries:
+        try:
+            if entry.is_dir():
+                lines.append(f"- 📁 {entry.name}/")
+            else:
+                size_kb = entry.stat().st_size / 1024
+                lines.append(f"- {entry.name}  ({size_kb:.0f} KB)")
+        except Exception:
+            lines.append(f"- {entry.name} (nicht lesbar)")
+    return "\n".join(lines)
 
 
 if __name__ == "__main__":
