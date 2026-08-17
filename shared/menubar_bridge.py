@@ -103,6 +103,21 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
     return html.encode("utf-8")
 
 
+def _unique_dest(dest_dir: Path, filename: str) -> Path:
+    """Verhindert Überschreiben bei Namenskollision im Zielordner (z.B. gleicher
+    Dateiname aus zwei verschiedenen Projektordnern in einer Auswahl)."""
+    target = dest_dir / filename
+    if not target.exists():
+        return target
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    i = 2
+    while True:
+        candidate = dest_dir / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
 def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None):
     """config_provider: optionales Callable[[], str], das server_url für den
     /config-Endpoint liefert. Helper übergibt einen Reader auf sein config.json,
@@ -113,7 +128,62 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
 
     class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         def do_OPTIONS(self):
-            self._cors_headers(200)
+            self.send_response(200)
+            self.send_header("Access-Control-Allow-Origin", "*")
+            self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+            self.send_header("Access-Control-Allow-Headers", "Content-Type")
+            self.end_headers()
+
+        def do_POST(self):
+            parsed = urlparse(self.path)
+            if parsed.path == "/copy-to-folder":
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                try:
+                    raw = self.rfile.read(length) if length else b"{}"
+                    body = json.loads(raw or b"{}")
+                except Exception:
+                    body = {}
+                self._handle_copy_to_folder(body.get("paths") or [])
+            else:
+                self._cors_headers(404)
+
+        def _handle_copy_to_folder(self, paths):
+            """Öffnet einen nativen Finder-Ordner-Picker (choose folder) und kopiert
+            die übergebenen Dateien dorthin -- für "Auswahl in neuen Ordner speichern"
+            im Foto-Browser (z.B. Fotoauswahl für eine Besprechung zusammenstellen)."""
+            if not paths:
+                self._json_response(400, {"ok": False, "error": "Keine Dateien ausgewählt"})
+                return
+            try:
+                result = subprocess.run(
+                    ["osascript", "-e",
+                     'POSIX path of (choose folder with prompt "Zielordner für die Auswahl wählen")'],
+                    capture_output=True, text=True, timeout=300,
+                )
+            except Exception as e:
+                self._json_response(500, {"ok": False, "error": str(e)})
+                return
+            if result.returncode != 0:
+                self._json_response(200, {"ok": False, "cancelled": True})
+                return
+            dest_dir = Path(result.stdout.strip())
+            copied, errors = 0, []
+            for p in paths:
+                src = Path(p)
+                try:
+                    if not src.exists():
+                        errors.append(f"{src.name}: nicht gefunden")
+                        continue
+                    target = _unique_dest(dest_dir, src.name)
+                    shutil.copy2(src, target)
+                    copied += 1
+                except Exception as e:
+                    errors.append(f"{src.name}: {e}")
+            log.info("copy-to-folder: %d/%d nach %s kopiert", copied, len(paths), dest_dir)
+            self._json_response(200, {"ok": True, "folder": str(dest_dir), "copied": copied, "errors": errors})
+
+        def _json_response(self, code, payload):
+            self._cors_headers(code, json.dumps(payload).encode("utf-8"), "application/json")
 
         def do_GET(self):
             parsed = urlparse(self.path)

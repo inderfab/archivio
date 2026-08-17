@@ -292,11 +292,26 @@
       <div id="gallery-ordner-tags" class="ordner-tags-scroll"></div>
     </div>
 
+    <div id="gallery-tag-row" style="display:none;">
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <span class="search-scope-label">Tags:</span>
+        <button type="button" class="scope-btn active" data-tag="" onclick="setTagFilter('')">Alle</button>
+        <input type="text" id="gallery-tag-search" class="filter-input" style="width:220px;"
+          placeholder="Tags filtern…" oninput="filterTagChips()">
+        <span id="gallery-tag-count" style="font-size:11px; color:var(--text-3);"></span>
+      </div>
+      <div id="gallery-tag-list" class="ordner-tags-scroll"></div>
+    </div>
+
     <div class="search-scope-row">
       <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
         <input type="checkbox" id="gallery-show-stars" checked onchange="toggleStarsVisibility()">
         Sterne ein-/ausblenden
       </label>
+    </div>
+
+    <div class="search-scope-row" style="font-size:11px; color:var(--text-3);">
+      Tipp: Taste <kbd style="border:1px solid var(--border); border-radius:3px; padding:0 5px; font-family:inherit;">T</kbd> vergibt ein Tag auf das fokussierte/geöffnete Foto oder die ganze Mehrfachauswahl.
     </div>
 
    </div>{# /gallery-filter-panel #}
@@ -325,12 +340,20 @@
 <div id="gallery-selection-bar" class="gallery-selection-bar">
   <span id="gallery-selection-count"></span>
   <button type="button" class="btn btn-primary" onclick="openKontaktbogen()">Kontaktbogen erstellen</button>
+  <button type="button" class="btn" onclick="saveSelectionToFolder()">In neuen Ordner speichern</button>
+  <button type="button" class="btn" onclick="event.stopPropagation(); openTagFlyover(Array.from(gallerySelection))">Tag zuweisen (T)</button>
   <button type="button" class="btn" onclick="clearSelection()">Auswahl aufheben</button>
 </div>
 
 <div id="gallery-context-menu" class="context-menu">
   <button type="button" onclick="contextMenuAction('open')">Öffnen</button>
   <button type="button" onclick="contextMenuAction('reveal')">Im Finder zeigen</button>
+</div>
+
+<div id="tag-flyover" class="tag-flyover" style="display:none;">
+  <div id="tag-flyover-current"></div>
+  <input type="text" id="tag-flyover-input" placeholder="Tag eingeben…" autocomplete="off" oninput="onTagFlyoverInput()">
+  <div id="tag-flyover-suggestions" class="tag-flyover-suggestions"></div>
 </div>
 
 <div id="loupe-overlay" class="loupe-overlay" style="display:none;" onclick="if(event.target===this) closeLoupe();">
@@ -541,6 +564,7 @@ function switchMode(mode) {
     galleryLoaded = true;
     reloadGallery();
     refreshOrdnerTags();
+    refreshTagFilterList();
   }
 }
 
@@ -652,13 +676,14 @@ function reloadGallery() {
   var pid      = document.getElementById('project_id_select').value;
   var sterne   = document.getElementById('sterne_input').value;
   var ordner   = document.getElementById('gallery-ordner-row').dataset.selected || '';
+  var tagId    = document.getElementById('gallery-tag-row').dataset.selected || '';
   var dateFrom = document.getElementById('gallery_date_from').value;
   var dateTo   = document.getElementById('gallery_date_to').value;
   var formats  = activeFormats();
   var allFormats = document.querySelectorAll('.format-btn').length;
   var formate = formats.length === allFormats ? '' : formats.join(',');
   var params = new URLSearchParams({
-    project_id: pid, sterne: sterne, ordner: ordner,
+    project_id: pid, sterne: sterne, ordner: ordner, tag_id: tagId,
     date_from: dateFrom, date_to: dateTo, formate: formate,
   });
   htmx.ajax('GET', '/galerie?' + params.toString(), { target: '#gallery-results', swap: 'innerHTML' });
@@ -724,6 +749,212 @@ function filterOrdnerTags() {
   var total = document.querySelectorAll('#gallery-ordner-tags .scope-btn').length;
   var countEl = document.getElementById('gallery-ordner-count');
   countEl.textContent = q ? (shown + ' von ' + total + ' Ordnern') : (total + ' Ordner');
+}
+
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+  });
+}
+
+function setTagFilter(tagId) {
+  var row = document.getElementById('gallery-tag-row');
+  row.dataset.selected = tagId ? String(tagId) : '';
+  row.querySelectorAll('.scope-btn').forEach(function(b) {
+    b.classList.toggle('active', (b.dataset.tag || '') === (tagId ? String(tagId) : ''));
+  });
+  reloadGallery();
+}
+
+function refreshTagFilterList() {
+  var row      = document.getElementById('gallery-tag-row');
+  var listEl   = document.getElementById('gallery-tag-list');
+  var searchEl = document.getElementById('gallery-tag-search');
+  var countEl  = document.getElementById('gallery-tag-count');
+  searchEl.value = '';
+  fetch('/galerie/tags')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.tags || !d.tags.length) { row.style.display = 'none'; listEl.innerHTML = ''; return; }
+      row.style.display = '';
+      document.querySelector('#gallery-tag-row .scope-btn[data-tag=""]').classList.add('active');
+      listEl.innerHTML = d.tags.map(function(t) {
+        return '<span class="tag-filter-item">'
+          + '<button type="button" class="scope-btn" data-tag="' + t.id + '" '
+          + 'onclick="setTagFilter(' + t.id + ')">' + escapeHtml(t.name) + '</button>'
+          + '<button type="button" class="tag-filter-delete" title="Tag komplett löschen" '
+          + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
+          + '</span>';
+      }).join('');
+      countEl.textContent = d.tags.length + ' Tags';
+    });
+}
+
+function deleteTagGlobally(tagId, name) {
+  if (!confirm('Tag „' + name + '“ von allen Fotos löschen?')) return;
+  fetch('/tags/' + tagId, { method: 'DELETE' }).then(function() {
+    var row = document.getElementById('gallery-tag-row');
+    var wasActive = row.dataset.selected === String(tagId);
+    refreshTagFilterList();
+    if (wasActive) { row.dataset.selected = ''; reloadGallery(); }
+  });
+}
+
+function filterTagChips() {
+  var q = document.getElementById('gallery-tag-search').value.trim().toLowerCase();
+  var shown = 0;
+  document.querySelectorAll('#gallery-tag-list .scope-btn').forEach(function(b) {
+    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    b.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  var total = document.querySelectorAll('#gallery-tag-list .scope-btn').length;
+  var countEl = document.getElementById('gallery-tag-count');
+  countEl.textContent = q ? (shown + ' von ' + total + ' Tags') : (total + ' Tags');
+}
+
+// ── Tag-Flyover (Taste T) ────────────────────────────────────────────────────
+// targetIds: immer ein Array -- ein einzelnes fokussiertes/geöffnetes Foto ODER
+// alle Fotos der aktuellen Mehrfachauswahl (Bulk-Tag).
+var tagFlyoverTargetIds = [];
+var _tagSuggestTimer    = null;
+
+function tagFlyoverIsOpen() {
+  return document.getElementById('tag-flyover').style.display !== 'none';
+}
+
+function openTagFlyover(target) {
+  if (target === null || target === undefined) return;
+  tagFlyoverTargetIds = Array.isArray(target) ? target.slice() : [target];
+  if (!tagFlyoverTargetIds.length) return;
+  var input = document.getElementById('tag-flyover-input');
+  document.getElementById('tag-flyover').style.display = 'block';
+  input.value = '';
+  renderTagSuggestions([]);
+  refreshCurrentTagChips();
+  input.focus();
+}
+
+function closeTagFlyover() {
+  document.getElementById('tag-flyover').style.display = 'none';
+  document.getElementById('tag-flyover-current').innerHTML = '';
+  tagFlyoverTargetIds = [];
+}
+
+function refreshCurrentTagChips() {
+  var container = document.getElementById('tag-flyover-current');
+  var ids = tagFlyoverTargetIds.slice();
+  if (!ids.length) { container.innerHTML = ''; return; }
+  Promise.all(ids.map(function(id) {
+    return fetch('/foto/' + id + '/tags').then(function(r) { return r.json(); });
+  })).then(function(results) {
+    var byId = {};
+    results.forEach(function(res) {
+      (res.tags || []).forEach(function(t) { byId[t.id] = t.name; });
+    });
+    var tagIds = Object.keys(byId);
+    if (!tagIds.length) { container.innerHTML = ''; return; }
+    container.innerHTML = '<div class="tag-flyover-current-label">Aktuelle Tags</div>'
+      + '<div class="tag-flyover-current-chips">'
+      + tagIds.map(function(id) {
+          return '<span class="tag-chip">' + escapeHtml(byId[id])
+            + '<button type="button" class="tag-chip-remove" title="entfernen" '
+            + 'onclick="removeTagFromTargets(' + id + ')">×</button></span>';
+        }).join('')
+      + '</div>';
+  });
+}
+
+function removeTagFromTargets(tagId) {
+  var ids = tagFlyoverTargetIds.slice();
+  Promise.all(ids.map(function(id) {
+    return fetch('/foto/' + id + '/tags/' + tagId, { method: 'DELETE' });
+  })).then(function() {
+    refreshCurrentTagChips();
+    refreshTagFilterList();
+    if (document.getElementById('gallery-tag-row').dataset.selected) reloadGallery();
+  });
+}
+
+function onTagFlyoverInput() {
+  clearTimeout(_tagSuggestTimer);
+  var q = document.getElementById('tag-flyover-input').value.trim();
+  _tagSuggestTimer = setTimeout(function() {
+    if (!q) { renderTagSuggestions([]); return; }
+    fetch('/tags/suggest?q=' + encodeURIComponent(q))
+      .then(function(r) { return r.json(); })
+      .then(function(d) { renderTagSuggestions(d.tags || [], q); });
+  }, 150);
+}
+
+function renderTagSuggestions(tags, query) {
+  var exact = query && tags.some(function(t) { return t.name.toLowerCase() === query.toLowerCase(); });
+  var html = tags.map(function(t) {
+    return '<div class="tag-flyover-item" onclick="pickTagSuggestion(\'' + t.name.replace(/'/g, "\\'") + '\')">'
+      + escapeHtml(t.name) + '</div>';
+  }).join('');
+  if (query && !exact) {
+    html += '<div class="tag-flyover-item create" onclick="pickTagSuggestion(\'' + query.replace(/'/g, "\\'") + '\')">'
+      + '+ Neuen Tag „' + escapeHtml(query) + '“ erstellen</div>';
+  }
+  document.getElementById('tag-flyover-suggestions').innerHTML = html;
+}
+
+function pickTagSuggestion(name) {
+  if (!tagFlyoverTargetIds.length || !name) return;
+  var requests = tagFlyoverTargetIds.map(function(id) {
+    return fetch('/foto/' + id + '/tags', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: name }),
+    });
+  });
+  Promise.all(requests).then(function() {
+    closeTagFlyover();
+    refreshTagFilterList();
+  });
+}
+
+document.addEventListener('keydown', function(e) {
+  if (!tagFlyoverIsOpen()) return;
+  if (e.key === 'Escape') { closeTagFlyover(); e.preventDefault(); }
+  else if (e.key === 'Enter') {
+    var q = document.getElementById('tag-flyover-input').value.trim();
+    if (q) pickTagSuggestion(q);
+    e.preventDefault();
+  }
+});
+
+document.addEventListener('click', function(e) {
+  var fly = document.getElementById('tag-flyover');
+  if (fly.style.display !== 'none' && !fly.contains(e.target)) closeTagFlyover();
+});
+
+// ── Auswahl in neuen Ordner speichern ───────────────────────────────────────
+function saveSelectionToFolder() {
+  if (!gallerySelection.size) return;
+  var paths = [];
+  gallerySelection.forEach(function(id) {
+    var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
+    if (tile && tile.dataset.path) paths.push(tile.dataset.path);
+  });
+  if (!paths.length) {
+    alert('Keine Dateipfade gefunden -- die ausgewählten Fotos sind evtl. nicht mehr geladen (bitte in der Galerie sichtbar halten).');
+    return;
+  }
+  fetch(HELPER + '/copy-to-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: paths }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.cancelled) return;
+    if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+    var msg = d.copied + ' Foto(s) kopiert nach:\n' + d.folder;
+    if (d.errors && d.errors.length) msg += '\n\nNicht kopiert:\n' + d.errors.join('\n');
+    alert(msg);
+  }).catch(function() {
+    alert('Archivio Helper läuft nicht. Bitte starten.');
+  });
 }
 
 function refreshGalleryPhotoIds() {
@@ -837,7 +1068,19 @@ function loupeStep(delta) {
   renderLoupe();
 }
 
+function isTypingInField() {
+  var el = document.activeElement;
+  if (!el) return false;
+  if (el.tagName === 'TEXTAREA') return true;
+  if (el.tagName === 'INPUT') {
+    var t = (el.type || 'text').toLowerCase();
+    return t !== 'checkbox' && t !== 'radio' && t !== 'button';
+  }
+  return false;
+}
+
 function handleLoupeKey(e) {
+  if (isTypingInField()) return;  // z.B. Tag-Flyover-Eingabe über der Loupe
   if (e.key === 'Escape') { closeLoupe(); e.preventDefault(); }
   else if (e.key === 'ArrowRight') { loupeStep(1); e.preventDefault(); }
   else if (e.key === 'ArrowLeft') { loupeStep(-1); e.preventDefault(); }
@@ -848,13 +1091,19 @@ function handleLoupeKey(e) {
     e.preventDefault();
   } else if (e.key === '[') { bumpRating(loupeCurrentId, -1); e.preventDefault(); }
   else if (e.key === ']') { bumpRating(loupeCurrentId, 1); e.preventDefault(); }
+  else if (e.key.toLowerCase() === 't') { openTagFlyover(loupeCurrentId); e.preventDefault(); }
 }
 
 document.addEventListener('keydown', function(e) {
+  if (tagFlyoverIsOpen()) return;  // eigener Keydown-Handler für die Flyover-Eingabe
   if (loupeOpen) { handleLoupeKey(e); return; }
   if (currentMode !== 'gallery') return;
-  var tag = (document.activeElement && document.activeElement.tagName) || '';
-  if (tag === 'INPUT' || tag === 'TEXTAREA') return;
+  if (isTypingInField()) return;
+  if (e.key.toLowerCase() === 't') {
+    if (gallerySelection.size > 0) { openTagFlyover(Array.from(gallerySelection)); e.preventDefault(); return; }
+    if (galleryFocusIdx >= 0) { openTagFlyover(galleryPhotoIds[galleryFocusIdx]); e.preventDefault(); return; }
+    return;
+  }
   if (galleryFocusIdx < 0 && !['ArrowRight', 'ArrowLeft', 'ArrowUp', 'ArrowDown'].includes(e.key)) return;
   if (e.key === 'ArrowRight') { moveFocus(1); e.preventDefault(); }
   else if (e.key === 'ArrowLeft') { moveFocus(-1); e.preventDefault(); }

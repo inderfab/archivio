@@ -24,6 +24,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "008_fts_doc_delete_trigger", _m008)
     _apply(conn, "009_projects_last_scanned_at", _m009)
     _apply(conn, "010_photo_ratings", _m010)
+    _apply(conn, "011_photo_tags", _m011)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -272,5 +273,28 @@ def _m010(conn: sqlite3.Connection):
             rating      INTEGER NOT NULL CHECK(rating BETWEEN 1 AND 5),
             rated_at    TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
         );
+    """)
+    conn.commit()
+
+
+def _m011(conn: sqlite3.Connection):
+    """Globale Tags für Fotos, ordnerübergreifend (Foto-Browser).
+
+    Wie die Sternebewertung dokumentweit (Hash), nicht pfadweit. Tags sind global
+    über alle Projekte -- der Projektfilter schränkt beim Suchen/Filtern zusätzlich
+    ein, ist aber keine Voraussetzung fürs Taggen selbst.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS photo_tags (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL UNIQUE COLLATE NOCASE,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now'))
+        );
+        CREATE TABLE IF NOT EXISTS photo_tag_assignments (
+            document_id INTEGER NOT NULL REFERENCES documents(id) ON DELETE CASCADE,
+            tag_id      INTEGER NOT NULL REFERENCES photo_tags(id) ON DELETE CASCADE,
+            PRIMARY KEY (document_id, tag_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_photo_tag_assignments_tag ON photo_tag_assignments(tag_id);
     """)
     conn.commit()

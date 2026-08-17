@@ -23,7 +23,7 @@
 {% endfor %}
 {% if has_more %}
 <div class="gallery-sentinel"
-     hx-get="/galerie?project_id={{ project_id|urlencode }}&sterne={{ sterne|urlencode }}&offset={{ next_offset }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&formate={{ formate|urlencode }}&ordner={{ ordner|urlencode }}"
+     hx-get="/galerie?project_id={{ project_id|urlencode }}&sterne={{ sterne|urlencode }}&offset={{ next_offset }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&formate={{ formate|urlencode }}&ordner={{ ordner|urlencode }}&tag_id={{ tag_id|urlencode }}"
      hx-trigger="revealed" hx-swap="outerHTML"></div>
 {% endif %}
 {% if is_empty %}

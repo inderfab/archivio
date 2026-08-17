@@ -108,15 +108,28 @@ def _folder_filter_sql(project_id: str, ordner: str) -> tuple[str, list]:
     return " AND (dp.path || '/') LIKE ?", [f"%/{ordner}/%"]
 
 
+def _tag_filter_sql(tag_id: str) -> tuple[str, list]:
+    """Globaler Foto-Tag-Filter (ordnerübergreifend, projektunabhängig)."""
+    if not tag_id:
+        return "", []
+    try:
+        tid = int(tag_id)
+    except ValueError:
+        return "", []
+    return " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)", [tid]
+
+
 def _fetch_photos(
     conn, project_id: str, sterne: str, offset: int, limit: int,
     date_from: str = "", date_to: str = "", formate: str = "", ordner: str = "",
+    tag_id: str = "",
 ) -> list[dict]:
     pf_sql, pf_params = _project_filter_sql(project_id)
     rf_sql, rf_params = _rating_filter_sql(sterne)
     ff_sql, ff_params = _format_filter_sql(formate)
     df_sql, df_params = _date_filter_sql(date_from, date_to)
     of_sql, of_params = _folder_filter_sql(project_id, ordner)
+    tf_sql, tf_params = _tag_filter_sql(tag_id)
     placeholders = ",".join("?" * len(_GALLERY_EXTS))
     sql = f"""
         SELECT d.id AS id, d.filename AS filename, d.extension AS extension,
@@ -133,11 +146,12 @@ def _fetch_photos(
         {ff_sql}
         {df_sql}
         {of_sql}
+        {tf_sql}
         ORDER BY COALESCE(json_extract(d.metadata, '$.photo_taken_at'), d.modified_at) DESC, d.id DESC
         LIMIT ? OFFSET ?
     """
     params = (list(_GALLERY_EXTS) + pf_params + rf_params + ff_params + df_params + of_params
-              + [limit, offset])
+              + tf_params + [limit, offset])
     rows = conn.execute(sql, params).fetchall()
     photos = []
     for row in rows:
@@ -187,11 +201,12 @@ async def galerie(
     date_to: str = Query(default=""),
     formate: str = Query(default=""),
     ordner: str = Query(default=""),
+    tag_id: str = Query(default=""),
 ):
     conn = connection.get_connection()
     try:
         photos = _fetch_photos(conn, project_id, sterne, offset, PAGE_SIZE,
-                                date_from, date_to, formate, ordner)
+                                date_from, date_to, formate, ordner, tag_id)
     finally:
         conn.close()
     groups = _group_photos(photos)
@@ -206,6 +221,7 @@ async def galerie(
         "date_to": date_to,
         "formate": formate,
         "ordner": ordner,
+        "tag_id": tag_id,
         "is_empty": offset == 0 and not photos,
     })
 
@@ -291,3 +307,98 @@ async def foto_bewertung(document_id: int, body: RatingBody):
     finally:
         conn.close()
     return JSONResponse({"ok": True, "rating": body.rating})
+
+
+@router.get("/tags/suggest")
+async def tags_suggest(q: str = Query(default="")):
+    """Autocomplete für die Tag-Eingabemaske (Taste T) -- bestehende Tags, die q
+    enthalten, alphabetisch, max. 20."""
+    q = q.strip()
+    if not q:
+        return JSONResponse({"tags": []})
+    escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT id, name FROM photo_tags WHERE name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT 20",
+            (f"%{escaped}%",),
+        ).fetchall()
+    finally:
+        conn.close()
+    return JSONResponse({"tags": [dict(r) for r in rows]})
+
+
+@router.get("/galerie/tags")
+async def galerie_tags():
+    """Alle global vergebenen Tags -- Basis für die Tag-Filter-Chips (nicht
+    projektgebunden, im Unterschied zum Ordner-Filter)."""
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute(
+            """
+            SELECT t.id AS id, t.name AS name
+            FROM photo_tags t
+            WHERE EXISTS (SELECT 1 FROM photo_tag_assignments a WHERE a.tag_id = t.id)
+            ORDER BY t.name COLLATE NOCASE
+            """
+        ).fetchall()
+    finally:
+        conn.close()
+    return JSONResponse({"tags": [dict(r) for r in rows]})
+
+
+class TagBody(BaseModel):
+    name: str
+
+
+@router.get("/foto/{document_id}/tags")
+async def foto_get_tags(document_id: int):
+    conn = connection.get_connection()
+    try:
+        tags = queries.get_photo_tags(conn, document_id)
+    finally:
+        conn.close()
+    return JSONResponse({"tags": tags})
+
+
+@router.post("/foto/{document_id}/tags")
+async def foto_add_tag(document_id: int, body: TagBody):
+    name = body.name.strip()
+    if not name:
+        return JSONResponse({"ok": False, "error": "Tag-Name fehlt"}, status_code=400)
+    conn = connection.get_connection()
+    try:
+        row = conn.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
+        if not row:
+            return JSONResponse({"ok": False, "error": "Dokument nicht gefunden"}, status_code=404)
+        tag_id = queries.get_or_create_tag(conn, name)
+        queries.assign_photo_tag(conn, document_id, tag_id)
+        tags = queries.get_photo_tags(conn, document_id)
+    finally:
+        conn.close()
+    return JSONResponse({"ok": True, "tags": tags})
+
+
+@router.delete("/foto/{document_id}/tags/{tag_id}")
+async def foto_remove_tag(document_id: int, tag_id: int):
+    conn = connection.get_connection()
+    try:
+        queries.remove_photo_tag(conn, document_id, tag_id)
+        tags = queries.get_photo_tags(conn, document_id)
+    finally:
+        conn.close()
+    return JSONResponse({"ok": True, "tags": tags})
+
+
+@router.delete("/tags/{tag_id}")
+async def delete_tag_globally(tag_id: int):
+    """Löscht einen Tag komplett -- von allen Fotos, ordnerübergreifend. Die
+    Zuweisungen (photo_tag_assignments) hängen per ON DELETE CASCADE daran und
+    verschwinden automatisch mit."""
+    conn = connection.get_connection()
+    try:
+        conn.execute("DELETE FROM photo_tags WHERE id = ?", (tag_id,))
+        conn.commit()
+    finally:
+        conn.close()
+    return JSONResponse({"ok": True})

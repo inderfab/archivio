@@ -138,6 +138,45 @@ def set_photo_rating(conn: sqlite3.Connection, document_id: int, rating: int) ->
     conn.commit()
 
 
+def get_or_create_tag(conn: sqlite3.Connection, name: str) -> int:
+    name = name.strip()
+    conn.execute("INSERT OR IGNORE INTO photo_tags (name) VALUES (?)", (name,))
+    row = conn.execute(
+        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE", (name,)
+    ).fetchone()
+    return row["id"]
+
+
+def assign_photo_tag(conn: sqlite3.Connection, document_id: int, tag_id: int) -> None:
+    conn.execute(
+        "INSERT OR IGNORE INTO photo_tag_assignments (document_id, tag_id) VALUES (?, ?)",
+        (document_id, tag_id),
+    )
+    conn.commit()
+
+
+def remove_photo_tag(conn: sqlite3.Connection, document_id: int, tag_id: int) -> None:
+    conn.execute(
+        "DELETE FROM photo_tag_assignments WHERE document_id = ? AND tag_id = ?",
+        (document_id, tag_id),
+    )
+    conn.commit()
+
+
+def get_photo_tags(conn: sqlite3.Connection, document_id: int) -> list[dict]:
+    rows = conn.execute(
+        """
+        SELECT t.id AS id, t.name AS name
+        FROM photo_tags t
+        JOIN photo_tag_assignments a ON a.tag_id = t.id
+        WHERE a.document_id = ?
+        ORDER BY t.name COLLATE NOCASE
+        """,
+        (document_id,),
+    ).fetchall()
+    return [dict(r) for r in rows]
+
+
 def get_project_by_path(conn: sqlite3.Connection, path: str) -> sqlite3.Row | None:
     return conn.execute(
         "SELECT * FROM projects WHERE path = ?", (path,)
