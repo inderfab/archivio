@@ -22,7 +22,7 @@ import menubar_bridge as bridge  # noqa: E402
 log = logging.getLogger("test")
 
 
-def _start_test_server(monkeypatch, link_action_provider=None):
+def _start_test_server(monkeypatch, link_action_provider=None, direct_open_provider=None):
     """Startet den echten Handler auf einem freien Port, patcht subprocess.run so
     dass wir zaehlen koennen, ob/wie oft eine Datei-Aktion tatsaechlich ausgefuehrt
     wurde -- das ist der sicherheitsrelevante Teil dieses Tests."""
@@ -32,7 +32,8 @@ def _start_test_server(monkeypatch, link_action_provider=None):
         lambda args, **kwargs: calls.append(args) or type("R", (), {"returncode": 0})(),
     )
     handler_cls = bridge.make_local_http_handler(
-        "Test", log, link_action_provider=link_action_provider
+        "Test", log, link_action_provider=link_action_provider,
+        direct_open_provider=direct_open_provider,
     )
     srv = HTTPServer(("127.0.0.1", 0), handler_cls)
     port = srv.server_port
@@ -105,6 +106,56 @@ def test_link_landing_page_shows_both_options_reveal_default(monkeypatch, tmp_pa
         assert 'href="/reveal?path=' in r.text
         assert "Datei öffnen" in r.text
         assert "Im Finder zeigen" in r.text
+    finally:
+        srv.shutdown()
+
+
+def test_link_landing_page_shows_hint_about_direct_open_setting(monkeypatch, tmp_path):
+    target = tmp_path / "plan.pdf"
+    srv, port, calls = _start_test_server(monkeypatch)
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert "ohne Bestätigung öffnen" in r.text
+    finally:
+        srv.shutdown()
+
+
+def test_link_direct_open_skips_landing_page_and_opens_immediately(monkeypatch, tmp_path):
+    """Ist direct_open_provider aktiv, MUSS /link sofort die Aktion ausloesen --
+    keine Zwischenseite, kein zusaetzlicher Klick noetig."""
+    target = tmp_path / "plan.pdf"
+    target.write_text("dummy")
+    srv, port, calls = _start_test_server(monkeypatch, direct_open_provider=lambda: True)
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert r.status_code == 200
+        assert calls == [["open", str(target)]]
+    finally:
+        srv.shutdown()
+
+
+def test_link_direct_open_respects_reveal_preference(monkeypatch, tmp_path):
+    target = tmp_path / "plan.pdf"
+    target.write_text("dummy")
+    srv, port, calls = _start_test_server(
+        monkeypatch, link_action_provider=lambda: "reveal", direct_open_provider=lambda: True
+    )
+    try:
+        requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert calls == [["open", "-R", str(target)]]
+    finally:
+        srv.shutdown()
+
+
+def test_link_direct_open_disabled_still_shows_landing_page(monkeypatch, tmp_path):
+    """direct_open_provider vorhanden, aber liefert False -- Standardverhalten
+    (Bestaetigungsseite) bleibt unveraendert."""
+    target = tmp_path / "plan.pdf"
+    srv, port, calls = _start_test_server(monkeypatch, direct_open_provider=lambda: False)
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert calls == []
+        assert 'href="/open?path=' in r.text
     finally:
         srv.shutdown()
 

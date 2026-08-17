@@ -833,13 +833,25 @@
 // Öffnet Dateien lokal auf dem eigenen Mac — kein URL-Scheme, kein Dialog.
 var HELPER = 'http://localhost:44380';
 
+function _helperErrorMessage(status, path) {
+  if (status === 404) {
+    return 'Datei nicht gefunden auf diesem Mac:\n' + path
+      + '\n\nMöglicherweise ist der Netzwerkpfad hier anders eingehängt als auf dem Server '
+      + '(z.B. "/Volumes/Groups" vs. "/Volumes/Groups-1"). Verbindung zum NAS neu herstellen '
+      + 'und erneut versuchen.';
+  }
+  return 'Archivio Helper konnte die Datei nicht öffnen (Fehler ' + status + ').';
+}
+
 function helperOpen(path) {
   fetch(HELPER + '/open?path=' + encodeURIComponent(path))
+    .then(function(r) { if (!r.ok) alert(_helperErrorMessage(r.status, path)); })
     .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
 }
 
 function helperReveal(path) {
   fetch(HELPER + '/reveal?path=' + encodeURIComponent(path))
+    .then(function(r) { if (!r.ok) alert(_helperErrorMessage(r.status, path)); })
     .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
 }
 

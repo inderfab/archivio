@@ -453,6 +453,8 @@ class ArchivioServer(rumps.App):
             "Autostart beim Login", callback=self.toggle_autostart)
         self._link_action_item = rumps.MenuItem(
             self._link_action_title(), callback=self.toggle_link_action)
+        self._link_direct_item = rumps.MenuItem(
+            "Archivio-Links ohne Bestätigung öffnen", callback=self.toggle_link_direct_open)
         self._update_item = rumps.MenuItem(
             "Update verfügbar", callback=self._install_pending_update)
         self._pending_update_info: updater.UpdateInfo | None = None
@@ -468,6 +470,7 @@ class ArchivioServer(rumps.App):
             rumps.separator,
             self._autostart_item,
             self._link_action_item,
+            self._link_direct_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen",    callback=self.open_browser),
             rumps.MenuItem("Auf Updates prüfen", callback=self.check_update),
@@ -484,6 +487,7 @@ class ArchivioServer(rumps.App):
         # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
         bridge.repair_broken_autostart_entries("Archivio Server", log)
         self._autostart_item.state = bridge.ensure_autostart_default(log, _UPDATE_STATE)
+        self._link_direct_item.state = self._link_direct_open()
 
         # config_provider liefert die eigene Adresse — dieselbe fest verdrahtete
         # localhost:8000, die dieser Prozess an anderen Stellen (_wait_for_server,
@@ -493,6 +497,7 @@ class ArchivioServer(rumps.App):
             "Archivio Server", log,
             config_provider=lambda: "http://127.0.0.1:8000",
             link_action_provider=self._link_action,
+            direct_open_provider=self._link_direct_open,
         )
         bridge.register_url_handler(log)
         bridge.ensure_mcp_registered("Archivio Server", log)
@@ -565,6 +570,30 @@ class ArchivioServer(rumps.App):
         except Exception as e:
             log.warning("Link-Verhalten konnte nicht gespeichert werden: %s", e)
         sender.title = self._link_action_title()
+
+    def _link_direct_open(self) -> bool:
+        try:
+            return bool(json.loads(_UPDATE_STATE.read_text()).get("link_direct_open", False))
+        except Exception:
+            return False
+
+    def toggle_link_direct_open(self, sender):
+        """Schaltet um, ob /link (Quick-Action-Links) die Bestätigungsseite überspringt
+        und die Datei sofort öffnet/anzeigt. Bewusster Trade-off: reaktiviert das
+        Auto-Öffnen-Risiko (z.B. durch Mail-Linkvorschau), das die Bestätigungsseite
+        ursprünglich verhindern sollte -- deshalb standardmässig aus, pro Person selbst
+        aktivierbar."""
+        new_state = sender.state != 1
+        try:
+            state = {}
+            if _UPDATE_STATE.exists():
+                state = json.loads(_UPDATE_STATE.read_text())
+            state["link_direct_open"] = new_state
+            _UPDATE_STATE.parent.mkdir(parents=True, exist_ok=True)
+            _UPDATE_STATE.write_text(json.dumps(state, indent=2, ensure_ascii=False))
+        except Exception as e:
+            log.warning("Link-Direktöffnen-Einstellung konnte nicht gespeichert werden: %s", e)
+        sender.state = new_state
 
     def _ki_action(self, _):
         if not _ollama_available():

@@ -103,6 +103,7 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
   a.btn-secondary {{ display:inline-block; padding:10px 22px; background:#fff; color:#2563eb;
                       border:1px solid #2563eb; text-decoration:none; border-radius:6px;
                       font-size:14px; }}
+  .hint {{ color:#999; font-size:11px; margin-top:18px; max-width:340px; }}
 </style></head>
 <body><div class="box">
 <div class="path">{path}</div>
@@ -110,6 +111,7 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
 <a class="btn" href="/{primary}?path={enc}">{labels[primary]}</a>
 <a class="btn-secondary" href="/{secondary}?path={enc}">{labels[secondary]}</a>
 </div>
+<div class="hint">Tipp: In der Menüleiste unter {app_name} lässt sich „Archivio-Links ohne Bestätigung öffnen" aktivieren, um diese Seite künftig zu überspringen.</div>
 </div></body></html>"""
     return html.encode("utf-8")
 
@@ -129,13 +131,20 @@ def _unique_dest(dest_dir: Path, filename: str) -> Path:
         i += 1
 
 
-def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None):
+def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None,
+                             direct_open_provider=None):
     """config_provider: optionales Callable[[], str], das server_url für den
     /config-Endpoint liefert. Helper übergibt einen Reader auf sein config.json,
     Server übergibt einen fest verdrahteten "http://127.0.0.1:8000" (dieselbe Adresse,
     die server_app.py an anderen Stellen bereits hardcoded verwendet).
     link_action_provider: optionales Callable[[], str] ("open"/"reveal"), liefert das
-    im Menü eingestellte Standardverhalten für /link (Quick-Action-Links)."""
+    im Menü eingestellte Standardverhalten für /link (Quick-Action-Links).
+    direct_open_provider: optionales Callable[[], bool] -- ist es True, überspringt /link
+    die Bestätigungsseite und führt die Aktion sofort aus (Menü-Option "Archivio-Links
+    ohne Bestätigung öffnen"). Bewusster Trade-off: reaktiviert das Risiko, das die
+    Bestätigungsseite ursprünglich verhindern sollte (automatisches Öffnen durch
+    Link-Vorschau z.B. in Mail.app) -- daher standardmässig aus, pro Person einzeln
+    aktivierbar."""
 
     class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         def do_OPTIONS(self):
@@ -203,25 +212,14 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
 
             if parsed.path == "/link" and path:
                 action = link_action_provider() if link_action_provider else "open"
-                self._cors_headers(200, _link_landing_page(app_name, path, action), "text/html; charset=utf-8")
+                if direct_open_provider and direct_open_provider():
+                    self._perform(action, path)
+                else:
+                    self._cors_headers(200, _link_landing_page(app_name, path, action), "text/html; charset=utf-8")
             elif parsed.path == "/open" and path:
-                if "://" in path and not path.startswith("/"):
-                    subprocess.run(["open", path], timeout=5)
-                    self._html_response(200, "✓ Wird geöffnet …")
-                else:
-                    p = Path(path)
-                    if p.exists():
-                        subprocess.run(["open", str(p)], timeout=5)
-                        self._html_response(200, "✓ Wird geöffnet …")
-                    else:
-                        self._not_found(path)
+                self._perform("open", path)
             elif parsed.path == "/reveal" and path:
-                p = Path(path)
-                if p.exists():
-                    subprocess.run(["open", "-R", str(p)], timeout=5)
-                    self._html_response(200, "✓ Im Finder angezeigt")
-                else:
-                    self._not_found(path)
+                self._perform("reveal", path)
             elif parsed.path == "/ping":
                 self._cors_headers(200)
             elif parsed.path == "/config":
@@ -232,6 +230,28 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                     self._cors_headers(404)
             else:
                 self._cors_headers(404)
+
+        def _perform(self, action, path):
+            """Führt /open bzw. /reveal aus -- gemeinsam genutzt von den direkten
+            Routen UND von /link, wenn direct_open_provider aktiv ist."""
+            if action == "reveal":
+                p = Path(path)
+                if p.exists():
+                    subprocess.run(["open", "-R", str(p)], timeout=5)
+                    self._html_response(200, "✓ Im Finder angezeigt")
+                else:
+                    self._not_found(path)
+            else:
+                if "://" in path and not path.startswith("/"):
+                    subprocess.run(["open", path], timeout=5)
+                    self._html_response(200, "✓ Wird geöffnet …")
+                else:
+                    p = Path(path)
+                    if p.exists():
+                        subprocess.run(["open", str(p)], timeout=5)
+                        self._html_response(200, "✓ Wird geöffnet …")
+                    else:
+                        self._not_found(path)
 
         def _not_found(self, path):
             log.warning("Datei nicht gefunden: %s", path)
@@ -254,8 +274,10 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
     return _LocalHTTPHandler
 
 
-def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None) -> None:
-    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider)
+def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None,
+                        direct_open_provider=None) -> None:
+    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider,
+                                           direct_open_provider)
     try:
         srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), handler_cls)
         threading.Thread(target=srv.serve_forever, daemon=True).start()
