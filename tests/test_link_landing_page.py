@@ -81,6 +81,34 @@ def test_link_landing_page_respects_reveal_preference(monkeypatch, tmp_path):
         srv.shutdown()
 
 
+def test_link_landing_page_shows_both_options_open_default(monkeypatch, tmp_path):
+    """Beide Optionen müssen immer vorhanden sein -- die Menü-Präferenz bestimmt
+    nur, welche als Primär-Button hervorgehoben ist."""
+    target = tmp_path / "plan.pdf"
+    srv, port, calls = _start_test_server(monkeypatch)
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert 'href="/open?path=' in r.text
+        assert 'href="/reveal?path=' in r.text
+        assert "Datei öffnen" in r.text
+        assert "Im Finder zeigen" in r.text
+    finally:
+        srv.shutdown()
+
+
+def test_link_landing_page_shows_both_options_reveal_default(monkeypatch, tmp_path):
+    target = tmp_path / "plan.pdf"
+    srv, port, calls = _start_test_server(monkeypatch, link_action_provider=lambda: "reveal")
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert 'href="/open?path=' in r.text
+        assert 'href="/reveal?path=' in r.text
+        assert "Datei öffnen" in r.text
+        assert "Im Finder zeigen" in r.text
+    finally:
+        srv.shutdown()
+
+
 def test_clicking_through_landing_page_button_actually_opens(monkeypatch, tmp_path):
     """Der tatsächliche Klick (simuliert: GET auf die im Button verlinkte /open-URL)
     MUSS weiterhin funktionieren -- der Fix darf die eigentliche Funktion nicht

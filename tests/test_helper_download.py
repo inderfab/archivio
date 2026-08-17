@@ -51,3 +51,41 @@ def test_download_helper_404_wenn_kein_build(tmp_path, monkeypatch):
     c = TestClient(app)
     r = c.get("/dashboard/download/helper")
     assert r.status_code == 404
+
+
+def test_helper_info_reads_bundled_helper_version_file(tmp_path, monkeypatch):
+    """Server und Helper sind unabhängig versioniert -- _helper_info() muss die
+    von scripts/build_server_app.sh geschriebene HELPER_VERSION-Datei lesen,
+    nicht die Server-VERSION."""
+    (tmp_path / "archivio-helper-3.1.11.zip").write_bytes(b"x")
+    (tmp_path / "archivio-helper-3.1.9.zip").write_bytes(b"x")
+    helper_version_file = tmp_path / "HELPER_VERSION"
+    helper_version_file.write_text("3.1.11")
+
+    monkeypatch.setattr(dash, "_DIST", tmp_path)
+    monkeypatch.setattr(dash, "_DIST_DATA", tmp_path / "does-not-exist")
+    monkeypatch.setattr(dash, "_HELPER_VERSION_FILE", helper_version_file)
+
+    available, version = dash._helper_info()
+    assert available is True
+    assert version == "3.1.11"
+
+
+def test_helper_info_fallback_picks_highest_version_not_lexicographic(tmp_path, monkeypatch):
+    """Regressionstest: 'archivio-helper-3.1.9.zip' sortiert alphabetisch NACH
+    'archivio-helper-3.1.11.zip' (weil '9' > '1'), was den Download-Endpunkt lange
+    die falsche, ältere Helper-Version ausliefern liess. Der Fallback (kein exakter
+    HELPER_VERSION-Treffer) muss echte Versionsvergleiche nutzen."""
+    (tmp_path / "archivio-helper-3.1.9.zip").write_bytes(b"x")
+    (tmp_path / "archivio-helper-3.1.11.zip").write_bytes(b"x")
+    (tmp_path / "archivio-helper-3.1.2.zip").write_bytes(b"x")
+
+    monkeypatch.setattr(dash, "_DIST", tmp_path)
+    monkeypatch.setattr(dash, "_DIST_DATA", tmp_path / "does-not-exist")
+    # Keine der vorhandenen Versionen entspricht der "gewünschten" -> Fallback greift.
+    monkeypatch.setattr(dash, "_HELPER_VERSION_FILE", tmp_path / "no-such-file")
+    monkeypatch.setattr(dash, "_HELPER_VERSION_FILE_DEV", tmp_path / "no-such-file-either")
+
+    available, version = dash._helper_info()
+    assert available is True
+    assert version == "3.1.11"

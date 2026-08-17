@@ -81,11 +81,15 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
     NIE direkt eine Aktion aus (im Unterschied zu /open, /reveal) -- sonst reicht ein
     Link-Preview/Unfurling der Ziel-App (z.B. Mail.app faengt beim Einfuegen automatisch
     an, eine Vorschau des Links zu laden) um die Datei ungewollt zu oeffnen. Erst der
-    tatsaechliche Klick auf den Button hier loest /open bzw. /reveal aus -- ein
-    automatisierter Preview-Fetch klickt nichts."""
-    action = action if action in ("open", "reveal") else "open"
-    label  = "Datei öffnen" if action == "open" else "Im Finder zeigen"
-    enc    = quote(path, safe="")
+    tatsaechliche Klick auf einen der Buttons hier loest /open bzw. /reveal aus -- ein
+    automatisierter Preview-Fetch klickt nichts.
+
+    Zeigt IMMER beide Optionen -- die im Menü eingestellte Präferenz (action) nur als
+    hervorgehobenen Primär-Button, die jeweils andere als sekundäre Option daneben."""
+    primary = action if action in ("open", "reveal") else "open"
+    secondary = "reveal" if primary == "open" else "open"
+    labels = {"open": "Datei öffnen", "reveal": "Im Finder zeigen"}
+    enc = quote(path, safe="")
     html = f"""<!DOCTYPE html>
 <html><head><meta charset="utf-8"><title>{app_name}</title>
 <style>
@@ -93,12 +97,19 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
           justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
   .box {{ text-align:center; }}
   .path {{ color:#888; font-size:12px; margin-bottom:16px; word-break:break-all; max-width:400px; }}
+  .actions {{ display:flex; gap:10px; justify-content:center; }}
   a.btn {{ display:inline-block; padding:10px 22px; background:#2563eb; color:#fff;
            text-decoration:none; border-radius:6px; font-size:14px; }}
+  a.btn-secondary {{ display:inline-block; padding:10px 22px; background:#fff; color:#2563eb;
+                      border:1px solid #2563eb; text-decoration:none; border-radius:6px;
+                      font-size:14px; }}
 </style></head>
 <body><div class="box">
 <div class="path">{path}</div>
-<a class="btn" href="/{action}?path={enc}">{label}</a>
+<div class="actions">
+<a class="btn" href="/{primary}?path={enc}">{labels[primary]}</a>
+<a class="btn-secondary" href="/{secondary}?path={enc}">{labels[secondary]}</a>
+</div>
 </div></body></html>"""
     return html.encode("utf-8")
 

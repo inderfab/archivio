@@ -64,22 +64,43 @@ _DIST = Path(__file__).parent.parent / "dist"
 # Fallback: DATA_DIR (Library/Application Support/Archivio/dist) — dort legt Postinstall den ZIP ab
 _DIST_DATA = Path.home() / "Library" / "Application Support" / "Archivio" / "dist"
 _VERSION_FILE = Path(__file__).parent.parent / "VERSION"
+# Von scripts/build_server_app.sh ins Bundle geschrieben (Contents/Resources/HELPER_VERSION) --
+# Server und Helper sind unabhängig versioniert, die Server-VERSION sagt nichts über die
+# tatsächlich mitgelieferte Helper-Version aus.
+_HELPER_VERSION_FILE = Path(__file__).parent.parent / "HELPER_VERSION"
+# Dev-Checkout ohne Bundle (kein HELPER_VERSION vorhanden)
+_HELPER_VERSION_FILE_DEV = Path(__file__).parent.parent / "helper" / "VERSION"
 
 
 def _helper_info() -> tuple[bool, str]:
-    version = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "1.0.0"
+    if _HELPER_VERSION_FILE.exists():
+        version = _HELPER_VERSION_FILE.read_text().strip()
+    elif _HELPER_VERSION_FILE_DEV.exists():
+        version = _HELPER_VERSION_FILE_DEV.read_text().strip()
+    else:
+        version = "1.0.0"
     # Alle Suchpfade: Bundle-dist + DATA_DIR-dist
     for dist_dir in (_DIST, _DIST_DATA):
         if (dist_dir / f"archivio-helper-{version}.zip").exists():
             return True, version
-    # Fallback: neusten verfügbaren ZIP in beiden Verzeichnissen suchen
-    candidates = sorted(
+    # Fallback: neusten verfügbaren ZIP in beiden Verzeichnissen suchen -- nach Version
+    # sortiert, NICHT alphabetisch ("archivio-helper-3.1.9.zip" > "...3.1.11.zip" als
+    # String, weil '9' > '1' -- das lieferte lange die falsche, ältere Version aus).
+    candidates = (
         list(_DIST.glob("archivio-helper-*.zip")) +
-        list(_DIST_DATA.glob("archivio-helper-*.zip"))
-        if _DIST_DATA.exists() else list(_DIST.glob("archivio-helper-*.zip"))
+        (list(_DIST_DATA.glob("archivio-helper-*.zip")) if _DIST_DATA.exists() else [])
     )
     if candidates:
-        return True, candidates[-1].stem.replace("archivio-helper-", "")
+        from packaging.version import InvalidVersion, Version
+
+        def _parsed(p: Path) -> Version:
+            try:
+                return Version(p.stem.replace("archivio-helper-", ""))
+            except InvalidVersion:
+                return Version("0")
+
+        best = max(candidates, key=_parsed)
+        return True, best.stem.replace("archivio-helper-", "")
     return False, version
 
 
