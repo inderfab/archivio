@@ -110,6 +110,22 @@ def test_link_landing_page_shows_both_options_reveal_default(monkeypatch, tmp_pa
         srv.shutdown()
 
 
+def test_link_landing_page_title_shows_filename_for_link_preview(monkeypatch, tmp_path):
+    """Mail.app/Slack usw. holen beim Einfuegen des Links eine Linkvorschau (Titel,
+    Beschreibung) via <title>/Open-Graph-Metadaten -- die soll den Datei-/Ordnernamen
+    zeigen statt der generischen Helper-Bezeichnung."""
+    target = tmp_path / "Grundriss_EG.pdf"
+    srv, port, calls = _start_test_server(monkeypatch)
+    try:
+        r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)})
+        assert "<title>Grundriss_EG.pdf</title>" in r.text
+        assert 'property="og:title" content="Grundriss_EG.pdf"' in r.text
+        assert 'property="og:site_name" content="Test"' in r.text
+        assert str(tmp_path) in r.text  # Ordnerpfad als og:description
+    finally:
+        srv.shutdown()
+
+
 def test_link_landing_page_shows_hint_about_direct_open_setting(monkeypatch, tmp_path):
     target = tmp_path / "plan.pdf"
     srv, port, calls = _start_test_server(monkeypatch)

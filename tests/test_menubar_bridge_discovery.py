@@ -83,19 +83,26 @@ def test_stop_advertising_noop_when_none():
 # ── discover_servers ──────────────────────────────────────────────────────────
 
 def _make_browser(services: dict):
-    """services: {name: (ip_str, port)} -- simuliert Faende synchron im Konstruktor,
-    wie es ein echter ServiceBrowser asynchron ueber die Zeit hinweg taete."""
+    """services: {name: (ip_str, port)} oder {name: (ip_str, port, hostname)} --
+    simuliert Faende synchron im Konstruktor, wie es ein echter ServiceBrowser
+    asynchron ueber die Zeit hinweg taete."""
     import socket as socket_module
 
     class _FakeInfo:
-        def __init__(self, addr, port):
+        def __init__(self, addr, port, server=None):
             self.addresses = [socket_module.inet_aton(addr)]
             self.port = port
+            self.server = server
 
     class _FakeZeroconfWithInfo(_FakeZeroconf):
         def get_service_info(self, type_, name):
-            addr, port = services[name]
-            return _FakeInfo(addr, port)
+            entry = services[name]
+            if len(entry) == 3:
+                addr, port, server = entry
+            else:
+                addr, port = entry
+                server = None
+            return _FakeInfo(addr, port, server)
 
     class _FakeServiceBrowser:
         def __init__(self, zc, service_type, listener):
@@ -141,6 +148,69 @@ def test_discover_servers_returns_empty_on_error(monkeypatch):
     monkeypatch.setattr(zeroconf_module, "Zeroconf", boom)
 
     found = bridge.discover_servers(timeout=0.01, log=log)
+    assert found == []
+
+
+# ── discover_other_servers ──────────────────────────────────────────────────────
+
+def test_discover_other_servers_filtert_sich_selbst(monkeypatch):
+    """Der eigene, gerade erst angemeldete Dienst (gleiche IP + Port) darf nicht als
+    'anderer Server' zurückkommen -- sonst würde jeder Server sich selbst melden."""
+    FakeZC, FakeBrowser = _make_browser({
+        "self": ("192.168.1.50", 8000, "MeinMac.local."),
+    })
+    monkeypatch.setattr(zeroconf_module, "Zeroconf", FakeZC)
+    monkeypatch.setattr(zeroconf_module, "ServiceBrowser", FakeBrowser)
+    monkeypatch.setattr(bridge, "_local_ip", lambda: "192.168.1.50")
+
+    found = bridge.discover_other_servers(own_port=8000, timeout=0.01, log=log)
+    assert found == []
+
+
+def test_discover_other_servers_findet_anderen_mit_hostname(monkeypatch):
+    FakeZC, FakeBrowser = _make_browser({
+        "other": ("192.168.1.20", 8000, "Buero-iMac.local."),
+    })
+    monkeypatch.setattr(zeroconf_module, "Zeroconf", FakeZC)
+    monkeypatch.setattr(zeroconf_module, "ServiceBrowser", FakeBrowser)
+    monkeypatch.setattr(bridge, "_local_ip", lambda: "192.168.1.50")
+
+    found = bridge.discover_other_servers(own_port=8000, timeout=0.01, log=log)
+    assert found == [("192.168.1.20", 8000, "Buero-iMac")]
+
+
+def test_discover_other_servers_faellt_auf_ip_zurueck_ohne_hostname(monkeypatch):
+    FakeZC, FakeBrowser = _make_browser({
+        "other": ("192.168.1.20", 8000),  # kein hostname (server=None)
+    })
+    monkeypatch.setattr(zeroconf_module, "Zeroconf", FakeZC)
+    monkeypatch.setattr(zeroconf_module, "ServiceBrowser", FakeBrowser)
+    monkeypatch.setattr(bridge, "_local_ip", lambda: "192.168.1.50")
+
+    found = bridge.discover_other_servers(own_port=8000, timeout=0.01, log=log)
+    assert found == [("192.168.1.20", 8000, "192.168.1.20")]
+
+
+def test_discover_other_servers_unterscheidet_gleiche_ip_anderer_port(monkeypatch):
+    """Gleiche IP aber anderer Port (z.B. zwei Server-Instanzen auf demselben Mac,
+    theoretisch) zaehlt NICHT als der eigene Dienst."""
+    FakeZC, FakeBrowser = _make_browser({
+        "other": ("192.168.1.50", 9000, "MeinMac.local."),
+    })
+    monkeypatch.setattr(zeroconf_module, "Zeroconf", FakeZC)
+    monkeypatch.setattr(zeroconf_module, "ServiceBrowser", FakeBrowser)
+    monkeypatch.setattr(bridge, "_local_ip", lambda: "192.168.1.50")
+
+    found = bridge.discover_other_servers(own_port=8000, timeout=0.01, log=log)
+    assert found == [("192.168.1.50", 9000, "MeinMac")]
+
+
+def test_discover_other_servers_returns_empty_on_error(monkeypatch):
+    def boom():
+        raise RuntimeError("zeroconf init failed")
+    monkeypatch.setattr(zeroconf_module, "Zeroconf", boom)
+
+    found = bridge.discover_other_servers(own_port=8000, timeout=0.01, log=log)
     assert found == []
 
 

@@ -230,6 +230,55 @@ def test_galerie_ordner_tags_empty_without_project(tmp_db):
     assert r.json()["tags"] == []
 
 
+def test_galerie_hides_large_tiff_by_default(tmp_db, tmp_path):
+    from web.thumbnails import TIFF_MAX_BYTES
+
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    small = tmp_path / "small.tiff"
+    big = tmp_path / "big.tiff"
+    small.write_bytes(b"x" * 100)
+    big.write_bytes(b"x" * 100)  # tatsaechlicher Dateiinhalt egal, filesize kommt aus der DB
+    doc_small = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-small", "filename": "small.tiff", "extension": ".tiff",
+        "filesize": 100, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_small, str(small), True)
+    queries.set_extraction_status(tmp_db, doc_small, "listed")
+    doc_big = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-big", "filename": "big.tiff", "extension": ".tiff",
+        "filesize": TIFF_MAX_BYTES + 1, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_big, str(big), True)
+    queries.set_extraction_status(tmp_db, doc_big, "listed")
+    tmp_db.commit()
+
+    c = _client()
+    r = c.get("/galerie")
+    assert f'data-id="{doc_small}"' in r.text
+    assert "big.tiff" not in r.text
+
+
+def test_galerie_show_large_tiff_toggle_includes_it(tmp_db, tmp_path):
+    from web.thumbnails import TIFF_MAX_BYTES
+
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    big = tmp_path / "big.tiff"
+    big.write_bytes(b"x" * 100)
+    doc_big = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-big", "filename": "big.tiff", "extension": ".tiff",
+        "filesize": TIFF_MAX_BYTES + 1, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_big, str(big), True)
+    queries.set_extraction_status(tmp_db, doc_big, "listed")
+    tmp_db.commit()
+
+    c = _client()
+    r = c.get("/galerie", params={"show_large_tiff": "1"})
+    assert f'data-id="{doc_big}"' in r.text
+
+
 def test_kontaktbogen_shows_selected_photos_in_order(tmp_db, tmp_path):
     settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
     p = queries.insert_project(tmp_db, "P", str(tmp_path))

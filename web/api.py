@@ -1,6 +1,8 @@
 """JSON-API."""
 from __future__ import annotations
 
+import base64
+import io
 import os
 import re
 import subprocess
@@ -10,6 +12,7 @@ from pathlib import Path
 
 from fastapi import APIRouter
 from fastapi.responses import HTMLResponse, JSONResponse
+from pydantic import BaseModel
 
 from config import settings
 from db import connection
@@ -1867,3 +1870,91 @@ async def diagnostics():
         f'Ausgeführt um {ts}</div></div>'
     )
     return HTMLResponse(html)
+
+
+def _resolve_pdf_path(conn, document_id: int) -> tuple[Path | None, str | None]:
+    """Löst document_id -> Pfad auf, geprüft gegen die konfigurierten NAS-Wurzelpfade
+    (dieselbe Whitelist wie list_folder/open_file im MCP-Connector und die Foto-Galerie)
+    UND auf .pdf-Endung beschränkt. Nie einen Client-Pfad direkt entgegennehmen."""
+    row = conn.execute(
+        """
+        SELECT d.extension AS extension, dp.path AS path
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.id = ?
+        """,
+        (document_id,),
+    ).fetchone()
+    if not row:
+        return None, "Dokument nicht gefunden"
+    if (row["extension"] or "").lower() != ".pdf":
+        return None, "kein PDF"
+    base_folders = settings.get("scanner.base_folders", [])
+    allowed = [f.get("path") for f in base_folders if f.get("path")]
+    if not allowed:
+        return None, "keine NAS-Ordner konfiguriert"
+    try:
+        target = Path(row["path"]).resolve()
+    except Exception as e:
+        return None, f"ungültiger Pfad: {e}"
+    ok = any(target == Path(a).resolve() or Path(a).resolve() in target.parents for a in allowed)
+    if not ok:
+        return None, "Pfad ausserhalb der erlaubten Archivio-Ordner"
+    if not target.exists():
+        return None, "Datei nicht gefunden"
+    return target, None
+
+
+class MergePdfBody(BaseModel):
+    ids: list[int]
+
+
+@router.post("/pdf-zusammenfuehren")
+async def merge_pdfs(body: MergePdfBody):
+    """Fügt mehrere ausgewählte PDF-Dokumente zu einem neuen PDF zusammen. Antwortet
+    mit Base64 statt einem direkten Datei-Download, damit das Frontend übersprungene
+    Dateien (kein PDF, nicht lesbar, ausserhalb der Whitelist) in derselben Antwort
+    melden kann -- der eigentliche Speicherort wird danach ganz normal über den
+    Browser-Download gewählt, kein Helper-Umbau nötig."""
+    if not body.ids:
+        return JSONResponse({"ok": False, "error": "Keine Dokumente ausgewählt"}, status_code=400)
+
+    import pypdf
+
+    conn = connection.get_connection()
+    writer = pypdf.PdfWriter()
+    skipped: list[str] = []
+    merged = 0
+    try:
+        for doc_id in body.ids:
+            path, err = _resolve_pdf_path(conn, doc_id)
+            if err:
+                row = conn.execute("SELECT filename FROM documents WHERE id = ?", (doc_id,)).fetchone()
+                name = row["filename"] if row else str(doc_id)
+                skipped.append(f"{name} ({err})")
+                continue
+            try:
+                writer.append(str(path))
+                merged += 1
+            except Exception as e:
+                skipped.append(f"{path.name} (nicht lesbar: {e})")
+    finally:
+        conn.close()
+
+    if merged == 0:
+        writer.close()
+        return JSONResponse(
+            {"ok": False, "error": "Keine gültigen PDFs in der Auswahl", "skipped": skipped},
+            status_code=400,
+        )
+
+    buf = io.BytesIO()
+    writer.write(buf)
+    writer.close()
+
+    return JSONResponse({
+        "ok": True,
+        "merged": merged,
+        "skipped": skipped,
+        "pdf_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+    })

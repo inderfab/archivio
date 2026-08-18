@@ -351,6 +351,7 @@ async def search(
     filesize:        str = Query(default=""),
     duplicates_only: str = Query(default=""),
     search_in:       str = Query(default="docs"),
+    tag_id:          str = Query(default=""),
 ):
     scope = set(search_in.split(",")) if search_in else {"docs"}
     if not scope:
@@ -363,13 +364,13 @@ async def search(
 
     results, error, total = [], None, 0
     folder_results = []
-    has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only])
+    has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id])
     if q.strip() or has_filters:
         conn = connection.get_connection()
         filters_str, filter_params = _build_filters(
             project_id, type, from_addr, to_addr, subject_filter,
             date_from, date_to, filesize, duplicates_only,
-            filter_plans=filter_plans,
+            filter_plans=filter_plans, tag_id=tag_id,
         )
         results, error = _run_scoped_search(conn, q.strip(), filters_str, filter_params,
                                              content_scope)
@@ -625,9 +626,15 @@ def _build_filters(
     from_addr: str = "", to_addr: str = "", subject_filter: str = "",
     date_from: str = "", date_to: str = "",
     filesize: str = "", duplicates_only: str = "",
-    filter_plans: bool = False,
+    filter_plans: bool = False, tag_id: str = "",
 ) -> tuple[str, list]:
     filters, params = "", []
+    if tag_id:
+        try:
+            filters += " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)"
+            params.append(int(tag_id))
+        except ValueError:
+            pass
     if filter_plans:
         filters += " AND json_extract(d.metadata, '$.is_plan') = 1"
     if project_id:

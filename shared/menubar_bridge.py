@@ -11,6 +11,7 @@ Apps automatisch korrekt auf die jeweils eigene Bundle-Resources auf.
 """
 from __future__ import annotations
 
+import html as _html
 import http.server
 import json
 import shutil
@@ -90,8 +91,15 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
     secondary = "reveal" if primary == "open" else "open"
     labels = {"open": "Datei öffnen", "reveal": "Im Finder zeigen"}
     enc = quote(path, safe="")
+    filename = _html.escape(Path(path).name or path)
+    folder = _html.escape(str(Path(path).parent))
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{app_name}</title>
+<html><head><meta charset="utf-8">
+<title>{filename}</title>
+<meta property="og:title" content="{filename}">
+<meta property="og:site_name" content="{app_name}">
+<meta property="og:description" content="{folder}">
+<meta name="description" content="{folder}">
 <style>
   body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
           justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
@@ -106,7 +114,7 @@ def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
   .hint {{ color:#999; font-size:11px; margin-top:18px; max-width:340px; }}
 </style></head>
 <body><div class="box">
-<div class="path">{path}</div>
+<div class="path">{_html.escape(path)}</div>
 <div class="actions">
 <a class="btn" href="/{primary}?path={enc}">{labels[primary]}</a>
 <a class="btn-secondary" href="/{secondary}?path={enc}">{labels[secondary]}</a>
@@ -582,6 +590,54 @@ def discover_servers(timeout: float, log) -> list[tuple[str, int]]:
         return found
     except Exception as e:
         log.warning("mDNS-Suche fehlgeschlagen: %s", e)
+        return []
+
+
+def discover_other_servers(own_port: int, timeout: float, log) -> list[tuple[str, int, str]]:
+    """Wie discover_servers(), aber mit Hostnamen im Ergebnis und OHNE den eigenen
+    Dienst (gleiche eigene IP + Port werden herausgefiltert) -- für die
+    Mehrere-Server-im-Netz-Warnung beim Start (Server prüft sich selbst)."""
+    try:
+        import socket
+        import time as _time
+        from zeroconf import ServiceBrowser, Zeroconf
+
+        own_ip = _local_ip()
+        found: list[tuple[str, int, str]] = []
+
+        class _Listener:
+            def add_service(self, zc, type_, name):
+                try:
+                    info = zc.get_service_info(type_, name)
+                    if not info or not info.addresses:
+                        return
+                    host = socket.inet_ntoa(info.addresses[0])
+                    if host == own_ip and info.port == own_port:
+                        return  # der eigene, gerade erst angemeldete Dienst
+                    hostname = (info.server or "").rstrip(".")
+                    if hostname.endswith(".local"):
+                        hostname = hostname[: -len(".local")]
+                    found.append((host, info.port, hostname or host))
+                except Exception as e:
+                    log.warning("mDNS-Service-Aufloesung fehlgeschlagen: %s", e)
+
+            def remove_service(self, zc, type_, name):
+                pass
+
+            def update_service(self, zc, type_, name):
+                pass
+
+        zc = Zeroconf()
+        try:
+            ServiceBrowser(zc, SERVICE_TYPE, _Listener())
+            _time.sleep(timeout)
+        finally:
+            zc.close()
+        found = list(dict.fromkeys(found))
+        log.info("mDNS-Selbstpruefung: %d andere Server gefunden", len(found))
+        return found
+    except Exception as e:
+        log.warning("mDNS-Selbstpruefung fehlgeschlagen: %s", e)
         return []
 
 

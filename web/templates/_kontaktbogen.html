@@ -30,10 +30,12 @@
   .kb-caption { font-size: 11px; color: #4b5563; margin-top: 5px; word-break: break-all; }
   .kb-stars { font-size: 11px; color: #d97706; }
   .kb-empty { color: #9ca3af; font-size: 14px; }
+  .kb-filename-toggle { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #374151; cursor: pointer; }
+  body.kb-hide-filenames .kb-filename { display: none; }
 
   @media print {
     body { margin: 8mm; }
-    .kb-print-btn, .kb-mode-toggle { display: none; }
+    .kb-print-btn, .kb-mode-toggle, .kb-filename-toggle { display: none; }
     .kb-header { margin-bottom: 10mm; }
   }
 </style>
@@ -46,6 +48,10 @@
         <button type="button" class="kb-mode-btn active" data-mode="square" onclick="setKbMode('square')">Quadratisch</button>
         <button type="button" class="kb-mode-btn" data-mode="original" onclick="setKbMode('original')">Original</button>
       </div>
+      <label class="kb-filename-toggle">
+        <input type="checkbox" id="kb-show-filenames" checked onchange="toggleKbFilenames()">
+        Dateinamen einblenden
+      </label>
       <button class="kb-print-btn" onclick="window.print()">Als PDF drucken</button>
     </div>
   </div>
@@ -55,7 +61,7 @@
     <div class="kb-item">
       <img src="/foto/{{ p.id }}/ansicht" alt="{{ p.filename }}">
       <div class="kb-caption">
-        {{ p.filename }}
+        <span class="kb-filename">{{ p.filename }}</span>
         {% if p.rating %}<div class="kb-stars">{{ '★' * p.rating }}{{ '☆' * (5 - p.rating) }}</div>{% endif %}
       </div>
     </div>
@@ -72,6 +78,10 @@
       document.querySelectorAll('.kb-mode-btn').forEach(function(b) {
         b.classList.toggle('active', b.dataset.mode === mode);
       });
+    }
+
+    function toggleKbFilenames() {
+      document.body.classList.toggle('kb-hide-filenames', !document.getElementById('kb-show-filenames').checked);
     }
   </script>
 </body>

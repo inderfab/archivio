@@ -14,7 +14,7 @@ from pydantic import BaseModel
 
 from db import connection, queries
 from web.shared import templates
-from web.thumbnails import ALL_GALLERY_EXTENSIONS, get_thumbnail_bytes
+from web.thumbnails import ALL_GALLERY_EXTENSIONS, TIFF_EXTENSIONS, TIFF_MAX_BYTES, get_thumbnail_bytes
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -119,10 +119,24 @@ def _tag_filter_sql(tag_id: str) -> tuple[str, list]:
     return " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)", [tid]
 
 
+def _large_tiff_filter_sql(show_large_tiff: bool) -> tuple[str, list]:
+    """Grosse TIFFs (kein Thumbnail möglich, siehe web/thumbnails.py TIFF_MAX_BYTES)
+    standardmässig aus dem Grid ausblenden statt als leeren Platzhalter zu zeigen --
+    per Filter-Toggle wieder einblendbar (dann weiterhin nur als Platzhalter, echte
+    Thumbnail-Generierung bleibt aus Performance-Gründen deaktiviert)."""
+    if show_large_tiff:
+        return "", []
+    placeholders = ",".join("?" * len(TIFF_EXTENSIONS))
+    return (
+        f" AND NOT (d.extension IN ({placeholders}) AND d.filesize > ?)",
+        list(TIFF_EXTENSIONS) + [TIFF_MAX_BYTES],
+    )
+
+
 def _fetch_photos(
     conn, project_id: str, sterne: str, offset: int, limit: int,
     date_from: str = "", date_to: str = "", formate: str = "", ordner: str = "",
-    tag_id: str = "",
+    tag_id: str = "", show_large_tiff: bool = False,
 ) -> list[dict]:
     pf_sql, pf_params = _project_filter_sql(project_id)
     rf_sql, rf_params = _rating_filter_sql(sterne)
@@ -130,6 +144,7 @@ def _fetch_photos(
     df_sql, df_params = _date_filter_sql(date_from, date_to)
     of_sql, of_params = _folder_filter_sql(project_id, ordner)
     tf_sql, tf_params = _tag_filter_sql(tag_id)
+    lt_sql, lt_params = _large_tiff_filter_sql(show_large_tiff)
     placeholders = ",".join("?" * len(_GALLERY_EXTS))
     sql = f"""
         SELECT d.id AS id, d.filename AS filename, d.extension AS extension,
@@ -147,11 +162,12 @@ def _fetch_photos(
         {df_sql}
         {of_sql}
         {tf_sql}
+        {lt_sql}
         ORDER BY COALESCE(json_extract(d.metadata, '$.photo_taken_at'), d.modified_at) DESC, d.id DESC
         LIMIT ? OFFSET ?
     """
     params = (list(_GALLERY_EXTS) + pf_params + rf_params + ff_params + df_params + of_params
-              + tf_params + [limit, offset])
+              + tf_params + lt_params + [limit, offset])
     rows = conn.execute(sql, params).fetchall()
     photos = []
     for row in rows:
@@ -202,11 +218,13 @@ async def galerie(
     formate: str = Query(default=""),
     ordner: str = Query(default=""),
     tag_id: str = Query(default=""),
+    show_large_tiff: str = Query(default=""),
 ):
     conn = connection.get_connection()
     try:
         photos = _fetch_photos(conn, project_id, sterne, offset, PAGE_SIZE,
-                                date_from, date_to, formate, ordner, tag_id)
+                                date_from, date_to, formate, ordner, tag_id,
+                                bool(show_large_tiff))
     finally:
         conn.close()
     groups = _group_photos(photos)
@@ -222,6 +240,7 @@ async def galerie(
         "formate": formate,
         "ordner": ordner,
         "tag_id": tag_id,
+        "show_large_tiff": show_large_tiff,
         "is_empty": offset == 0 and not photos,
     })
 

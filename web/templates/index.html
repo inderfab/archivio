@@ -235,6 +235,18 @@
       </div>
     </div>
 
+    <div class="filter-section">
+      <div class="filter-section-title">Tags</div>
+      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
+        <button type="button" class="scope-btn active" data-tag="" onclick="setSearchTagFilter('')">Alle</button>
+        <input type="text" id="search-tag-search" class="filter-input" style="width:220px;"
+          placeholder="Tags filtern…" oninput="filterSearchTagChips()">
+        <span id="search-tag-count" style="font-size:11px; color:var(--text-3);"></span>
+      </div>
+      <div id="search-tag-list" class="ordner-tags-scroll"></div>
+      <input type="hidden" name="tag_id" id="search_tag_id_input" value="">
+    </div>
+
   </div>
 
   {# ── Aktive Filter als Chips ── #}
@@ -310,6 +322,13 @@
       </label>
     </div>
 
+    <div class="search-scope-row">
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
+        <input type="checkbox" id="gallery-show-large-tiff" onchange="reloadGallery()">
+        Grosse Bilder als Platzhalter anzeigen
+      </label>
+    </div>
+
     <div class="search-scope-row" style="font-size:11px; color:var(--text-3);">
       Tipp: Taste <kbd style="border:1px solid var(--border); border-radius:3px; padding:0 5px; font-family:inherit;">T</kbd> vergibt ein Tag auf das fokussierte/geöffnete Foto oder die ganze Mehrfachauswahl.
     </div>
@@ -348,6 +367,14 @@
 <div id="gallery-context-menu" class="context-menu">
   <button type="button" onclick="contextMenuAction('open')">Öffnen</button>
   <button type="button" onclick="contextMenuAction('reveal')">Im Finder zeigen</button>
+</div>
+
+<div id="doc-selection-bar" class="gallery-selection-bar">
+  <span id="doc-selection-count"></span>
+  <button type="button" class="btn" onclick="saveDocSelectionToFolder()">In neuen Ordner speichern</button>
+  <button type="button" class="btn" onclick="mergeSelectionToPdf(Array.from(docSelection))">Als PDF zusammenstellen</button>
+  <button type="button" class="btn" onclick="event.stopPropagation(); openTagFlyover(Array.from(docSelection))">Tag zuweisen (T)</button>
+  <button type="button" class="btn" onclick="clearDocSelection()">Auswahl aufheben</button>
 </div>
 
 <div id="tag-flyover" class="tag-flyover" style="display:none;">
@@ -552,6 +579,8 @@ var loupeAutoAdvance    = false;
 function switchMode(mode) {
   if (mode === currentMode) return;
   currentMode = mode;
+  clearSelection();       // Galerie-Mehrfachauswahl darf nicht in den anderen Modus mitwandern
+  clearDocSelection();    // dito für die Suchergebnis-Auswahl
   document.getElementById('mode-btn-search').classList.toggle('active', mode === 'search');
   document.getElementById('mode-btn-gallery').classList.toggle('active', mode === 'gallery');
   document.getElementById('search-mode-block').style.display = mode === 'search' ? '' : 'none';
@@ -565,6 +594,9 @@ function switchMode(mode) {
     reloadGallery();
     refreshOrdnerTags();
     refreshTagFilterList();
+  }
+  if (mode === 'search') {
+    refreshSearchTagFilterList();
   }
 }
 
@@ -622,6 +654,96 @@ function updateSelectionBar() {
   document.getElementById('gallery-selection-count').textContent = count + ' ausgewählt';
 }
 
+// ── Mehrfachauswahl in der normalen Dokumentsuche (Tags, In-Ordner-kopieren, PDF) ──
+var docSelection = new Set();
+
+function toggleDocSelect(id, evt) {
+  if (evt) evt.stopPropagation();
+  var row = document.querySelector('.result[data-id="' + id + '"]');
+  if (docSelection.has(id)) {
+    docSelection.delete(id);
+    if (row) row.classList.remove('selected');
+  } else {
+    docSelection.add(id);
+    if (row) row.classList.add('selected');
+  }
+  var cb = row ? row.querySelector('.result-select input') : null;
+  if (cb) cb.checked = docSelection.has(id);
+  updateDocSelectionBar();
+}
+
+function selectAllVisibleDocs() {
+  document.querySelectorAll('#results .result[data-id]').forEach(function(row) {
+    var id = parseInt(row.dataset.id, 10);
+    docSelection.add(id);
+    row.classList.add('selected');
+    var cb = row.querySelector('.result-select input');
+    if (cb) cb.checked = true;
+  });
+  updateDocSelectionBar();
+}
+
+function clearDocSelection() {
+  docSelection.forEach(function(id) {
+    var row = document.querySelector('.result[data-id="' + id + '"]');
+    if (row) {
+      row.classList.remove('selected');
+      var cb = row.querySelector('.result-select input');
+      if (cb) cb.checked = false;
+    }
+  });
+  docSelection.clear();
+  updateDocSelectionBar();
+}
+
+function updateDocSelectionBar() {
+  var bar = document.getElementById('doc-selection-bar');
+  var count = docSelection.size;
+  bar.style.display = count > 0 ? 'flex' : 'none';
+  document.getElementById('doc-selection-count').textContent = count + ' ausgewählt';
+}
+
+function saveDocSelectionToFolder() {
+  if (!docSelection.size) return;
+  var paths = [];
+  docSelection.forEach(function(id) {
+    var row = document.querySelector('.result[data-id="' + id + '"]');
+    if (row && row.dataset.path) paths.push(row.dataset.path);
+  });
+  if (!paths.length) {
+    alert('Keine Dateipfade in der Auswahl (z.B. reine Mail-Treffer haben keinen Dateipfad).');
+    return;
+  }
+  fetch(HELPER + '/copy-to-folder', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paths: paths }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (d.cancelled) return;
+    if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+    var msg = d.copied + ' Datei(en) kopiert nach:\n' + d.folder;
+    if (d.errors && d.errors.length) msg += '\n\nNicht kopiert:\n' + d.errors.join('\n');
+    alert(msg);
+  }).catch(function() {
+    alert('Archivio Helper läuft nicht. Bitte starten.');
+  });
+}
+
+// Suchergebnisse werden bei jeder neuen Suche komplett neu gerendert (innerHTML-Swap) --
+// Auswahl-Checkboxen dabei anhand von docSelection wiederherstellen, sonst geht der
+// visuelle Zustand (nicht aber die Auswahl selbst) bei jedem Tastendruck verloren.
+document.body.addEventListener('htmx:afterSwap', function(evt) {
+  if (!evt.detail.target || evt.detail.target.id !== 'results') return;
+  document.querySelectorAll('#results .result[data-id]').forEach(function(row) {
+    var id = parseInt(row.dataset.id, 10);
+    if (docSelection.has(id)) {
+      row.classList.add('selected');
+      var cb = row.querySelector('.result-select input');
+      if (cb) cb.checked = true;
+    }
+  });
+});
+
 function openKontaktbogen() {
   if (!gallerySelection.size) return;
   var ids = Array.from(gallerySelection).join(',');
@@ -632,10 +754,16 @@ function openKontaktbogen() {
 var contextMenuPath = null;
 
 document.addEventListener('contextmenu', function(e) {
-  var tile = e.target.closest('.photo-tile');
-  if (!tile || currentMode !== 'gallery') return;
+  var target = null;
+  if (currentMode === 'gallery') {
+    target = e.target.closest('.photo-tile');
+  } else if (currentMode === 'search') {
+    var row = e.target.closest('.result[data-path]');
+    if (row && row.dataset.path) target = row;
+  }
+  if (!target) return;
   e.preventDefault();
-  contextMenuPath = tile.dataset.path;
+  contextMenuPath = target.dataset.path;
   var menu = document.getElementById('gallery-context-menu');
   var x = Math.min(e.clientX, window.innerWidth - 190);
   var y = Math.min(e.clientY, window.innerHeight - 90);
@@ -682,9 +810,10 @@ function reloadGallery() {
   var formats  = activeFormats();
   var allFormats = document.querySelectorAll('.format-btn').length;
   var formate = formats.length === allFormats ? '' : formats.join(',');
+  var showLargeTiff = document.getElementById('gallery-show-large-tiff').checked ? '1' : '';
   var params = new URLSearchParams({
     project_id: pid, sterne: sterne, ordner: ordner, tag_id: tagId,
-    date_from: dateFrom, date_to: dateTo, formate: formate,
+    date_from: dateFrom, date_to: dateTo, formate: formate, show_large_tiff: showLargeTiff,
   });
   htmx.ajax('GET', '/galerie?' + params.toString(), { target: '#gallery-results', swap: 'innerHTML' });
 }
@@ -791,12 +920,15 @@ function refreshTagFilterList() {
 }
 
 function deleteTagGlobally(tagId, name) {
-  if (!confirm('Tag „' + name + '“ von allen Fotos löschen?')) return;
+  if (!confirm('Tag „' + name + '“ von allen Dateien löschen?')) return;
   fetch('/tags/' + tagId, { method: 'DELETE' }).then(function() {
     var row = document.getElementById('gallery-tag-row');
-    var wasActive = row.dataset.selected === String(tagId);
+    var wasActiveGallery = row.dataset.selected === String(tagId);
+    var wasActiveSearch = document.getElementById('search_tag_id_input').value === String(tagId);
     refreshTagFilterList();
-    if (wasActive) { row.dataset.selected = ''; reloadGallery(); }
+    refreshSearchTagFilterList();
+    if (wasActiveGallery) { row.dataset.selected = ''; reloadGallery(); }
+    if (wasActiveSearch) { setSearchTagFilter(''); }
   });
 }
 
@@ -811,6 +943,53 @@ function filterTagChips() {
   var total = document.querySelectorAll('#gallery-tag-list .scope-btn').length;
   var countEl = document.getElementById('gallery-tag-count');
   countEl.textContent = q ? (shown + ' von ' + total + ' Tags') : (total + ' Tags');
+}
+
+// ── Tag-Filter in der normalen Suche (gleicher Aufbau wie Galerie) ──────────
+function refreshSearchTagFilterList() {
+  var listEl   = document.getElementById('search-tag-list');
+  var searchEl = document.getElementById('search-tag-search');
+  var countEl  = document.getElementById('search-tag-count');
+  searchEl.value = '';
+  fetch('/galerie/tags')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.tags || !d.tags.length) { listEl.innerHTML = ''; countEl.textContent = ''; return; }
+      document.querySelectorAll('#mehr-filter-panel .scope-btn[data-tag=""]').forEach(function(b) {
+        b.classList.add('active');
+      });
+      listEl.innerHTML = d.tags.map(function(t) {
+        return '<span class="tag-filter-item">'
+          + '<button type="button" class="scope-btn" data-tag="' + t.id + '" '
+          + 'onclick="setSearchTagFilter(' + t.id + ')">' + escapeHtml(t.name) + '</button>'
+          + '<button type="button" class="tag-filter-delete" title="Tag komplett löschen" '
+          + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
+          + '</span>';
+      }).join('');
+      countEl.textContent = d.tags.length + ' Tags';
+    });
+}
+
+function filterSearchTagChips() {
+  var q = document.getElementById('search-tag-search').value.trim().toLowerCase();
+  var shown = 0;
+  document.querySelectorAll('#search-tag-list .scope-btn').forEach(function(b) {
+    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    b.style.display = match ? '' : 'none';
+    if (match) shown++;
+  });
+  var total = document.querySelectorAll('#search-tag-list .scope-btn').length;
+  var countEl = document.getElementById('search-tag-count');
+  countEl.textContent = q ? (shown + ' von ' + total + ' Tags') : (total + ' Tags');
+}
+
+function setSearchTagFilter(tagId) {
+  document.getElementById('search_tag_id_input').value = tagId ? String(tagId) : '';
+  document.querySelectorAll('#mehr-filter-panel .scope-btn[data-tag]').forEach(function(b) {
+    b.classList.toggle('active', (b.dataset.tag || '') === (tagId ? String(tagId) : ''));
+  });
+  updateChips();
+  htmx.trigger(document.getElementById('q'), 'search');
 }
 
 // ── Tag-Flyover (Taste T) ────────────────────────────────────────────────────
@@ -872,6 +1051,7 @@ function removeTagFromTargets(tagId) {
   })).then(function() {
     refreshCurrentTagChips();
     refreshTagFilterList();
+    refreshSearchTagFilterList();
     if (document.getElementById('gallery-tag-row').dataset.selected) reloadGallery();
   });
 }
@@ -912,6 +1092,7 @@ function pickTagSuggestion(name) {
   Promise.all(requests).then(function() {
     closeTagFlyover();
     refreshTagFilterList();
+    refreshSearchTagFilterList();
   });
 }
 
@@ -1097,6 +1278,14 @@ function handleLoupeKey(e) {
 document.addEventListener('keydown', function(e) {
   if (tagFlyoverIsOpen()) return;  // eigener Keydown-Handler für die Flyover-Eingabe
   if (loupeOpen) { handleLoupeKey(e); return; }
+  if (currentMode === 'search') {
+    if (isTypingInField()) return;
+    if (e.key.toLowerCase() === 't' && docSelection.size > 0) {
+      openTagFlyover(Array.from(docSelection));
+      e.preventDefault();
+    }
+    return;
+  }
   if (currentMode !== 'gallery') return;
   if (isTypingInField()) return;
   if (e.key.toLowerCase() === 't') {
@@ -1114,5 +1303,7 @@ document.addEventListener('keydown', function(e) {
   else if (e.key === '[') { bumpRating(galleryPhotoIds[galleryFocusIdx], -1); }
   else if (e.key === ']') { bumpRating(galleryPhotoIds[galleryFocusIdx], 1); }
 });
+
+refreshSearchTagFilterList();  // Suche ist der Standard-Modus beim Laden
 </script>
 {% endblock %}

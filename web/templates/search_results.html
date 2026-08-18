@@ -7,10 +7,15 @@
   </div>
 
 {% else %}
-  <div class="result-count">
-    {{ total }} Ergebnis{{ "se" if total != 1 else "" }} für „{{ query }}"
-    {% if results and results[0].fallback %}
-      <span style="color:var(--text-3); font-style:italic;"> · Teilwort-Suche</span>
+  <div class="result-count" style="display:flex; align-items:center; justify-content:space-between; gap:10px;">
+    <span>
+      {{ total }} Ergebnis{{ "se" if total != 1 else "" }} für „{{ query }}"
+      {% if results and results[0].fallback %}
+        <span style="color:var(--text-3); font-style:italic;"> · Teilwort-Suche</span>
+      {% endif %}
+    </span>
+    {% if results %}
+    <button type="button" class="btn-mehr-filter" onclick="selectAllVisibleDocs()">Alle sichtbaren auswählen</button>
     {% endif %}
   </div>
 
@@ -39,9 +44,12 @@
   {% for r in results %}
   {% set ext = r.extension.lstrip('.') if r.extension else 'eml' %}
   {% set is_mail = r.source_type == 'email' %}
-  <div class="result">
+  <div class="result" data-id="{{ r.id }}" data-path="{{ '' if is_mail else r.filepath }}">
 
     <div class="result-header">
+      <label class="result-select" onclick="event.stopPropagation()" title="Für Mehrfachauswahl markieren">
+        <input type="checkbox" onclick="toggleDocSelect({{ r.id }}, event)">
+      </label>
       <button class="preview-toggle"
         onclick="togglePreview(this, {{ r.id }}, document.getElementById('q').value)">▶</button>
       <span class="result-title">{{ r.filename }}</span>

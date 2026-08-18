@@ -511,8 +511,29 @@ class ArchivioServer(rumps.App):
         threading.Thread(target=_probe_permissions, daemon=True).start()
         threading.Thread(target=_update_watchdog, args=(self,), daemon=True).start()
         self._zc, self._zc_info = bridge.advertise_service(8000, log)
+        threading.Thread(target=self._check_other_servers, daemon=True).start()
         time.sleep(3)
         self._status_loop()
+
+    def _check_other_servers(self):
+        """Einmalig beim Start: prüft per mDNS, ob bereits ein anderer Archivio-Server
+        im Netz läuft, und weist per Dialog darauf hin -- mehrere Server bleiben
+        technisch möglich, sind aber i.d.R. nicht sinnvoll (jeder scannt die NAS-Dateien
+        separat statt sich einen gemeinsamen Index zu teilen)."""
+        time.sleep(5)  # eigenen mDNS-Dienst zuerst propagieren lassen
+        others = bridge.discover_other_servers(8000, timeout=3, log=log)
+        if not others:
+            return
+        names = ", ".join(sorted({hostname for _, _, hostname in others}))
+        bridge.thread_alert(
+            "Weiterer Archivio-Server im Netzwerk gefunden",
+            f"Es gibt bereits andere Nutzer im Netzwerk mit einem Archivio-Server. "
+            f"Gerätename: {names}. Es macht in der Regel Sinn, einen gemeinsamen Server "
+            f"für alle zu betreiben und auf den Arbeitsstationen nur den Archivio Helper "
+            f"zu installieren -- damit müssen die Dateien nicht von allen Nutzern einzeln "
+            f"gescannt werden. Es ist aber grundsätzlich möglich, mehrere Server parallel "
+            f"zu nutzen.",
+        )
 
     def _status_loop(self):
         while True:

@@ -604,6 +604,11 @@
     .detail-path  { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 10px; color: var(--text-3); margin-bottom: 12px; word-break: break-all; }
     .detail-actions { display: flex; flex-direction: column; gap: 6px; margin-top: 14px; }
 
+    /* ── Suchergebnis-Auswahl ── */
+    .result-select { display: inline-flex; align-items: center; cursor: pointer; margin-right: 2px; }
+    .result-select input { width: 14px; height: 14px; cursor: pointer; }
+    .result.selected { background: #eff6ff; margin: 0 -16px; padding-left: 16px; padding-right: 16px; border-radius: 4px; }
+
     /* ── Ergebnis-Aktionen ── */
     .result-actions {
       display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
@@ -853,6 +858,32 @@ function helperReveal(path) {
   fetch(HELPER + '/reveal?path=' + encodeURIComponent(path))
     .then(function(r) { if (!r.ok) alert(_helperErrorMessage(r.status, path)); })
     .catch(function() { alert('Archivio Helper läuft nicht. Bitte starten.'); });
+}
+
+function mergeSelectionToPdf(ids) {
+  if (!ids || !ids.length) return;
+  fetch('/api/pdf-zusammenfuehren', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ ids: ids }),
+  }).then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+    var byteChars = atob(d.pdf_base64);
+    var bytes = new Uint8Array(byteChars.length);
+    for (var i = 0; i < byteChars.length; i++) bytes[i] = byteChars.charCodeAt(i);
+    var blob = new Blob([bytes], { type: 'application/pdf' });
+    var url = URL.createObjectURL(blob);
+    var a = document.createElement('a');
+    a.href = url;
+    a.download = 'Zusammengefuehrt.pdf';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+    if (d.skipped && d.skipped.length) {
+      alert('Übersprungen (kein PDF oder nicht lesbar):\n' + d.skipped.join('\n'));
+    }
+  }).catch(function() { alert('Fehler beim Zusammenführen.'); });
 }
 
 function openMail(documentId) {
