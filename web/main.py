@@ -366,19 +366,33 @@ async def search(
     folder_results = []
     has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id])
     if q.strip() or has_filters:
-        conn = connection.get_connection()
-        filters_str, filter_params = _build_filters(
-            project_id, type, from_addr, to_addr, subject_filter,
-            date_from, date_to, filesize, duplicates_only,
-            filter_plans=filter_plans, tag_id=tag_id,
-        )
-        results, error = _run_scoped_search(conn, q.strip(), filters_str, filter_params,
-                                             content_scope)
-        if search_folders and q.strip():
-            folder_results = _search_folders(conn, q.strip(), project_id)
-        _prefer_project_path(conn, results, project_id)
+        # run_in_executor: _run_scoped_search ist eine blockierende SQLite-Anfrage, die bei
+        # Mehrwort-Queries mit vielen FTS-OR-Zweigen auf grossen Indizes mehrere Sekunden
+        # dauern kann. Direkt im async-Handler wuerde das den einzigen uvicorn-Worker/
+        # Event-Loop komplett blockieren -- ALLE anderen gleichzeitigen Anfragen (auch von
+        # anderen Nutzern, auch MCP-Tool-Aufrufe wie list_folder) haengen so lange fest,
+        # was sich als scheinbar zufaellige Timeouts aeussert.
+        import asyncio
+
+        def _do_search():
+            conn = connection.get_connection()
+            try:
+                filters_str, filter_params = _build_filters(
+                    project_id, type, from_addr, to_addr, subject_filter,
+                    date_from, date_to, filesize, duplicates_only,
+                    filter_plans=filter_plans, tag_id=tag_id,
+                )
+                results, error = _run_scoped_search(conn, q.strip(), filters_str, filter_params,
+                                                     content_scope)
+                folders = _search_folders(conn, q.strip(), project_id) if search_folders and q.strip() else []
+                _prefer_project_path(conn, results, project_id)
+                return results, error, folders
+            finally:
+                conn.close()
+
+        loop = asyncio.get_event_loop()
+        results, error, folder_results = await loop.run_in_executor(None, _do_search)
         total = len(results)
-        conn.close()
     return templates.TemplateResponse("search_results.html", {
         "request":        request,
         "results":        results,

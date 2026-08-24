@@ -62,22 +62,36 @@ async def mcp_search(
 ):
     """Read-only JSON-Suche für den MCP-Server (Archivio Helper) — reine Textantwort statt HTML.
     Nutzt dieselbe Such-Logik wie /search (main.py), nur ohne die Zusatzfilter (Datum, Absender, …).
-    """
+
+    Läuft über run_in_executor: _run_scoped_search ist eine blockierende SQLite-Anfrage,
+    die bei Mehrwort-Queries mit vielen FTS-OR-Zweigen auf grossen Indizes mehrere Sekunden
+    dauern kann. Direkt im async-Handler ausgefuehrt wuerde das den einzigen uvicorn-
+    Worker/Event-Loop komplett blockieren -- ALLE anderen gleichzeitigen Anfragen (auch
+    von anderen Nutzern, auch list_folder desselben MCP-Clients) haengen so lange fest,
+    was sich als scheinbar zufaellige Timeouts aeussert obwohl der Server nur mit genau
+    dieser einen Suche beschaeftigt ist."""
+    import asyncio
+
     from web.main import _build_filters, _prefer_project_path, _run_scoped_search, _search_folders
 
     q = q.strip()
     scope = set(search_in.split(",")) if search_in else {"docs", "filenames", "folders"}
 
-    conn = connection.get_connection()
-    try:
-        results: list = []
-        if q:
-            filters_str, filter_params = _build_filters(project_id, "")
-            results, _error = _run_scoped_search(conn, q, filters_str, filter_params, scope)
-            _prefer_project_path(conn, results, project_id)
-        folders = _search_folders(conn, q, project_id) if q and "folders" in scope else []
-    finally:
-        conn.close()
+    def _do_search():
+        conn = connection.get_connection()
+        try:
+            results: list = []
+            if q:
+                filters_str, filter_params = _build_filters(project_id, "")
+                results, _error = _run_scoped_search(conn, q, filters_str, filter_params, scope)
+                _prefer_project_path(conn, results, project_id)
+            folders = _search_folders(conn, q, project_id) if q and "folders" in scope else []
+            return results, folders
+        finally:
+            conn.close()
+
+    loop = asyncio.get_event_loop()
+    results, folders = await loop.run_in_executor(None, _do_search)
 
     cleaned = [
         {

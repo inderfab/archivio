@@ -154,13 +154,9 @@ class ArchivioHelper(rumps.App):
             self._link_action_title(), callback=self.toggle_link_action)
         self._link_direct_item = rumps.MenuItem(
             "Archivio-Links ohne Bestätigung öffnen", callback=self.toggle_link_direct_open)
-        self._fda_item = rumps.MenuItem(
-            "⚠️ Vollzugriff auf Festplatte fehlt …", callback=self._show_fda_prompt)
-        self._fda_item.hidden = True
 
         self.menu = [
             self._title_item,
-            self._fda_item,
             rumps.separator,
             self._version_item,
             self._status_item,
@@ -196,7 +192,6 @@ class ArchivioHelper(rumps.App):
         bridge.ensure_mcp_registered("Archivio Helper", log)
         bridge.ensure_quick_action_installed(log)
         threading.Thread(target=self._status_loop, daemon=True).start()
-        threading.Thread(target=self._check_full_disk_access, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
         threading.Thread(target=self._delayed_update_check, daemon=True).start()
         # Automatische Server-Suche nur wenn server_url noch der Auslieferungs-Default
@@ -333,20 +328,6 @@ class ArchivioHelper(rumps.App):
             f"{'erreichbar' if ok else 'nicht erreichbar'}"
         )
         # Kein Titeltext — Icon genügt
-        self._fda_item.hidden = bridge.has_full_disk_access()
-
-    def _check_full_disk_access(self):
-        """Beim Start einmalig pruefen und -- falls noetig -- Anleitung zeigen.
-        Der Helper oeffnet/zeigt Dateien direkt auf diesem Mac (auch NAS-Mounts) --
-        ohne Vollzugriff auf Festplatte schlaegt das fuer viele Ordner fehl."""
-        import time
-        time.sleep(2)
-        if not bridge.has_full_disk_access():
-            self._fda_item.hidden = False
-            bridge.show_full_disk_access_prompt("Archivio Helper")
-
-    def _show_fda_prompt(self, _):
-        bridge.show_full_disk_access_prompt("Archivio Helper")
 
     def open_browser(self, _):
         subprocess.run(["open", self._server_url])
