@@ -224,30 +224,55 @@ def test_galerie_ordner_tags_and_filter(tmp_db, tmp_path):
     assert "b.jpg" not in r.text
 
 
+def test_galerie_ordner_tags_excludes_deleted_folder(tmp_db, tmp_path):
+    """Ordner koennen nach dem Scan geloescht werden (die DB behaelt die Dokumente
+    absichtlich, siehe _fetch_folder_tags-Kommentar) -- der Ordner-Filter soll einen
+    inzwischen verschwundenen Ordner trotzdem nicht mehr ewig zur Auswahl anbieten."""
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    (tmp_path / "Aktuell").mkdir()
+    (tmp_path / "Geloescht").mkdir()
+    a = tmp_path / "Aktuell" / "a.jpg"
+    b = tmp_path / "Geloescht" / "b.jpg"
+    a.write_bytes(_jpeg_bytes())
+    b.write_bytes(_jpeg_bytes())
+    _make_photo(tmp_db, p, a)
+    _make_photo(tmp_db, p, b)
+
+    import shutil
+    shutil.rmtree(tmp_path / "Geloescht")
+
+    c = _client()
+    r = c.get("/galerie/ordner-tags", params={"project_id": str(p)})
+    assert r.json()["tags"] == ["Aktuell"]
+
+
 def test_galerie_ordner_tags_empty_without_project(tmp_db):
     c = _client()
     r = c.get("/galerie/ordner-tags")
     assert r.json()["tags"] == []
 
 
-def test_galerie_hides_large_tiff_by_default(tmp_db, tmp_path):
-    from web.thumbnails import TIFF_MAX_BYTES
-
+def test_galerie_hides_files_over_default_15mb(tmp_db, tmp_path):
+    """Standardfilter (15 MB) gilt fuer ALLE Formate, nicht nur TIFF -- frueher
+    war nur TIFF ueberhaupt begrenzt (auf 20 MB), alle anderen Formate liefen
+    ungefiltert und wurden trotzdem oft nicht angezeigt (Pillow Decompression-
+    Bomb-Schutz bei hochaufgeloesten Planscans, siehe web/thumbnails.py)."""
     settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
     p = queries.insert_project(tmp_db, "P", str(tmp_path))
-    small = tmp_path / "small.tiff"
-    big = tmp_path / "big.tiff"
-    small.write_bytes(b"x" * 100)
-    big.write_bytes(b"x" * 100)  # tatsaechlicher Dateiinhalt egal, filesize kommt aus der DB
+    small = tmp_path / "small.jpg"
+    big = tmp_path / "big.jpg"
+    small.write_bytes(_jpeg_bytes())
+    big.write_bytes(_jpeg_bytes())
     doc_small = queries.upsert_document(tmp_db, {
-        "project_id": p, "hash": "h-small", "filename": "small.tiff", "extension": ".tiff",
-        "filesize": 100, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+        "project_id": p, "hash": "h-small", "filename": "small.jpg", "extension": ".jpg",
+        "filesize": 1024, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
     })
     queries.upsert_path(tmp_db, doc_small, str(small), True)
     queries.set_extraction_status(tmp_db, doc_small, "listed")
     doc_big = queries.upsert_document(tmp_db, {
-        "project_id": p, "hash": "h-big", "filename": "big.tiff", "extension": ".tiff",
-        "filesize": TIFF_MAX_BYTES + 1, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+        "project_id": p, "hash": "h-big", "filename": "big.jpg", "extension": ".jpg",
+        "filesize": 16 * 1024 * 1024, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
     })
     queries.upsert_path(tmp_db, doc_big, str(big), True)
     queries.set_extraction_status(tmp_db, doc_big, "listed")
@@ -256,27 +281,90 @@ def test_galerie_hides_large_tiff_by_default(tmp_db, tmp_path):
     c = _client()
     r = c.get("/galerie")
     assert f'data-id="{doc_small}"' in r.text
-    assert "big.tiff" not in r.text
+    assert "big.jpg" not in r.text
 
 
-def test_galerie_show_large_tiff_toggle_includes_it(tmp_db, tmp_path):
-    from web.thumbnails import TIFF_MAX_BYTES
-
+def test_galerie_max_size_mb_alle_includes_large_files(tmp_db, tmp_path):
     settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
     p = queries.insert_project(tmp_db, "P", str(tmp_path))
-    big = tmp_path / "big.tiff"
-    big.write_bytes(b"x" * 100)
+    big = tmp_path / "big.jpg"
+    big.write_bytes(_jpeg_bytes())
     doc_big = queries.upsert_document(tmp_db, {
-        "project_id": p, "hash": "h-big", "filename": "big.tiff", "extension": ".tiff",
-        "filesize": TIFF_MAX_BYTES + 1, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+        "project_id": p, "hash": "h-big", "filename": "big.jpg", "extension": ".jpg",
+        "filesize": 16 * 1024 * 1024, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
     })
     queries.upsert_path(tmp_db, doc_big, str(big), True)
     queries.set_extraction_status(tmp_db, doc_big, "listed")
     tmp_db.commit()
 
     c = _client()
-    r = c.get("/galerie", params={"show_large_tiff": "1"})
+    r = c.get("/galerie", params={"max_size_mb": "alle"})
     assert f'data-id="{doc_big}"' in r.text
+
+
+def test_galerie_max_size_mb_custom_threshold(tmp_db, tmp_path):
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    mid = tmp_path / "mid.jpg"
+    mid.write_bytes(_jpeg_bytes())
+    doc_mid = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-mid", "filename": "mid.jpg", "extension": ".jpg",
+        "filesize": 8 * 1024 * 1024, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_mid, str(mid), True)
+    queries.set_extraction_status(tmp_db, doc_mid, "listed")
+    tmp_db.commit()
+
+    c = _client()
+    assert f'data-id="{doc_mid}"' not in c.get("/galerie", params={"max_size_mb": "5"}).text
+    assert f'data-id="{doc_mid}"' in c.get("/galerie", params={"max_size_mb": "10"}).text
+
+
+def test_galerie_sort_name_az_and_za(tmp_db, tmp_path):
+    """Alphabetische Sortierung pro Ordner (z.B. '1_xx.jpg', '2_xx.jpg') -- vorher
+    war die Galerie nur nach Datum sortierbar, was solche Reihenfolgen 'durcheinander'
+    erscheinen liess, sobald mehrere Dateien denselben modified_at-Zeitstempel hatten."""
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    for name in ("2_b.jpg", "1_a.jpg", "10_c.jpg"):
+        photo = tmp_path / name
+        photo.write_bytes(_jpeg_bytes())
+        _make_photo(tmp_db, p, photo)
+
+    c = _client()
+    r_az = c.get("/galerie", params={"sort": "name_az"})
+    pos_az = {name: r_az.text.index(name) for name in ("1_a.jpg", "10_c.jpg", "2_b.jpg")}
+    assert pos_az["1_a.jpg"] < pos_az["2_b.jpg"] < pos_az["10_c.jpg"]
+
+    r_za = c.get("/galerie", params={"sort": "name_za"})
+    pos_za = {name: r_za.text.index(name) for name in ("1_a.jpg", "10_c.jpg", "2_b.jpg")}
+    assert pos_za["10_c.jpg"] < pos_za["2_b.jpg"] < pos_za["1_a.jpg"]
+
+
+def test_galerie_sort_datum_alt_zuerst(tmp_db, tmp_path):
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    older = tmp_path / "older.jpg"
+    newer = tmp_path / "newer.jpg"
+    older.write_bytes(_jpeg_bytes())
+    newer.write_bytes(_jpeg_bytes())
+    doc_older = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-older", "filename": "older.jpg", "extension": ".jpg",
+        "filesize": older.stat().st_size, "modified_at": "2020-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_older, str(older), True)
+    queries.set_extraction_status(tmp_db, doc_older, "listed")
+    doc_newer = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-newer", "filename": "newer.jpg", "extension": ".jpg",
+        "filesize": newer.stat().st_size, "modified_at": "2026-01-01T00:00:00Z", "source_type": "filesystem",
+    })
+    queries.upsert_path(tmp_db, doc_newer, str(newer), True)
+    queries.set_extraction_status(tmp_db, doc_newer, "listed")
+    tmp_db.commit()
+
+    c = _client()
+    r = c.get("/galerie", params={"sort": "datum_alt"})
+    assert r.text.index("older.jpg") < r.text.index("newer.jpg")
 
 
 def test_kontaktbogen_shows_selected_photos_in_order(tmp_db, tmp_path):

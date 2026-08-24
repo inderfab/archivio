@@ -23,13 +23,22 @@ from db import queries
 
 log = logging.getLogger(__name__)
 
+# Pillows "Decompression Bomb"-Schutz bricht das Öffnen grosser Bilder ab (Default:
+# ~89 Megapixel) -- gedacht für nicht vertrauenswürdige Uploads. Hier ausschliesslich
+# lokal gescannte, vom Nutzer selbst abgelegte Dateien (z.B. hochaufgelöste Planscans
+# als JPG/PNG), deshalb deaktiviert. Die eigene RENDER_MAX_BYTES-Grenze unten schützt
+# weiterhin vor pathologisch grossen Dateien.
+Image.MAX_IMAGE_PIXELS = None
+
 # Formate, die immer ein Thumbnail bekommen.
 GALLERY_EXTENSIONS = {".jpg", ".jpeg", ".png", ".heic", ".heif", ".gif", ".bmp", ".webp"}
-# TIFF nur unterhalb der Schwelle -- grosse TIFFs sind oft 100+ MB und würden
-# die Galerie spürbar verlangsamen.
 TIFF_EXTENSIONS = {".tiff", ".tif"}
-TIFF_MAX_BYTES = 20 * 1024 * 1024
 ALL_GALLERY_EXTENSIONS = GALLERY_EXTENSIONS | TIFF_EXTENSIONS
+# Technische Sicherheitsgrenze fürs Rendern selbst (nicht die Sichtbarkeit im Grid --
+# die regelt web/gallery.py::_size_filter_sql einstellbar bis 30 MB / 'alle').
+# Grosszügig über allen Filter-Optionen, schützt nur vor wirklich pathologischen
+# Dateien (mehrere hundert MB).
+RENDER_MAX_BYTES = 300 * 1024 * 1024
 
 SIZES = {"grid": 400, "full": 1600}
 
@@ -143,13 +152,12 @@ def get_thumbnail_bytes(conn: sqlite3.Connection, document_id: int, size_name: s
 
 
 def _render_thumbnail(path: Path, ext: str, px: int, document_id: int, conn: sqlite3.Connection) -> bytes | None:
-    if ext in TIFF_EXTENSIONS:
-        try:
-            if path.stat().st_size > TIFF_MAX_BYTES:
-                return None
-        except Exception:
+    if ext not in ALL_GALLERY_EXTENSIONS:
+        return None
+    try:
+        if path.stat().st_size > RENDER_MAX_BYTES:
             return None
-    elif ext not in GALLERY_EXTENSIONS:
+    except Exception:
         return None
 
     _ensure_heif()

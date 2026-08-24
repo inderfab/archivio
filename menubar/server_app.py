@@ -168,6 +168,14 @@ def _env() -> dict:
     env = os.environ.copy()
     if _IN_BUNDLE:
         env["ARCHIVIO_DATA_DIR"] = str(_DATA_DIR)
+    # launchd startet Login-Items/LaunchAgents mit einer minimalen Umgebung ohne
+    # LANG/LC_ALL -- ohne diese Variablen faellt Python teils auf ASCII statt UTF-8
+    # fuer stdout/stderr/Log-Dateien zurueck. Jede Log-Zeile mit Umlauten (Postfach-
+    # oder Dateinamen wie "Möbelierung") liess den Mail-/Datei-Scan dann mit
+    # UnicodeEncodeError abbrechen. PYTHONUTF8 erzwingt UTF-8 unabhaengig vom
+    # (evtl. leeren) Locale-Environment.
+    env["PYTHONUTF8"] = "1"
+    env["PYTHONIOENCODING"] = "utf-8"
     return env
 
 
@@ -459,9 +467,13 @@ class ArchivioServer(rumps.App):
             "Update verfügbar", callback=self._install_pending_update)
         self._pending_update_info: updater.UpdateInfo | None = None
         self._zc = self._zc_info = None
+        self._fda_item = rumps.MenuItem(
+            "⚠️ Vollzugriff auf Festplatte fehlt …", callback=self._show_fda_prompt)
+        self._fda_item.hidden = True
 
         self.menu = [
             self._title_item,
+            self._fda_item,
             rumps.separator,
             self._version_item,
             self._server_item,
@@ -512,8 +524,22 @@ class ArchivioServer(rumps.App):
         threading.Thread(target=_update_watchdog, args=(self,), daemon=True).start()
         self._zc, self._zc_info = bridge.advertise_service(8000, log)
         threading.Thread(target=self._check_other_servers, daemon=True).start()
+        threading.Thread(target=self._check_full_disk_access, daemon=True).start()
         time.sleep(3)
         self._status_loop()
+
+    def _check_full_disk_access(self):
+        """Beim Start einmalig pruefen und -- falls noetig -- Anleitung zeigen.
+        Apple erlaubt kein programmatisches Erteilen von Vollzugriff auf Festplatte,
+        deshalb nur Hinweis + direkter Sprung ins richtige Systemeinstellungen-Panel.
+        Der Menue-Eintrag bleibt sichtbar bis _refresh_status() den Zugriff erkennt."""
+        time.sleep(2)
+        if not bridge.has_full_disk_access():
+            self._fda_item.hidden = False
+            bridge.show_full_disk_access_prompt("Archivio Server")
+
+    def _show_fda_prompt(self, _):
+        bridge.show_full_disk_access_prompt("Archivio Server")
 
     def _check_other_servers(self):
         """Einmalig beim Start: prüft per mDNS, ob bereits ein anderer Archivio-Server
@@ -556,6 +582,7 @@ class ArchivioServer(rumps.App):
         # Ollama neu starten falls es unerwartet gestoppt ist
         if _ollama_available() and not _is_ollama_running():
             threading.Thread(target=_start_ollama, daemon=True).start()
+        self._fda_item.hidden = bridge.has_full_disk_access()
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])

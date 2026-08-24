@@ -163,6 +163,25 @@ def remove_photo_tag(conn: sqlite3.Connection, document_id: int, tag_id: int) ->
     conn.commit()
 
 
+def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> bool:
+    """Benennt einen Tag um. Gibt False zurück, wenn der neue Name bereits (case-
+    insensitiv) einem ANDEREN Tag gehört -- UNIQUE COLLATE NOCASE auf photo_tags.name
+    würde das sonst als IntegrityError werfen statt eine sinnvolle Fehlermeldung
+    zuzulassen."""
+    new_name = new_name.strip()
+    if not new_name:
+        return False
+    clash = conn.execute(
+        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE AND id != ?",
+        (new_name, tag_id),
+    ).fetchone()
+    if clash:
+        return False
+    conn.execute("UPDATE photo_tags SET name = ? WHERE id = ?", (new_name, tag_id))
+    conn.commit()
+    return True
+
+
 def get_photo_tags(conn: sqlite3.Connection, document_id: int) -> list[dict]:
     rows = conn.execute(
         """

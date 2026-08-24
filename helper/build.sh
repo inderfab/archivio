@@ -214,3 +214,71 @@ zip -qr "archivio-helper-${VERSION}.zip" "$APP_NAME.app" \
 cd ..
 
 echo "✓ $DIST/archivio-helper-${VERSION}.zip erstellt"
+
+# ── PKG-Installer ─────────────────────────────────────────────────────────────
+# Frueher wurde der Helper nur als ZIP verteilt -- Nutzer haben ihn dann selbst per
+# Drag&Drop irgendwohin verschoben (oft ins eigene ~/Applications statt ins
+# gemeinsame /Applications). Auf Mehrbenutzer-Maecs war die App danach fuer alle
+# anderen Accounts unsichtbar (nur noch per Spotlight unter dem installierenden
+# Benutzer auffindbar). Ein PKG mit --install-location "/" (wie beim Server) landet
+# immer systemweit in /Applications, unabhaengig davon wer installiert.
+if ! command -v pkgbuild &>/dev/null; then
+  echo "⚠️  pkgbuild nicht gefunden – Helper-PKG wird übersprungen"
+  exit 0
+fi
+
+PKG="$DIST/archivio-helper-${VERSION}.pkg"
+PKG_ROOT=$(mktemp -d)
+PKG_SCRIPTS=$(mktemp -d)
+
+mkdir -p "$PKG_ROOT/Applications"
+cp -r "$APP" "$PKG_ROOT/Applications/"
+# Weltweit lesbar/ausfuehrbar machen -- ohne das koennen andere (Nicht-Admin-)Accounts
+# auf demselben Mac die App zwar in /Applications SEHEN, aber nicht oeffnen, je
+# nachdem welche Rechte die Dateien auf dem Baurechner (eigener Dev-Account) hatten.
+# pkgbuild uebernimmt Rechte/Besitzer aus PKG_ROOT unveraendert in die Payload.
+chmod -R a+rX "$PKG_ROOT/Applications/$APP_NAME.app"
+
+cat > "$PKG_SCRIPTS/postinstall" <<'POSTINSTALL'
+#!/bin/bash
+CURRENT_USER=$(stat -f "%Su" /dev/console 2>/dev/null || echo "")
+
+# Quarantine entfernen (verhindert Gatekeeper-Blockierung)
+xattr -cr "/Applications/Archivio Helper.app" 2>/dev/null || true
+
+if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
+  # Evtl. laufende alte Instanz beenden, damit der Nutzer die frisch installierte
+  # Version startet (Autostart/LaunchAgent richtet sich die App selbst beim naechsten
+  # Start ein -- siehe bridge.ensure_autostart_default in archivio_helper.py).
+  pkill -f "Contents/Resources/archivio_helper.py" 2>/dev/null || true
+  sleep 1
+  sudo -u "$CURRENT_USER" open -a "Archivio Helper" 2>/dev/null || true
+fi
+exit 0
+POSTINSTALL
+chmod +x "$PKG_SCRIPTS/postinstall"
+
+PKGBUILD_SIGN_ARGS=()
+if [ -n "$ARCHIVIO_SIGN_INSTALLER" ]; then
+  PKGBUILD_SIGN_ARGS=(--sign "$ARCHIVIO_SIGN_INSTALLER")
+else
+  echo "⚠️  ARCHIVIO_SIGN_INSTALLER nicht gesetzt — Helper-.pkg bleibt unsigniert"
+fi
+
+# TODO: siehe gleichlautender Kommentar in scripts/build_server_app.sh -- produkt-
+# build+Distribution-XML (erzwingt systemweite Installation) scheitert aktuell an der
+# Schluessel-Zugriffskontrolle (nur pkgbuild freigegeben). Auf productbuild umstellen,
+# sobald das behoben ist.
+pkgbuild \
+  --root "$PKG_ROOT" \
+  --scripts "$PKG_SCRIPTS" \
+  --identifier "io.archivio.helper" \
+  --version "$VERSION" \
+  --install-location "/" \
+  "${PKGBUILD_SIGN_ARGS[@]}" \
+  "$PKG"
+
+rm -rf "$PKG_ROOT" "$PKG_SCRIPTS"
+echo "✓ $PKG erstellt"
+
+notarize_and_staple "$PKG"

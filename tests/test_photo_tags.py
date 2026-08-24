@@ -221,3 +221,39 @@ def test_galerie_tag_filter_global_across_projects(tmp_db, tmp_path):
     r = c.get("/galerie", params={"tag_id": str(tag_id)})
     assert f'data-id="{doc_a}"' in r.text
     assert "b.jpg" not in r.text
+
+
+def test_rename_tag_globally(tmp_db, tmp_path):
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    a = tmp_path / "a.jpg"
+    a.write_bytes(_jpeg_bytes())
+    doc_a = _make_photo(tmp_db, p, a)
+    tag_id = queries.get_or_create_tag(tmp_db, "Alt")
+    queries.assign_photo_tag(tmp_db, doc_a, tag_id)
+
+    c = _client()
+    r = c.post(f"/tags/{tag_id}/umbenennen", json={"name": "Neu"})
+    assert r.status_code == 200
+    assert r.json()["ok"] is True
+
+    tags = queries.get_photo_tags(tmp_db, doc_a)
+    assert [t["name"] for t in tags] == ["Neu"]
+
+
+def test_rename_tag_rejects_clash_with_existing_name(tmp_db):
+    tag_a = queries.get_or_create_tag(tmp_db, "Wichtig")
+    queries.get_or_create_tag(tmp_db, "Dringend")
+    tmp_db.commit()
+
+    c = _client()
+    r = c.post(f"/tags/{tag_a}/umbenennen", json={"name": "dringend"})
+    assert r.status_code == 400
+    assert r.json()["ok"] is False
+
+
+def test_rename_tag_rejects_empty_name(tmp_db):
+    tag_id = queries.get_or_create_tag(tmp_db, "Original")
+    c = _client()
+    r = c.post(f"/tags/{tag_id}/umbenennen", json={"name": "   "})
+    assert r.status_code == 400

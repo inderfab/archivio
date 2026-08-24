@@ -73,6 +73,9 @@ _HELPER_VERSION_FILE_DEV = Path(__file__).parent.parent / "helper" / "VERSION"
 
 
 def _helper_info() -> tuple[bool, str]:
+    """Bevorzugt .pkg (systemweite Installation nach /Applications -- siehe
+    helper/build.sh) vor .zip (aeltere Auslieferung, manuelles Draganddrop war
+    Ursache fuer 'Helper bei anderen Benutzern unsichtbar')."""
     if _HELPER_VERSION_FILE.exists():
         version = _HELPER_VERSION_FILE.read_text().strip()
     elif _HELPER_VERSION_FILE_DEV.exists():
@@ -81,13 +84,18 @@ def _helper_info() -> tuple[bool, str]:
         version = "1.0.0"
     # Alle Suchpfade: Bundle-dist + DATA_DIR-dist
     for dist_dir in (_DIST, _DIST_DATA):
+        if (dist_dir / f"archivio-helper-{version}.pkg").exists():
+            return True, version
         if (dist_dir / f"archivio-helper-{version}.zip").exists():
             return True, version
-    # Fallback: neusten verfügbaren ZIP in beiden Verzeichnissen suchen -- nach Version
-    # sortiert, NICHT alphabetisch ("archivio-helper-3.1.9.zip" > "...3.1.11.zip" als
-    # String, weil '9' > '1' -- das lieferte lange die falsche, ältere Version aus).
+    # Fallback: neuesten verfügbaren Build (pkg oder zip) in beiden Verzeichnissen
+    # suchen -- nach Version sortiert, NICHT alphabetisch ("archivio-helper-3.1.9.zip"
+    # > "...3.1.11.zip" als String, weil '9' > '1' -- lieferte lange die falsche,
+    # ältere Version aus).
     candidates = (
+        list(_DIST.glob("archivio-helper-*.pkg")) +
         list(_DIST.glob("archivio-helper-*.zip")) +
+        (list(_DIST_DATA.glob("archivio-helper-*.pkg")) if _DIST_DATA.exists() else []) +
         (list(_DIST_DATA.glob("archivio-helper-*.zip")) if _DIST_DATA.exists() else [])
     )
     if candidates:
@@ -181,23 +189,21 @@ async def retry_errors(request: Request):
 
 @router.get("/download/helper")
 async def download_helper():
-    """Liefert die Helper-ZIP unveraendert aus. Die server_url wird NICHT mehr hier
-    vorbelegt (patchte frueher config.json innerhalb der bereits signierten+notarisierten
-    Zip -- das bricht die Codesignatur, macOS zeigt dann "beschaedigt" statt der App.
-    Der Helper sucht den Server stattdessen selbst per mDNS (menubar_bridge.discover_servers),
+    """Liefert bevorzugt das Helper-PKG aus (installiert systemweit nach /Applications,
+    sichtbar fuer alle Benutzer des Macs -- siehe helper/build.sh), sonst die aeltere
+    ZIP als Fallback. Die server_url wird NICHT hier vorbelegt (patchte frueher
+    config.json innerhalb der bereits signierten+notarisierten Datei -- das bricht die
+    Codesignatur, macOS zeigt dann "beschaedigt". Der Helper sucht den Server
+    stattdessen selbst per mDNS (menubar_bridge.discover_servers),
     siehe helper/archivio_helper.py)."""
     _, version = _helper_info()
-    fname = f"archivio-helper-{version}.zip"
-    src_path = None
-    for dist_dir in (_DIST, _DIST_DATA):
-        p = dist_dir / fname
-        if p.exists():
-            src_path = p
-            break
-    if not src_path:
-        return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
-
-    return FileResponse(src_path, media_type="application/zip", filename=fname)
+    for ext, media_type in ((".pkg", "application/octet-stream"), (".zip", "application/zip")):
+        fname = f"archivio-helper-{version}{ext}"
+        for dist_dir in (_DIST, _DIST_DATA):
+            p = dist_dir / fname
+            if p.exists():
+                return FileResponse(p, media_type=media_type, filename=fname)
+    return JSONResponse({"error": "Kein Build vorhanden"}, status_code=404)
 
 
 @router.get("/download/server")

@@ -337,6 +337,11 @@ PKG_SCRIPTS=$(mktemp -d)
 
 mkdir -p "$PKG_ROOT/Applications"
 cp -r "$APP" "$PKG_ROOT/Applications/"
+# Weltweit lesbar/ausfuehrbar machen -- ohne das koennen andere (Nicht-Admin-)Accounts
+# auf demselben Mac die App zwar in /Applications SEHEN, aber nicht oeffnen, je
+# nachdem welche Rechte die Dateien auf dem Baurechner (eigener Dev-Account) hatten.
+# pkgbuild uebernimmt Rechte/Besitzer aus PKG_ROOT unveraendert in die Payload.
+chmod -R a+rX "$PKG_ROOT/Applications/$APP_NAME.app"
 
 cat > "$PKG_SCRIPTS/postinstall" <<'POSTINSTALL'
 #!/bin/bash
@@ -388,6 +393,16 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   <string>LOGDIRPLACEHOLDER/launchd-server.log</string>
   <key>StandardOutPath</key>
   <string>LOGDIRPLACEHOLDER/launchd-server.log</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <!-- launchd startet LaunchAgents mit einer minimalen Umgebung ohne LANG/LC_ALL --
+         ohne diese kann Python fuer stdout/stderr/Logs auf ASCII statt UTF-8
+         zurueckfallen (UnicodeEncodeError bei Umlauten in Datei-/Postfachnamen). -->
+    <key>PYTHONUTF8</key>
+    <string>1</string>
+    <key>PYTHONIOENCODING</key>
+    <string>utf-8</string>
+  </dict>
 </dict>
 </plist>
 PLISTEOF
@@ -422,6 +437,16 @@ else
   echo "⚠️  ARCHIVIO_SIGN_INSTALLER nicht gesetzt — .pkg bleibt unsigniert"
 fi
 
+# TODO: Ein rohes pkgbuild-Package ohne Distribution-XML kann Installer.app auf
+# manchen Macs "Nur für mich installieren" anbieten/waehlen lassen -- installiert
+# dann NICHT nach /Applications sondern user-lokal, unsichtbar fuer andere Accounts.
+# Eine productbuild+Distribution-XML-Loesung (rootVolumeOnly, enable_currentUserHome=
+# false) wuerde das zwingend unterbinden, siehe git-History dieser Datei -- aber
+# "Developer ID Installer"-Schluessel im System-Keychain ist aktuell nur fuer pkgbuild
+# freigegeben (Zugriffskontrolle), productbuild --sign schlaegt mit userCanceledErr
+# fehl (kein Dialog, sofortiger Abbruch). Sobald die Schluessel-ACL in Schluesselbund-
+# verwaltung angepasst ist (privaten Schluessel unter dem Zertifikat anklicken ->
+# Zugriffskontrolle -> "Allen Anwendungen erlauben"), auf productbuild umstellen.
 pkgbuild \
   --root "$PKG_ROOT" \
   --scripts "$PKG_SCRIPTS" \

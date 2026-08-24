@@ -71,6 +71,29 @@ def test_helper_info_reads_bundled_helper_version_file(tmp_path, monkeypatch):
     assert version == "3.1.11"
 
 
+def test_helper_info_prefers_pkg_over_zip(tmp_path, monkeypatch):
+    """Das PKG installiert systemweit nach /Applications (sichtbar fuer alle Nutzer
+    des Macs) -- bei gleicher Version muss es der ZIP vorgezogen werden, siehe
+    helper/build.sh."""
+    (tmp_path / "archivio-helper-3.1.15.zip").write_bytes(b"x")
+    (tmp_path / "archivio-helper-3.1.15.pkg").write_bytes(b"x")
+    helper_version_file = tmp_path / "HELPER_VERSION"
+    helper_version_file.write_text("3.1.15")
+
+    monkeypatch.setattr(dash, "_DIST", tmp_path)
+    monkeypatch.setattr(dash, "_DIST_DATA", tmp_path / "does-not-exist")
+    monkeypatch.setattr(dash, "_HELPER_VERSION_FILE", helper_version_file)
+
+    available, version = dash._helper_info()
+    assert available is True
+    assert version == "3.1.15"
+
+    c = TestClient(app)
+    r = c.get("/dashboard/download/helper")
+    assert r.status_code == 200
+    assert r.headers["content-disposition"].endswith('.pkg"')
+
+
 def test_helper_info_fallback_picks_highest_version_not_lexicographic(tmp_path, monkeypatch):
     """Regressionstest: 'archivio-helper-3.1.9.zip' sortiert alphabetisch NACH
     'archivio-helper-3.1.11.zip' (weil '9' > '1'), was den Download-Endpunkt lange

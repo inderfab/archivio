@@ -316,6 +316,16 @@
     </div>
 
     <div class="search-scope-row">
+      <div class="search-scope-group">
+        <span class="search-scope-label">Sortierung:</span>
+        <button type="button" class="scope-btn active" data-sort="datum_neu" onclick="setGallerySort('datum_neu')">Datum (neu zuerst)</button>
+        <button type="button" class="scope-btn" data-sort="datum_alt" onclick="setGallerySort('datum_alt')">Datum (alt zuerst)</button>
+        <button type="button" class="scope-btn" data-sort="name_az" onclick="setGallerySort('name_az')">Name A–Z</button>
+        <button type="button" class="scope-btn" data-sort="name_za" onclick="setGallerySort('name_za')">Name Z–A</button>
+      </div>
+    </div>
+
+    <div class="search-scope-row">
       <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
         <input type="checkbox" id="gallery-show-stars" checked onchange="toggleStarsVisibility()">
         Sterne ein-/ausblenden
@@ -323,9 +333,16 @@
     </div>
 
     <div class="search-scope-row">
-      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
-        <input type="checkbox" id="gallery-show-large-tiff" onchange="reloadGallery()">
-        Grosse Bilder als Platzhalter anzeigen
+      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2);">
+        Bilder anzeigen bis:
+        <select id="gallery-max-size" class="filter-input" style="width:auto; padding:4px 8px;" onchange="reloadGallery()">
+          <option value="5">5 MB</option>
+          <option value="10">10 MB</option>
+          <option value="15" selected>15 MB</option>
+          <option value="20">20 MB</option>
+          <option value="30">30 MB</option>
+          <option value="alle">Alle</option>
+        </select>
       </label>
     </div>
 
@@ -335,6 +352,7 @@
 
    </div>{# /gallery-filter-panel #}
     <input type="hidden" name="sterne" id="sterne_input" value="">
+    <input type="hidden" name="sort" id="gallery_sort_input" value="datum_neu">
   </div>
 
 </div>{# /search-form #}
@@ -378,6 +396,10 @@
 </div>
 
 <div id="tag-flyover" class="tag-flyover" style="display:none;">
+  <label class="tag-flyover-pin">
+    <input type="checkbox" id="tag-flyover-pin-checkbox" onchange="setTagFlyoverPinned(this.checked)">
+    Offen halten (Pfeiltasten ←/→ wechseln Foto)
+  </label>
   <div id="tag-flyover-current"></div>
   <input type="text" id="tag-flyover-input" placeholder="Tag eingeben…" autocomplete="off" oninput="onTagFlyoverInput()">
   <div id="tag-flyover-suggestions" class="tag-flyover-suggestions"></div>
@@ -810,10 +832,12 @@ function reloadGallery() {
   var formats  = activeFormats();
   var allFormats = document.querySelectorAll('.format-btn').length;
   var formate = formats.length === allFormats ? '' : formats.join(',');
-  var showLargeTiff = document.getElementById('gallery-show-large-tiff').checked ? '1' : '';
+  var maxSizeMb = document.getElementById('gallery-max-size').value;
+  var sort = document.getElementById('gallery_sort_input').value;
   var params = new URLSearchParams({
     project_id: pid, sterne: sterne, ordner: ordner, tag_id: tagId,
-    date_from: dateFrom, date_to: dateTo, formate: formate, show_large_tiff: showLargeTiff,
+    date_from: dateFrom, date_to: dateTo, formate: formate, max_size_mb: maxSizeMb,
+    sort: sort,
   });
   htmx.ajax('GET', '/galerie?' + params.toString(), { target: '#gallery-results', swap: 'innerHTML' });
 }
@@ -822,6 +846,14 @@ function setSterneFilter(v) {
   document.getElementById('sterne_input').value = v;
   document.querySelectorAll('#gallery-mode-block .scope-btn[data-sterne]').forEach(function(b) {
     b.classList.toggle('active', b.dataset.sterne === v);
+  });
+  reloadGallery();
+}
+
+function setGallerySort(v) {
+  document.getElementById('gallery_sort_input').value = v;
+  document.querySelectorAll('#gallery-mode-block .scope-btn[data-sort]').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.sort === v);
   });
   reloadGallery();
 }
@@ -911,6 +943,8 @@ function refreshTagFilterList() {
         return '<span class="tag-filter-item">'
           + '<button type="button" class="scope-btn" data-tag="' + t.id + '" '
           + 'onclick="setTagFilter(' + t.id + ')">' + escapeHtml(t.name) + '</button>'
+          + '<button type="button" class="tag-filter-rename" title="Tag umbenennen" '
+          + 'onclick="event.stopPropagation(); renameTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">✎</button>'
           + '<button type="button" class="tag-filter-delete" title="Tag komplett löschen" '
           + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
           + '</span>';
@@ -930,6 +964,27 @@ function deleteTagGlobally(tagId, name) {
     if (wasActiveGallery) { row.dataset.selected = ''; reloadGallery(); }
     if (wasActiveSearch) { setSearchTagFilter(''); }
   });
+}
+
+function renameTagGlobally(tagId, oldName) {
+  var name = prompt('Neuer Name für Tag „' + oldName + '“:', oldName);
+  if (name === null) return;
+  name = name.trim();
+  if (!name || name === oldName) return;
+  fetch('/tags/' + tagId + '/umbenennen', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name: name }),
+  }).then(function(r) { return r.json().then(function(d) { return { ok: r.ok, data: d }; }); })
+    .then(function(res) {
+      if (!res.ok || !res.data.ok) {
+        alert('Umbenennen fehlgeschlagen: ' + (res.data.error || 'unbekannter Fehler'));
+        return;
+      }
+      refreshTagFilterList();
+      refreshSearchTagFilterList();
+      if (tagFlyoverIsOpen()) refreshCurrentTagChips();
+    });
 }
 
 function filterTagChips() {
@@ -962,6 +1017,8 @@ function refreshSearchTagFilterList() {
         return '<span class="tag-filter-item">'
           + '<button type="button" class="scope-btn" data-tag="' + t.id + '" '
           + 'onclick="setSearchTagFilter(' + t.id + ')">' + escapeHtml(t.name) + '</button>'
+          + '<button type="button" class="tag-filter-rename" title="Tag umbenennen" '
+          + 'onclick="event.stopPropagation(); renameTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">✎</button>'
           + '<button type="button" class="tag-filter-delete" title="Tag komplett löschen" '
           + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
           + '</span>';
@@ -997,9 +1054,16 @@ function setSearchTagFilter(tagId) {
 // alle Fotos der aktuellen Mehrfachauswahl (Bulk-Tag).
 var tagFlyoverTargetIds = [];
 var _tagSuggestTimer    = null;
+var _tagSuggestIndex    = -1;
+var tagFlyoverPinned    = localStorage.getItem('archivio_tag_flyover_pinned') === '1';
 
 function tagFlyoverIsOpen() {
   return document.getElementById('tag-flyover').style.display !== 'none';
+}
+
+function setTagFlyoverPinned(pinned) {
+  tagFlyoverPinned = pinned;
+  localStorage.setItem('archivio_tag_flyover_pinned', pinned ? '1' : '0');
 }
 
 function openTagFlyover(target) {
@@ -1008,7 +1072,9 @@ function openTagFlyover(target) {
   if (!tagFlyoverTargetIds.length) return;
   var input = document.getElementById('tag-flyover-input');
   document.getElementById('tag-flyover').style.display = 'block';
+  document.getElementById('tag-flyover-pin-checkbox').checked = tagFlyoverPinned;
   input.value = '';
+  _tagSuggestIndex = -1;
   renderTagSuggestions([]);
   refreshCurrentTagChips();
   input.focus();
@@ -1058,6 +1124,7 @@ function removeTagFromTargets(tagId) {
 
 function onTagFlyoverInput() {
   clearTimeout(_tagSuggestTimer);
+  _tagSuggestIndex = -1;
   var q = document.getElementById('tag-flyover-input').value.trim();
   _tagSuggestTimer = setTimeout(function() {
     if (!q) { renderTagSuggestions([]); return; }
@@ -1078,6 +1145,19 @@ function renderTagSuggestions(tags, query) {
       + '+ Neuen Tag „' + escapeHtml(query) + '“ erstellen</div>';
   }
   document.getElementById('tag-flyover-suggestions').innerHTML = html;
+  _tagSuggestIndex = -1;
+}
+
+function _tagSuggestItems() {
+  return document.querySelectorAll('#tag-flyover-suggestions .tag-flyover-item');
+}
+
+function moveTagSuggestHighlight(delta) {
+  var items = _tagSuggestItems();
+  if (!items.length) return;
+  _tagSuggestIndex = ((_tagSuggestIndex + delta) % items.length + items.length) % items.length;
+  items.forEach(function(el, i) { el.classList.toggle('highlighted', i === _tagSuggestIndex); });
+  items[_tagSuggestIndex].scrollIntoView({ block: 'nearest' });
 }
 
 function pickTagSuggestion(name) {
@@ -1090,9 +1170,18 @@ function pickTagSuggestion(name) {
     });
   });
   Promise.all(requests).then(function() {
-    closeTagFlyover();
     refreshTagFilterList();
     refreshSearchTagFilterList();
+    if (tagFlyoverPinned) {
+      var input = document.getElementById('tag-flyover-input');
+      input.value = '';
+      _tagSuggestIndex = -1;
+      renderTagSuggestions([]);
+      refreshCurrentTagChips();
+      input.focus();
+    } else {
+      closeTagFlyover();
+    }
   });
 }
 
@@ -1100,9 +1189,21 @@ document.addEventListener('keydown', function(e) {
   if (!tagFlyoverIsOpen()) return;
   if (e.key === 'Escape') { closeTagFlyover(); e.preventDefault(); }
   else if (e.key === 'Enter') {
-    var q = document.getElementById('tag-flyover-input').value.trim();
-    if (q) pickTagSuggestion(q);
+    var items = _tagSuggestItems();
+    if (_tagSuggestIndex >= 0 && items[_tagSuggestIndex]) { items[_tagSuggestIndex].click(); }
+    else {
+      var q = document.getElementById('tag-flyover-input').value.trim();
+      if (q) pickTagSuggestion(q);
+    }
     e.preventDefault();
+  }
+  else if (e.key === 'ArrowDown') { moveTagSuggestHighlight(1); e.preventDefault(); }
+  else if (e.key === 'ArrowUp') { moveTagSuggestHighlight(-1); e.preventDefault(); }
+  else if (tagFlyoverPinned && loupeOpen && e.key === 'ArrowRight') {
+    loupeStep(1); openTagFlyover(loupeCurrentId); e.preventDefault();
+  }
+  else if (tagFlyoverPinned && loupeOpen && e.key === 'ArrowLeft') {
+    loupeStep(-1); openTagFlyover(loupeCurrentId); e.preventDefault();
   }
 });
 
@@ -1145,7 +1246,37 @@ function refreshGalleryPhotoIds() {
   );
 }
 
-document.body.addEventListener('htmx:afterSwap', function() { refreshGalleryPhotoIds(); });
+// Jede Seite (30 Fotos) bekommt serverseitig ihre eigenen Ordner-Gruppen -- bei
+// einem Ordner mit >30 Fotos erscheint der Ordnertitel dadurch ein zweites Mal
+// direkt unter sich selbst. Nach jedem Nachladen benachbarte Gruppen mit
+// identischem Titel zusammenfassen (Fotos in die erste verschieben, Rest entfernen).
+function mergeDuplicateGalleryGroups() {
+  var groups = document.querySelectorAll('#gallery-results .gallery-group');
+  var lastGrid = null, lastTitle = null;
+  groups.forEach(function(g) {
+    var titleEl = g.querySelector('.gallery-group-title');
+    var grid    = g.querySelector('.gallery-grid');
+    var title   = titleEl ? titleEl.textContent : '';
+    if (lastTitle !== null && title === lastTitle && lastGrid && grid) {
+      while (grid.firstChild) { lastGrid.appendChild(grid.firstChild); }
+      g.remove();
+    } else {
+      lastGrid = grid; lastTitle = title;
+    }
+  });
+}
+
+var _loupePendingStep = 0;
+
+document.body.addEventListener('htmx:afterSwap', function() {
+  mergeDuplicateGalleryGroups();
+  refreshGalleryPhotoIds();
+  if (_loupePendingStep) {
+    var d = _loupePendingStep;
+    _loupePendingStep = 0;
+    loupeStep(d);
+  }
+});
 
 function focusTile(id) {
   document.querySelectorAll('.photo-tile.focused').forEach(function(el) { el.classList.remove('focused'); });
@@ -1244,9 +1375,17 @@ function updateLoupeStars(rating) {
 function loupeStep(delta) {
   var idx = galleryPhotoIds.indexOf(loupeCurrentId);
   var next = idx + delta;
-  if (next < 0 || next >= galleryPhotoIds.length) return;
+  if (next < 0) return;
+  if (next >= galleryPhotoIds.length) {
+    // Naechste Seite ist evtl. noch nicht geladen (Sentinel wird im Vollbild nie
+    // sichtbar/gescrollt) -- Nachladen manuell anstossen, dann in afterSwap fortsetzen.
+    var sentinel = document.querySelector('#gallery-results .gallery-sentinel');
+    if (sentinel) { _loupePendingStep = delta; htmx.trigger(sentinel, 'revealed'); }
+    return;
+  }
   loupeCurrentId = galleryPhotoIds[next];
   renderLoupe();
+  if (tagFlyoverPinned && tagFlyoverIsOpen()) openTagFlyover(loupeCurrentId);
 }
 
 function isTypingInField() {

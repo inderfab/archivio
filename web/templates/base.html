@@ -741,6 +741,11 @@
     }
     .tag-flyover-item:hover { background: var(--bg-2); }
     .tag-flyover-item.create { color: #2563eb; font-weight: 500; }
+    .tag-flyover-item.highlighted { background: var(--accent); color: #fff; }
+    .tag-flyover-pin {
+      display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3);
+      cursor: pointer; margin-bottom: 8px;
+    }
 
     #tag-flyover-current:empty { margin: 0; }
     .tag-flyover-current-label {
@@ -760,14 +765,21 @@
     .tag-chip-remove:hover { color: #dc2626; background: #fee2e2; }
 
     .tag-filter-item { position: relative; display: inline-block; }
-    .tag-filter-item .scope-btn { padding-right: 22px; }
+    .tag-filter-item .scope-btn { padding-right: 38px; }
     .tag-filter-delete {
       position: absolute; top: 50%; right: 4px; transform: translateY(-50%);
       width: 14px; height: 14px; border-radius: 50%; background: #dc2626; color: #fff;
       border: none; font-size: 10px; line-height: 1; cursor: pointer; display: none;
       align-items: center; justify-content: center; padding: 0;
     }
-    .tag-filter-item:hover .tag-filter-delete { display: flex; }
+    .tag-filter-rename {
+      position: absolute; top: 50%; right: 20px; transform: translateY(-50%);
+      width: 14px; height: 14px; border-radius: 50%; background: var(--text-3); color: #fff;
+      border: none; font-size: 9px; line-height: 1; cursor: pointer; display: none;
+      align-items: center; justify-content: center; padding: 0;
+    }
+    .tag-filter-item:hover .tag-filter-delete,
+    .tag-filter-item:hover .tag-filter-rename { display: flex; }
 
     .loupe-overlay {
       position: fixed; inset: 0; background: rgba(0,0,0,.92);

@@ -6,6 +6,7 @@ nie ein Dateipfad als Client-Parameter.
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
@@ -14,7 +15,7 @@ from pydantic import BaseModel
 
 from db import connection, queries
 from web.shared import templates
-from web.thumbnails import ALL_GALLERY_EXTENSIONS, TIFF_EXTENSIONS, TIFF_MAX_BYTES, get_thumbnail_bytes
+from web.thumbnails import ALL_GALLERY_EXTENSIONS, get_thumbnail_bytes
 
 router = APIRouter()
 log = logging.getLogger(__name__)
@@ -119,24 +120,58 @@ def _tag_filter_sql(tag_id: str) -> tuple[str, list]:
     return " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)", [tid]
 
 
-def _large_tiff_filter_sql(show_large_tiff: bool) -> tuple[str, list]:
-    """Grosse TIFFs (kein Thumbnail möglich, siehe web/thumbnails.py TIFF_MAX_BYTES)
-    standardmässig aus dem Grid ausblenden statt als leeren Platzhalter zu zeigen --
-    per Filter-Toggle wieder einblendbar (dann weiterhin nur als Platzhalter, echte
-    Thumbnail-Generierung bleibt aus Performance-Gründen deaktiviert)."""
-    if show_large_tiff:
+_DATE_SORT_OPTIONS = {
+    "datum_neu": "COALESCE(json_extract(d.metadata, '$.photo_taken_at'), d.modified_at) DESC, d.id DESC",
+    "datum_alt": "COALESCE(json_extract(d.metadata, '$.photo_taken_at'), d.modified_at) ASC, d.id ASC",
+}
+_NAME_SORT_MODES = {"name_az", "name_za"}
+
+
+def _sort_order_sql(sort: str) -> str:
+    return _DATE_SORT_OPTIONS.get(sort, _DATE_SORT_OPTIONS["datum_neu"])
+
+
+_NATURAL_KEY_RE = re.compile(r"(\d+)")
+
+
+def _natural_sort_key(name: str) -> list:
+    """Numerische Abschnitte als Zahl vergleichen statt als Zeichenkette, damit
+    '10_c.jpg' NACH '2_b.jpg' einsortiert wird (nicht davor, wie es reines Text-
+    Sortieren tut -- '1' < '2' zeichenweise, aber '10' > '2' als Zahl). Entspricht
+    dem, was der macOS Finder als 'Name' anzeigt."""
+    parts = _NATURAL_KEY_RE.split(name.lower())
+    return [int(p) if p.isdigit() else p for p in parts]
+
+
+def _sort_photos_naturally(photos: list[dict], sort: str) -> list[dict]:
+    """Ordner-Gruppierung bleibt erhalten (Ordner selbst NICHT umgekehrt bei Z-A) --
+    nur die Dateien innerhalb eines Ordners werden auf-/absteigend sortiert. sorted()
+    ist stabil, daher zwei Durchgaenge: zuerst nach Dateiname (mit gewuenschter
+    Richtung), danach stabil nach Ordner -- die Dateireihenfolge aus Schritt 1 bleibt
+    innerhalb jedes Ordners erhalten."""
+    reverse = sort == "name_za"
+    by_name = sorted(photos, key=lambda p: _natural_sort_key(p["filename"]), reverse=reverse)
+    return sorted(by_name, key=lambda p: p["group"])
+
+
+def _size_filter_sql(max_size_mb: str) -> tuple[str, list]:
+    """Filtert Fotos über einer Grössenschwelle aus dem Grid aus -- gilt für ALLE
+    Formate (nicht nur TIFF), einstellbar per Dropdown (5/10/15/20/30 MB, 'alle').
+    Kein Zusammenhang mit web/thumbnails.py's technischer RENDER_MAX_BYTES-Grenze,
+    die unabhängig davon eine sehr grosszügige Obergrenze fürs Rendern selbst setzt."""
+    if not max_size_mb or max_size_mb == "alle":
         return "", []
-    placeholders = ",".join("?" * len(TIFF_EXTENSIONS))
-    return (
-        f" AND NOT (d.extension IN ({placeholders}) AND d.filesize > ?)",
-        list(TIFF_EXTENSIONS) + [TIFF_MAX_BYTES],
-    )
+    try:
+        max_bytes = int(max_size_mb) * 1024 * 1024
+    except ValueError:
+        return "", []
+    return " AND d.filesize <= ?", [max_bytes]
 
 
 def _fetch_photos(
     conn, project_id: str, sterne: str, offset: int, limit: int,
     date_from: str = "", date_to: str = "", formate: str = "", ordner: str = "",
-    tag_id: str = "", show_large_tiff: bool = False,
+    tag_id: str = "", max_size_mb: str = "15", sort: str = "datum_neu",
 ) -> list[dict]:
     pf_sql, pf_params = _project_filter_sql(project_id)
     rf_sql, rf_params = _rating_filter_sql(sterne)
@@ -144,7 +179,7 @@ def _fetch_photos(
     df_sql, df_params = _date_filter_sql(date_from, date_to)
     of_sql, of_params = _folder_filter_sql(project_id, ordner)
     tf_sql, tf_params = _tag_filter_sql(tag_id)
-    lt_sql, lt_params = _large_tiff_filter_sql(show_large_tiff)
+    lt_sql, lt_params = _size_filter_sql(max_size_mb)
     placeholders = ",".join("?" * len(_GALLERY_EXTS))
     sql = f"""
         SELECT d.id AS id, d.filename AS filename, d.extension AS extension,
@@ -163,12 +198,29 @@ def _fetch_photos(
         {of_sql}
         {tf_sql}
         {lt_sql}
-        ORDER BY COALESCE(json_extract(d.metadata, '$.photo_taken_at'), d.modified_at) DESC, d.id DESC
-        LIMIT ? OFFSET ?
+        {{ORDER_LIMIT}}
     """
     params = (list(_GALLERY_EXTS) + pf_params + rf_params + ff_params + df_params + of_params
-              + tf_params + lt_params + [limit, offset])
-    rows = conn.execute(sql, params).fetchall()
+              + tf_params + lt_params)
+
+    if sort in _NAME_SORT_MODES:
+        # Natuerliches Sortieren (1, 2, 10 statt 1, 10, 2) laesst sich nicht in
+        # SQLite-SQL ausdruecken -- deshalb ALLE gefilterten Treffer laden, in Python
+        # natuerlich sortieren, danach manuell die Seite ausschneiden. Foto-Galerien
+        # bleiben pro Projekt/Ordner klein genug (typischerweise Hunderte bis wenige
+        # Tausend), das ist unproblematisch.
+        full_sql = sql.format(ORDER_LIMIT="")
+        rows = conn.execute(full_sql, params).fetchall()
+        photos = []
+        for row in rows:
+            d = dict(row)
+            d["group"] = _parent_folder_name(d["path"]) if project_id else (d["project_name"] or "")
+            photos.append(d)
+        photos = _sort_photos_naturally(photos, sort)
+        return photos[offset:offset + limit]
+
+    full_sql = sql.format(ORDER_LIMIT=f"ORDER BY {_sort_order_sql(sort)} LIMIT ? OFFSET ?")
+    rows = conn.execute(full_sql, params + [limit, offset]).fetchall()
     photos = []
     for row in rows:
         d = dict(row)
@@ -192,7 +244,17 @@ def _fetch_folder_tags(conn, project_id: str) -> list[str]:
         {pf_sql}
     """
     rows = conn.execute(sql, list(_GALLERY_EXTS) + pf_params).fetchall()
-    tags = sorted({_parent_folder_name(r["path"]) for r in rows})
+    # Ordner koennen nach dem Scan geloescht worden sein (Datei-System-seitig) --
+    # ohne diesen Check taucht so ein Ordner fuer immer im Filter auf, obwohl er
+    # laengst weg ist (die DB entfernt verwaiste Dokumente nicht automatisch, siehe
+    # PROJEKT_STATUS.md -- absichtlich, um NAS-Aussetzer nicht als Datenverlust
+    # misszuverstehen). Pro DISTINCTEM Elternordner nur einmal pruefen statt pro Datei.
+    folder_paths = {str(Path(r["path"]).parent) for r in rows}
+    existing_folders = {fp for fp in folder_paths if Path(fp).exists()}
+    tags = sorted({
+        _parent_folder_name(r["path"]) for r in rows
+        if str(Path(r["path"]).parent) in existing_folders
+    })
     return tags
 
 
@@ -218,13 +280,14 @@ async def galerie(
     formate: str = Query(default=""),
     ordner: str = Query(default=""),
     tag_id: str = Query(default=""),
-    show_large_tiff: str = Query(default=""),
+    max_size_mb: str = Query(default="15"),
+    sort: str = Query(default="datum_neu"),
 ):
     conn = connection.get_connection()
     try:
         photos = _fetch_photos(conn, project_id, sterne, offset, PAGE_SIZE,
                                 date_from, date_to, formate, ordner, tag_id,
-                                bool(show_large_tiff))
+                                max_size_mb, sort)
     finally:
         conn.close()
     groups = _group_photos(photos)
@@ -240,7 +303,8 @@ async def galerie(
         "formate": formate,
         "ordner": ordner,
         "tag_id": tag_id,
-        "show_large_tiff": show_large_tiff,
+        "max_size_mb": max_size_mb,
+        "sort": sort,
         "is_empty": offset == 0 and not photos,
     })
 
@@ -407,6 +471,23 @@ async def foto_remove_tag(document_id: int, tag_id: int):
     finally:
         conn.close()
     return JSONResponse({"ok": True, "tags": tags})
+
+
+class RenameTagBody(BaseModel):
+    name: str
+
+
+@router.post("/tags/{tag_id}/umbenennen")
+async def rename_tag_globally(tag_id: int, body: RenameTagBody):
+    conn = connection.get_connection()
+    try:
+        ok = queries.rename_tag(conn, tag_id, body.name)
+    finally:
+        conn.close()
+    if not ok:
+        return JSONResponse(
+            {"ok": False, "error": "Name leer oder bereits vergeben"}, status_code=400)
+    return JSONResponse({"ok": True, "name": body.name.strip()})
 
 
 @router.delete("/tags/{tag_id}")

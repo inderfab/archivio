@@ -657,3 +657,51 @@ def resolve_discovery(found: list[tuple[str, int]]) -> tuple[str, str | None]:
 def thread_alert(title: str, message: str) -> None:
     msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
     subprocess.run(["osascript", "-e", f'display alert "{title}" message "{msg}"'], timeout=60)
+
+
+# ── Vollzugriff auf Festplatte (Full Disk Access) ─────────────────────────────
+# macOS verweigert TCC.db (die Systemdatenbank der Datenschutz-Freigaben selbst)
+# ohne "Vollzugriff auf Festplatte" -- Standardtechnik um FDA-Status ohne private
+# APIs zu pruefen. Programmatisch erteilen kann Apple bewusst niemand (Security-
+# Feature) -- wir koennen nur pruefen, hinweisen und die Systemeinstellungen oeffnen.
+_TCC_PROBE = Path("/Library/Application Support/com.apple.TCC/TCC.db")
+
+
+def has_full_disk_access() -> bool:
+    try:
+        with open(_TCC_PROBE, "rb") as f:
+            f.read(1)
+        return True
+    except (PermissionError, OSError):
+        return False
+
+
+def open_full_disk_access_settings() -> None:
+    subprocess.run(
+        ["open", "x-apple.systempreferences:com.apple.preference.security?Privacy_AllFiles"],
+        timeout=10,
+    )
+
+
+def show_full_disk_access_prompt(app_name: str) -> None:
+    """Zeigt eine blockierende Anleitung und oeffnet danach direkt das richtige
+    Systemeinstellungen-Panel. Wird beim Boot (fehlender Zugriff) und ueber den
+    manuellen Menu-Eintrag aufgerufen."""
+    message = (
+        f"{app_name} benoetigt 'Vollzugriff auf Festplatte', um Dateien auf externen "
+        f"Volumes (NAS) lesen zu koennen. Ohne diese Freigabe schlagen Scan und "
+        f"Dateizugriff fehl oder sind extrem langsam.\n\n"
+        f"Schritte:\n"
+        f"1. Systemeinstellungen -> Datenschutz & Sicherheit -> Vollzugriff auf Festplatte\n"
+        f"2. '{app_name}' aktivieren (Schloss ggf. entsperren)\n"
+        f"3. {app_name} bei Bedarf neu starten"
+    )
+    result = subprocess.run(
+        ["osascript", "-e",
+         f'display alert "Vollzugriff auf Festplatte fehlt" message '
+         f'"{message.replace(chr(92), chr(92)*2).replace(chr(34), chr(92)+chr(34))}" '
+         f'buttons {{"Später", "Systemeinstellungen öffnen"}} default button 2'],
+        timeout=120, capture_output=True, text=True,
+    )
+    if "Systemeinstellungen öffnen" in (result.stdout or ""):
+        open_full_disk_access_settings()
