@@ -7,7 +7,7 @@
 
 {# Schritt 3 oben: Antwort wird noch generiert — bleibt sichtbar bis Antwort kommt #}
 <div id="ai-answer-placeholder"
-  hx-get="/search/ai/answer?q={{ question | urlencode }}&project_id={{ project_id | urlencode }}"
+  hx-get="/search/ai/answer?q={{ question | urlencode }}&project_id={{ project_id | urlencode }}&type={{ type | urlencode }}"
   hx-trigger="load"
   hx-swap="outerHTML">
   <div class="ai-thinking" style="margin-bottom: 20px;">

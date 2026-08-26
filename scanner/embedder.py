@@ -129,8 +129,13 @@ def vector_search(
     query_vec: np.ndarray,
     project_id: str = "",
     limit: int = 8,
+    extra_filter_sql: str = "",
+    extra_filter_params: list | None = None,
 ) -> list[dict]:
-    """Findet die ähnlichsten Chunks per Cosine-Similarity."""
+    """Findet die ähnlichsten Chunks per Cosine-Similarity.
+    extra_filter_sql/extra_filter_params: zusätzliche SQL-Bedingung (z.B. Typ-Filter
+    "Nur Mail" aus der Such-UI) -- muss mit " AND ..." beginnen. Ohne das würde ein in
+    der Such-UI gesetzter Typ-Filter von der KI-Suche stillschweigend ignoriert."""
     base_sql = """
         SELECT dc.id, dc.document_id, dc.chunk_index, dc.content, dc.page_number,
                dc.embedding,
@@ -142,15 +147,16 @@ def vector_search(
         JOIN projects  p        ON p.id  = d.project_id
         LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         WHERE dc.embedding IS NOT NULL
-    """
+    """ + extra_filter_sql
+    extra_params = extra_filter_params or []
     if project_id:
         try:
             rows = conn.execute(base_sql + " AND d.project_id = ?",
-                                (int(project_id),)).fetchall()
+                                extra_params + [int(project_id)]).fetchall()
         except (ValueError, TypeError):
             rows = []
     else:
-        rows = conn.execute(base_sql).fetchall()
+        rows = conn.execute(base_sql, extra_params).fetchall()
 
     if not rows:
         return []
@@ -226,23 +232,28 @@ def keyword_search_chunks(
     query: str,
     project_id: str = "",
     limit: int = 4,
+    extra_filter_sql: str = "",
+    extra_filter_params: list | None = None,
 ) -> list[dict]:
     """Keyword-Suche in Chunks. Drei Strategien, nach Relevanz gemergt:
     1. FTS5 BM25 (primär, umlaut-sicher, gerankt)
     2. LIKE mit Umlaut-Normalisierung (fallback, umlaut-sicher)
     3. Heading-Suche (UPPERCASE-Term = SIA-Norm-Definitions-Überschrift, boost)
-    """
+
+    extra_filter_sql/extra_filter_params: zusätzliche SQL-Bedingung (z.B. Typ-Filter
+    "Nur Mail" aus der Such-UI) -- muss mit " AND ..." beginnen. Ohne das würde ein in
+    der Such-UI gesetzter Typ-Filter von der KI-Suche stillschweigend ignoriert."""
     import re
     words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in query.lower().split() if w]
     words = [w for w in words if len(w) > 2 and w not in _STOPWORDS]
     if not words:
         return []
 
-    proj_clause = ""
-    proj_params: list = []
+    proj_clause = extra_filter_sql
+    proj_params: list = list(extra_filter_params or [])
     if project_id:
         try:
-            proj_clause = "AND d.project_id = ?"
+            proj_clause += " AND d.project_id = ?"
             proj_params.append(int(project_id))
         except (ValueError, TypeError):
             pass

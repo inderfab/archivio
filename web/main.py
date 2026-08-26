@@ -141,7 +141,24 @@ app.include_router(gallery_router)
 
 # ── KI-Suche ──────────────────────────────────────────────────────────────────
 
-def _ai_vector_search(q: str, project_id: str):
+def _ai_type_filter_sql(doc_type: str) -> tuple[str, list]:
+    """Typ-Filter ("Mail", Formatkategorien, einzelne Extension) für die KI-Suche --
+    dieselbe Logik wie _build_filters() für die normale Suche. Ohne das ignorierte die
+    KI-Suche einen in der UI gesetzten Typ-Filter stillschweigend (Bug: Nutzer filterte
+    auf "Mail", KI-Suche durchsuchte trotzdem alle Dokumenttypen)."""
+    if not doc_type:
+        return "", []
+    if doc_type == "mail":
+        return " AND d.source_type = 'email'", []
+    if doc_type in _TYPE_CATEGORIES:
+        exts = _TYPE_CATEGORIES[doc_type]
+        placeholders = ",".join("?" * len(exts))
+        return f" AND d.extension IN ({placeholders})", list(exts)
+    ext = doc_type if doc_type.startswith(".") else f".{doc_type}"
+    return " AND d.extension = ?", [ext]
+
+
+def _ai_vector_search(q: str, project_id: str, doc_type: str = ""):
     """Gemeinsame Logik: Embeddings + Vektorsuche. Gibt (sources, error, ollama_missing) zurück.
     Läuft synchron — immer via run_in_executor aufrufen, nicht direkt aus async-Handler!
     """
@@ -151,14 +168,18 @@ def _ai_vector_search(q: str, project_id: str):
     if not status["ok"]:
         return None, status["reason"], status.get("ollama_missing", False)
 
+    type_sql, type_params = _ai_type_filter_sql(doc_type)
+
     conn = connection.get_connection()
     try:
         qvec = embed_query(q)
         if qvec is None:
             return None, "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?", False
 
-        kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=10)
-        vec_sources = vector_search(conn, qvec, project_id=project_id, limit=20)
+        kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=10,
+                                             extra_filter_sql=type_sql, extra_filter_params=type_params)
+        vec_sources = vector_search(conn, qvec, project_id=project_id, limit=20,
+                                     extra_filter_sql=type_sql, extra_filter_params=type_params)
         # Hybrid-Merge: Keyword zuerst (präziser), Vektor ergänzt
         seen_ids = {s["id"] for s in kw_sources}
         sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
@@ -212,6 +233,7 @@ async def search_ai(
     request:    Request,
     q:          str = Query(default=""),
     project_id: str = Query(default=""),
+    type:       str = Query(default=""),
 ):
     """Schritt 1 (schnell): Vektorsuche → Quellen sofort anzeigen. Antwort lädt separat nach."""
     if not q.strip():
@@ -220,7 +242,7 @@ async def search_ai(
     import asyncio
     loop = asyncio.get_event_loop()
     sources, error, ollama_missing = await loop.run_in_executor(
-        None, _ai_vector_search, q, project_id
+        None, _ai_vector_search, q, project_id, type
     )
 
     if error and sources is None:
@@ -233,6 +255,7 @@ async def search_ai(
         "request":    request,
         "question":   q,
         "project_id": project_id,
+        "type":       type,
         "sources":    sources or [],
         "error":      error,
     })
@@ -243,6 +266,7 @@ async def search_ai_answer(
     request:    Request,
     q:          str = Query(default=""),
     project_id: str = Query(default=""),
+    type:       str = Query(default=""),
 ):
     """Schritt 2 (langsam): LLM-Antwort generieren."""
     if not q.strip():
@@ -253,7 +277,7 @@ async def search_ai_answer(
 
     loop = asyncio.get_event_loop()
     sources, error, _ = await loop.run_in_executor(
-        None, _ai_vector_search, q, project_id
+        None, _ai_vector_search, q, project_id, type
     )
     if not sources:
         return HTMLResponse('<div class="ai-no-answer">Keine Antwort generiert — keine relevanten Quellen gefunden.</div>')
