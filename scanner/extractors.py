@@ -674,6 +674,7 @@ _REGISTRY: dict[str, callable] = {
     ".md":   extract_txt,
     ".pdf":  extract_pdf,
     ".docx": extract_docx,
+    ".dotx": extract_docx,  # Word-Vorlage -- strukturell dasselbe OOXML-Format wie .docx
     ".doc":  extract_doc,
     ".xlsx": extract_xlsx,
     ".eml":  extract_eml,

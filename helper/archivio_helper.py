@@ -152,8 +152,6 @@ class ArchivioHelper(rumps.App):
             "Autostart beim Login", callback=self.toggle_autostart)
         self._link_action_item = rumps.MenuItem(
             self._link_action_title(), callback=self.toggle_link_action)
-        self._link_direct_item = rumps.MenuItem(
-            "Archivio-Links ohne Bestätigung öffnen", callback=self.toggle_link_direct_open)
 
         self.menu = [
             self._title_item,
@@ -166,7 +164,6 @@ class ArchivioHelper(rumps.App):
             self._search_item,
             self._autostart_item,
             self._link_action_item,
-            self._link_direct_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen", callback=self.open_browser),
             rumps.separator,
@@ -180,13 +177,11 @@ class ArchivioHelper(rumps.App):
         # Oeffnen der App (dieser Code-Pfad hier) heilt ihn.
         bridge.repair_broken_autostart_entries("Archivio Helper", log)
         self._autostart_item.state = bridge.ensure_autostart_default(log, STATE_PATH)
-        self._link_direct_item.state = _load_config().get("link_direct_open", False)
 
         bridge.start_local_server(
             "Archivio Helper", log,
             config_provider=lambda: _load_config().get("server_url", ""),
             link_action_provider=lambda: _load_config().get("link_action", "open"),
-            direct_open_provider=lambda: bool(_load_config().get("link_direct_open", False)),
         )
         bridge.register_url_handler(log)
         bridge.ensure_mcp_registered("Archivio Helper", log)
@@ -371,18 +366,6 @@ class ArchivioHelper(rumps.App):
         cfg["link_action"] = new_action
         _save_config(cfg)
         sender.title = self._link_action_title()
-
-    def toggle_link_direct_open(self, sender):
-        """Schaltet um, ob /link (Quick-Action-Links) die Bestätigungsseite überspringt
-        und die Datei sofort öffnet/anzeigt. Bewusster Trade-off: reaktiviert das
-        Auto-Öffnen-Risiko (z.B. durch Mail-Linkvorschau), das die Bestätigungsseite
-        ursprünglich verhindern sollte -- deshalb standardmässig aus, pro Person selbst
-        aktivierbar."""
-        new_state = sender.state != 1
-        cfg = _load_config()
-        cfg["link_direct_open"] = new_state
-        _save_config(cfg)
-        sender.state = new_state
 
 
 if __name__ == "__main__":

@@ -1453,7 +1453,7 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
 
 
 _TEXT_EXTRACTABLE = (
-    ".pdf", ".docx", ".doc", ".xlsx", ".xls", ".xlsm",
+    ".pdf", ".docx", ".doc", ".dotx", ".xlsx", ".xls", ".xlsm",
     ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
 )
 

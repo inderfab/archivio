@@ -56,15 +56,27 @@ def handle_archivio_url(url_str: str, log) -> None:
         log.error("Fehler bei URL-Verarbeitung: %s", e)
 
 
-def _html_page(app_name: str, message: str, autoclose: bool) -> bytes:
+def _html_page(app_name: str, message: str, autoclose: bool,
+                title: str | None = None, description: str | None = None) -> bytes:
+    """title/description gesetzt: og:title/og:description mit Datei-/Ordnername statt
+    generischer app_name-Beschriftung -- fuer die Link-Vorschau in Mail/Messages beim
+    Einfuegen eines kopierten Archivio-Links (siehe /link in do_GET)."""
     close_script = (
         "<script>setTimeout(function(){ window.close(); }, 300);</script>"
         if autoclose
         else ""
     )
+    page_title = title or app_name
+    meta_tags = ""
+    if title:
+        meta_tags += f'<meta property="og:title" content="{title}">\n'
+        meta_tags += f'<meta property="og:site_name" content="{app_name}">\n'
+    if description:
+        meta_tags += f'<meta property="og:description" content="{description}">\n'
+        meta_tags += f'<meta name="description" content="{description}">\n'
     html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8"><title>{app_name}</title>
-<style>
+<html><head><meta charset="utf-8"><title>{page_title}</title>
+{meta_tags}<style>
   body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
           justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
   .box {{ text-align:center; }}
@@ -77,51 +89,17 @@ def _html_page(app_name: str, message: str, autoclose: bool) -> bytes:
     return html.encode("utf-8")
 
 
-def _link_landing_page(app_name: str, path: str, action: str) -> bytes:
-    """Zwischenseite fuer per Quick Action kopierte Archivio-Links: GET auf /link loest
-    NIE direkt eine Aktion aus (im Unterschied zu /open, /reveal) -- sonst reicht ein
-    Link-Preview/Unfurling der Ziel-App (z.B. Mail.app faengt beim Einfuegen automatisch
-    an, eine Vorschau des Links zu laden) um die Datei ungewollt zu oeffnen. Erst der
-    tatsaechliche Klick auf einen der Buttons hier loest /open bzw. /reveal aus -- ein
-    automatisierter Preview-Fetch klickt nichts.
-
-    Zeigt IMMER beide Optionen -- die im Menü eingestellte Präferenz (action) nur als
-    hervorgehobenen Primär-Button, die jeweils andere als sekundäre Option daneben."""
-    primary = action if action in ("open", "reveal") else "open"
-    secondary = "reveal" if primary == "open" else "open"
-    labels = {"open": "Datei öffnen", "reveal": "Im Finder zeigen"}
-    enc = quote(path, safe="")
-    filename = _html.escape(Path(path).name or path)
-    folder = _html.escape(str(Path(path).parent))
-    html = f"""<!DOCTYPE html>
-<html><head><meta charset="utf-8">
-<title>{filename}</title>
-<meta property="og:title" content="{filename}">
-<meta property="og:site_name" content="{app_name}">
-<meta property="og:description" content="{folder}">
-<meta name="description" content="{folder}">
-<style>
-  body {{ font-family: -apple-system, sans-serif; display:flex; align-items:center;
-          justify-content:center; height:100vh; margin:0; background:#f5f5f5; color:#333; }}
-  .box {{ text-align:center; }}
-  .path {{ color:#888; font-size:12px; margin-bottom:16px; word-break:break-all; max-width:400px; }}
-  .actions {{ display:flex; gap:10px; justify-content:center; }}
-  a.btn {{ display:inline-block; padding:10px 22px; background:#2563eb; color:#fff;
-           text-decoration:none; border-radius:6px; font-size:14px; }}
-  a.btn-secondary {{ display:inline-block; padding:10px 22px; background:#fff; color:#2563eb;
-                      border:1px solid #2563eb; text-decoration:none; border-radius:6px;
-                      font-size:14px; }}
-  .hint {{ color:#999; font-size:11px; margin-top:18px; max-width:340px; }}
-</style></head>
-<body><div class="box">
-<div class="path">{_html.escape(path)}</div>
-<div class="actions">
-<a class="btn" href="/{primary}?path={enc}">{labels[primary]}</a>
-<a class="btn-secondary" href="/{secondary}?path={enc}">{labels[secondary]}</a>
-</div>
-<div class="hint">Tipp: In der Menüleiste unter {app_name} lässt sich „Archivio-Links ohne Bestätigung öffnen" aktivieren, um diese Seite künftig zu überspringen.</div>
-</div></body></html>"""
-    return html.encode("utf-8")
+def _looks_like_real_browser(user_agent: str) -> bool:
+    """Heuristik um einen echten Browser-Klick von einem automatisierten Link-
+    Vorschau-Abruf (Mail/Messages LPLinkView, Slack/Discord-Unfurling, etc.) zu
+    unterscheiden. Echte Browser haengen IMMER einen Produkt-Token wie "Safari/",
+    "Chrome/", "Firefox/" an ihren User-Agent -- reine Metadaten-Fetcher (auch wenn
+    sie intern WebKit fuer JS-Rendering nutzen) tun das i.d.R. nicht, weil sie sich
+    nicht als Browser ausgeben wollen/muessen. Kein 100%-sicheres Signal, aber der
+    Standardansatz gegen genau dieses Problem (siehe z.B. wie Websites Slack-/
+    Twitter-/Facebook-Unfurling-Bots erkennen)."""
+    ua = (user_agent or "").lower()
+    return any(marker in ua for marker in ("safari/", "chrome/", "firefox/", "edg/", "opr/"))
 
 
 def _unique_dest(dest_dir: Path, filename: str) -> Path:
@@ -139,20 +117,18 @@ def _unique_dest(dest_dir: Path, filename: str) -> Path:
         i += 1
 
 
-def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None,
-                             direct_open_provider=None):
+def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None):
     """config_provider: optionales Callable[[], str], das server_url für den
     /config-Endpoint liefert. Helper übergibt einen Reader auf sein config.json,
     Server übergibt einen fest verdrahteten "http://127.0.0.1:8000" (dieselbe Adresse,
     die server_app.py an anderen Stellen bereits hardcoded verwendet).
-    link_action_provider: optionales Callable[[], str] ("open"/"reveal"), liefert das
-    im Menü eingestellte Standardverhalten für /link (Quick-Action-Links).
-    direct_open_provider: optionales Callable[[], bool] -- ist es True, überspringt /link
-    die Bestätigungsseite und führt die Aktion sofort aus (Menü-Option "Archivio-Links
-    ohne Bestätigung öffnen"). Bewusster Trade-off: reaktiviert das Risiko, das die
-    Bestätigungsseite ursprünglich verhindern sollte (automatisches Öffnen durch
-    Link-Vorschau z.B. in Mail.app) -- daher standardmässig aus, pro Person einzeln
-    aktivierbar."""
+    link_action_provider: optionales Callable[[], str] ("open"/"reveal") -- wird bei
+    JEDEM /link-Aufruf frisch ausgewertet und liest damit immer die AKTUELLE Menü-
+    Einstellung der Person, die gerade klickt (nicht die der Person, die den Link
+    ursprünglich kopiert hat). /link führt die Aktion sofort aus, keine Zwischenseite/
+    Bestätigung -- die Datei-/Ordnernamen-Meta-Tags in der Antwort sorgen dafür, dass
+    Mail/Messages beim Einfügen trotzdem eine Vorschau mit korrektem Namen zeigen
+    können, ohne dass dafür ein zusätzlicher Klick nötig wäre."""
 
     class _LocalHTTPHandler(http.server.BaseHTTPRequestHandler):
         def do_OPTIONS(self):
@@ -219,11 +195,23 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
             path = unquote(params.get("path", [""])[0])
 
             if parsed.path == "/link" and path:
-                action = link_action_provider() if link_action_provider else "open"
-                if direct_open_provider and direct_open_provider():
+                ua = self.headers.get("User-Agent", "")
+                if _looks_like_real_browser(ua):
+                    action = link_action_provider() if link_action_provider else "open"
                     self._perform(action, path)
                 else:
-                    self._cors_headers(200, _link_landing_page(app_name, path, action), "text/html; charset=utf-8")
+                    # Vermutlich ein automatisierter Link-Vorschau-Abruf (Mail/Messages
+                    # unfurling beim Einfuegen) statt eines echten Klicks -- KEINE Aktion
+                    # ausloesen, nur die og:title-getaggte Seite fuer die Vorschau liefern.
+                    # Header mitloggen: falls die UA-Heuristik hier mal daneben liegt,
+                    # sehen wir aus dem Log, woran sich Mails Abrufer sonst erkennen liesse.
+                    log.info("/link ohne Browser-UA (evtl. Link-Vorschau): UA=%r headers=%s",
+                             ua, dict(self.headers))
+                    filename = _html.escape(Path(path).name or path)
+                    folder = _html.escape(str(Path(path).parent))
+                    enc = quote(path, safe="")
+                    fallback = f'<a href="/link?path={enc}">{filename} öffnen</a>'
+                    self._html_response(200, fallback, autoclose=False, title=filename, description=folder)
             elif parsed.path == "/open" and path:
                 self._perform("open", path)
             elif parsed.path == "/reveal" and path:
@@ -240,13 +228,17 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 self._cors_headers(404)
 
         def _perform(self, action, path):
-            """Führt /open bzw. /reveal aus -- gemeinsam genutzt von den direkten
-            Routen UND von /link, wenn direct_open_provider aktiv ist."""
+            """Führt /open bzw. /reveal aus. Titel/Beschreibung der Antwortseite tragen
+            Datei-/Ordnername -- fuer die Link-Vorschau in Mail/Messages beim Einfuegen
+            (og:title statt generischem app_name), ohne dass dafuer ein Zwischenschritt
+            noetig waere."""
+            filename = _html.escape(Path(path).name or path)
+            folder = _html.escape(str(Path(path).parent))
             if action == "reveal":
                 p = Path(path)
                 if p.exists():
                     subprocess.run(["open", "-R", str(p)], timeout=5)
-                    self._html_response(200, "✓ Im Finder angezeigt")
+                    self._html_response(200, "✓ Im Finder angezeigt", title=filename, description=folder)
                 else:
                     self._not_found(path)
             else:
@@ -257,7 +249,7 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                     p = Path(path)
                     if p.exists():
                         subprocess.run(["open", str(p)], timeout=5)
-                        self._html_response(200, "✓ Wird geöffnet …")
+                        self._html_response(200, "✓ Wird geöffnet …", title=filename, description=folder)
                     else:
                         self._not_found(path)
 
@@ -265,8 +257,10 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
             log.warning("Datei nicht gefunden: %s", path)
             self._html_response(404, f"⚠ Datei nicht gefunden: {path}", autoclose=False)
 
-        def _html_response(self, code, message, autoclose=True):
-            self._cors_headers(code, _html_page(app_name, message, autoclose), "text/html; charset=utf-8")
+        def _html_response(self, code, message, autoclose=True, title=None, description=None):
+            self._cors_headers(
+                code, _html_page(app_name, message, autoclose, title, description),
+                "text/html; charset=utf-8")
 
         def _cors_headers(self, code, body=None, content_type="text/plain"):
             self.send_response(code)
@@ -282,10 +276,8 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
     return _LocalHTTPHandler
 
 
-def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None,
-                        direct_open_provider=None) -> None:
-    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider,
-                                           direct_open_provider)
+def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None) -> None:
+    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider)
     try:
         srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), handler_cls)
         threading.Thread(target=srv.serve_forever, daemon=True).start()

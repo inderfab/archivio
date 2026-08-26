@@ -630,8 +630,11 @@ _TYPE_CATEGORIES: dict[str, list[str]] = {
     "cat:adobe":     [".psd", ".ai", ".indd"],
     "cat:video":     [".mp4", ".mov", ".avi", ".mkv", ".m4v", ".wmv",
                       ".mp3", ".wav", ".aac", ".m4a", ".flac"],
-    "cat:dokumente": [".pdf", ".docx", ".doc", ".xlsx", ".xls", ".xlsm",
+    "cat:dokumente": [".pdf", ".docx", ".doc", ".dotx", ".xlsx", ".xls", ".xlsm",
                       ".pptx", ".ppt", ".txt", ".rtf", ".csv", ".eml", ".msg"],
+    # .dotx (Word-Vorlage) ist strukturell dasselbe OOXML-Format wie .docx -- gehoert
+    # in denselben Filter, damit Vorlagen beim Filtern nach "Word (DOCX)" mit auftauchen.
+    ".docx":         [".docx", ".dotx"],
 }
 
 
