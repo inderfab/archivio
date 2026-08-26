@@ -448,6 +448,7 @@ def scan_project(project_id: int, root: Path,
     skip_conn = connection.get_connection()
 
     found_any = False
+    scanned_paths: set[str] = set()
     try:
         for dirpath, dirnames, filenames in os.walk(root):
             dirnames[:] = [
@@ -478,6 +479,7 @@ def scan_project(project_id: int, root: Path,
 
             for filename in dir_processable:
                 path = Path(dirpath) / filename
+                scanned_paths.add(str(path))
 
                 if cancel_flag and cancel_flag.get("cancel"):
                     log.info("Scan abgebrochen.")
@@ -652,6 +654,18 @@ def scan_project(project_id: int, root: Path,
         except Exception:
             pass
 
+    # Nur erreicht wenn der Ordnerbaum VOLLSTÄNDIG durchlaufen wurde (jedes obige
+    # return -- Cancel, Stall-Abbruch, Pfad nicht lesbar -- verlässt die Funktion
+    # vorher). Erst dann wissen wir sicher, dass ein in der DB fehlender Pfad
+    # wirklich gelöscht wurde und nicht nur wegen eines kurzzeitig nicht
+    # erreichbaren NAS im Walk gefehlt hat.
+    try:
+        removed = _cleanup_missing_files(project_id, root, scanned_paths)
+        if progress is not None and removed:
+            progress["removed"] = removed
+    except Exception as exc:
+        log.warning("Aufräumen gelöschter Dateien fehlgeschlagen: %s", exc)
+
     # FTS5-Automerge wieder aktivieren (billig). Das teure optimize() wird NICHT
     # hier angestossen — es hielte eine Schreibsperre, die bei "Alle scannen" die
     # Inserts des nächsten Projekts blockiert (database is locked → 0 Dokumente).
@@ -664,6 +678,65 @@ def scan_project(project_id: int, root: Path,
         c.close()
     except Exception as exc:
         log.warning("FTS5 automerge-Reset fehlgeschlagen: %s", exc)
+
+
+def _cleanup_missing_files(project_id: int, root: Path, scanned_paths: set[str]) -> int:
+    """Entfernt Dokument-Pfade, deren Datei bei diesem VOLLSTÄNDIGEN Scan von `root`
+    nicht mehr gefunden wurde (z.B. gelöschte Duplikate wie "xx(1).jpg"). Nur DB-
+    Einträge werden angefasst -- die READ-ONLY-Policy oben gilt für die NAS-Dateien,
+    nicht für die eigene SQLite-Datenbank.
+
+    Ein Dokument wird nur komplett gelöscht (inkl. Tags/Bewertungen per ON DELETE
+    CASCADE), wenn KEIN Pfad mehr übrig bleibt -- hat es noch einen gültigen Pfad
+    woanders (z.B. eine Kopie in einem anderen Ordner), bleibt es erhalten und nur
+    der verwaiste Pfad verschwindet. War der verwaiste Pfad der primäre, wird ein
+    verbleibender Pfad zum neuen primären befördert.
+
+    Wird bewusst NUR aufgerufen, wenn scan_project() den GESAMTEN Ordnerbaum ohne
+    Cancel/Stall-Abbruch durchlaufen hat (siehe Aufrufstelle) -- sonst könnte ein
+    zeitweise nicht erreichbares NAS fälschlich als "Dateien gelöscht" interpretiert
+    werden und Tags/Bewertungen unwiederbringlich verloren gehen."""
+    from web.thumbnails import clear_cache_for_hash
+
+    root_str = str(root)
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT dp.id, dp.document_id, dp.path, dp.is_primary "
+            "FROM document_paths dp JOIN documents d ON d.id = dp.document_id "
+            "WHERE d.project_id = ? AND (dp.path = ? OR dp.path LIKE ?)",
+            (project_id, root_str, root_str.rstrip("/") + "/%"),
+        ).fetchall()
+        stale = [r for r in rows if r["path"] not in scanned_paths]
+        if not stale:
+            return 0
+
+        removed_docs = 0
+        with conn:
+            for row in stale:
+                conn.execute("DELETE FROM document_paths WHERE id = ?", (row["id"],))
+                remaining = conn.execute(
+                    "SELECT id FROM document_paths WHERE document_id = ?", (row["document_id"],)
+                ).fetchall()
+                if not remaining:
+                    doc_hash = conn.execute(
+                        "SELECT hash FROM documents WHERE id = ?", (row["document_id"],)
+                    ).fetchone()
+                    conn.execute("DELETE FROM documents WHERE id = ?", (row["document_id"],))
+                    removed_docs += 1
+                    if doc_hash:
+                        clear_cache_for_hash(doc_hash["hash"])
+                elif row["is_primary"]:
+                    conn.execute(
+                        "UPDATE document_paths SET is_primary = 1 WHERE id = ?",
+                        (remaining[0]["id"],),
+                    )
+        if removed_docs or stale:
+            log.info("Aufräumen %s: %d verwaiste Pfad(e), %d Dokument(e) entfernt",
+                      root, len(stale), removed_docs)
+        return removed_docs
+    finally:
+        conn.close()
 
 
 def optimize_fts() -> None:
