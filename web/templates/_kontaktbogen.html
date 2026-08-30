@@ -20,7 +20,9 @@
     background: #111827; color: #fff; border: none; border-radius: 6px;
     padding: 8px 16px; font-size: 13px; font-family: inherit; cursor: pointer;
   }
-  .kb-grid { display: grid; grid-template-columns: repeat(4, 1fr); gap: 16px; }
+  .kb-grid { display: grid; grid-template-columns: repeat(var(--kb-cols, 4), 1fr); gap: 16px; }
+  .kb-columns { display: flex; align-items: center; gap: 6px; font-size: 12px; color: #374151; }
+  .kb-columns select { font-size: 12px; font-family: inherit; padding: 3px 6px; border: 1px solid #d1d5db; border-radius: 4px; }
   .kb-item { break-inside: avoid; }
   .kb-item img {
     width: 100%; border-radius: 4px; display: block; background: #f3f4f6;
@@ -52,6 +54,14 @@
         <input type="checkbox" id="kb-show-filenames" checked onchange="toggleKbFilenames()">
         Dateinamen einblenden
       </label>
+      <label class="kb-columns">
+        Nebeneinander:
+        <select id="kb-columns" onchange="setKbColumns(this.value)">
+          {% for n in range(1, 7) %}
+          <option value="{{ n }}" {{ 'selected' if n == 4 else '' }}>{{ n }}</option>
+          {% endfor %}
+        </select>
+      </label>
       <button class="kb-print-btn" onclick="window.print()">Als PDF drucken</button>
     </div>
   </div>
@@ -82,6 +92,10 @@
 
     function toggleKbFilenames() {
       document.body.classList.toggle('kb-hide-filenames', !document.getElementById('kb-show-filenames').checked);
+    }
+
+    function setKbColumns(n) {
+      document.documentElement.style.setProperty('--kb-cols', n);
     }
   </script>
 </body>

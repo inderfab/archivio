@@ -2,14 +2,20 @@
 {% block title %}Archivio – Suche{% endblock %}
 
 {% block content %}
+<div id="missed-scan-banner" class="missed-scan-banner" style="display:none;">
+  <span id="missed-scan-text"></span>
+  <div class="missed-scan-actions">
+    <button type="button" class="btn btn-sm" onclick="runMissedScanNow()">Jetzt scannen</button>
+    <button type="button" class="missed-scan-close" onclick="dismissMissedScanBanner()" aria-label="Schliessen">×</button>
+  </div>
+</div>
 <div id="search-form">
 
-  <div class="mode-switch">
-    <button type="button" class="mode-btn active" id="mode-btn-search" onclick="switchMode('search')">Suche</button>
-    <button type="button" class="mode-btn" id="mode-btn-gallery" onclick="switchMode('gallery')">Galerie</button>
-  </div>
-
-  <div class="shared-filter-row" style="display:flex; align-items:center; gap:8px; max-width:none;">
+  <div class="header-row">
+    <div class="mode-switch">
+      <button type="button" class="mode-btn active" id="mode-btn-search" onclick="switchMode('search')">Suche</button>
+      <button type="button" class="mode-btn" id="mode-btn-gallery" onclick="switchMode('gallery')">Fotos</button>
+    </div>
     <select name="project_id" id="project_id_select" style="max-width:320px;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
@@ -37,11 +43,8 @@
       </optgroup>
       {% endif %}
     </select>
-    <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
-      style="display:none;" onclick="toggleGalleryFilterPanel()">Filter</button>
-    <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn"
-      style="display:none;" onclick="selectAllVisible()">Alle sichtbaren auswählen</button>
-  </div>
+  </div>{# /header-row -- bleibt in Suche wie Fotos identisch, damit beim Moduswechsel
+             nichts (Logo, Umschalter, Projektauswahl) die Position wechselt #}
 
   <div id="search-mode-block">
 
@@ -52,24 +55,21 @@
       hx-get="/search" hx-trigger="input changed delay:300ms, search"
       hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
 
-    <label class="ai-toggle-wrap" title="Zwischen normaler Suche und KI-Suche wechseln">
-      <span class="ai-toggle-label ai-toggle-left">Suche</span>
-      <span class="ai-toggle-track">
-        <input type="checkbox" id="ai-toggle" style="display:none"
-          onchange="switchSearchMode(this.checked)">
-        <span class="ai-toggle-thumb"></span>
-      </span>
-      <span class="ai-toggle-label ai-toggle-right">KI-Suche <span style="font-size:10px; color:var(--text-3); font-weight:400;">(experimentell)</span></span>
-    </label>
+    <div class="ai-toggle-wrap" role="group" aria-label="Suchmodus">
+      <button type="button" class="ai-toggle-btn active" id="mode-volltext-btn"
+        onclick="switchSearchMode(false)">Volltext</button>
+      <button type="button" class="ai-toggle-btn" id="mode-ki-btn"
+        title="Experimentell" onclick="switchSearchMode(true)">KI-Suche</button>
+    </div>
   </div>
 
-  {# ── Basis-Filter ── #}
-  <div class="filters-basic">
-    <select name="type"
+  {# ── Typ-Filter + Filter-Button (Row 3 -- gleiche Struktur wie bei Fotos) ── #}
+  <div class="search-scope-row">
+    <select name="type" class="type-select"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
       onchange="updateChips()">
-      <option value="">Alle Typen</option>
+      <option value="">Alle Dateiformate</option>
       <optgroup label="── Kategorien ──">
         <option value="mail">✉ Mail</option>
         <option value="cat:dokumente">Dokumente (alle)</option>
@@ -144,107 +144,104 @@
         <option value=".xml">XML</option>
       </optgroup>
     </select>
-  </div>
 
-  {# ── Scope-Buttons + Mehr Filter ── #}
-  <div class="search-scope-row">
-    <div class="search-scope-group">
-      <span class="search-scope-label">Suche in:</span>
-      <button type="button" class="scope-btn active" id="scope-docs" onclick="toggleScope('docs')">Dokumente</button>
-      <button type="button" class="scope-btn active" id="scope-folders" onclick="toggleScope('folders')">Ordnernamen</button>
-      <button type="button" class="scope-btn active" id="scope-filenames" onclick="toggleScope('filenames')">Dateinamen</button>
-      <span style="color:var(--border);margin:0 2px;">|</span>
-      <button type="button" class="scope-btn" id="scope-plans" onclick="toggleScope('plans')" title="Nur Pläne aus ArchiCAD/Vectorworks">Pläne</button>
-    </div>
     <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
-      onclick="toggleMehrFilter()">⚙ Mehr Filter</button>
+      aria-expanded="false" aria-controls="mehr-filter-panel"
+      onclick="toggleMehrFilter()">⚙ Filter</button>
   </div>
-  <input type="hidden" name="search_in" id="search_in_input" value="docs,filenames,folders">
+  <input type="hidden" name="search_in" id="search_in_input" value="">
+  <input type="hidden" name="scope" id="result_scope_input" value="">
 
   <div id="mehr-filter-panel" class="mehr-filter-panel" style="display:none;">
 
-    <div class="filter-section">
-      <div class="filter-section-title">Mail-Filter</div>
-      <div class="filter-row-2">
-        <div>
-          <label class="filter-label">Von (Absender)</label>
-          <input type="text" name="from_addr" class="filter-input"
-            placeholder="Absender-Adresse"
-            hx-get="/search" hx-trigger="input changed delay:400ms"
-            hx-target="#results" hx-include="#search-form"
-            oninput="scheduleChipUpdate()">
-        </div>
-        <div>
-          <label class="filter-label">An / CC (Empfänger)</label>
-          <input type="text" name="to_addr" class="filter-input"
-            placeholder="Empfänger-Adresse"
-            hx-get="/search" hx-trigger="input changed delay:400ms"
-            hx-target="#results" hx-include="#search-form"
-            oninput="scheduleChipUpdate()">
-        </div>
+    <div class="search-scope-row" style="padding-top:0;">
+      <span class="search-scope-label">Suche in:</span>
+      <div class="segmented-control" role="radiogroup" aria-label="Suche in" id="search-in-group"
+        onkeydown="searchInKeydown(event)">
+        <button type="button" class="segmented-btn active" role="radio" aria-checked="true"
+          data-search-in="" tabindex="0" onclick="setSearchInScope('')">Alle</button>
+        <button type="button" class="segmented-btn" role="radio" aria-checked="false"
+          data-search-in="docs" tabindex="-1" onclick="setSearchInScope('docs')">Dokumente</button>
+        <button type="button" class="segmented-btn" role="radio" aria-checked="false"
+          data-search-in="folders" tabindex="-1" onclick="setSearchInScope('folders')">Ordnernamen</button>
+        <button type="button" class="segmented-btn" role="radio" aria-checked="false"
+          data-search-in="filenames" tabindex="-1" onclick="setSearchInScope('filenames')">Dateinamen</button>
       </div>
-      <div>
-        <label class="filter-label">Betreff enthält</label>
-        <input type="text" name="subject_filter" class="filter-input"
-          placeholder="z.B. Baubeschrieb"
+    </div>
+
+    <div class="search-scope-row" style="padding-top:0;">
+      <span class="search-scope-label">Umfang:</span>
+      <div class="segmented-control" role="radiogroup" aria-label="Ergebnis-Umfang" id="result-scope-group"
+        onkeydown="resultScopeKeydown(event)">
+        <button type="button" class="segmented-btn active" role="radio" aria-checked="true"
+          data-scope="" tabindex="0" onclick="setResultScope('')">Alle</button>
+        <button type="button" class="segmented-btn" role="radio" aria-checked="false"
+          data-scope="plans" tabindex="-1" title="Nur Pläne aus ArchiCAD/Vectorworks"
+          onclick="setResultScope('plans')">Nur Pläne</button>
+        <button type="button" class="segmented-btn" role="radio" aria-checked="false"
+          data-scope="norms" tabindex="-1" title="Nur Dokumente, die als technische Norm klassifiziert sind"
+          onclick="setResultScope('norms')">Nur Normen</button>
+      </div>
+    </div>
+
+    <div class="field-grid-2 gap-top">
+      <div class="field">
+        <span class="field-prefix" aria-hidden="true">Von</span>
+        <input type="text" name="from_addr" placeholder="Absender-Adresse" aria-label="Von (Absender)"
+          hx-get="/search" hx-trigger="input changed delay:400ms"
+          hx-target="#results" hx-include="#search-form"
+          oninput="scheduleChipUpdate()">
+      </div>
+      <div class="field">
+        <span class="field-prefix" aria-hidden="true">An/CC</span>
+        <input type="text" name="to_addr" placeholder="Empfänger-Adresse" aria-label="An / CC (Empfänger)"
           hx-get="/search" hx-trigger="input changed delay:400ms"
           hx-target="#results" hx-include="#search-form"
           oninput="scheduleChipUpdate()">
       </div>
     </div>
-
-    <div class="filter-section">
-      <div class="filter-section-title">Datei-Filter</div>
-      <div class="filter-row-2">
-        <div>
-          <label class="filter-label">Datumsbereich</label>
-          <div style="display:flex; gap:8px; align-items:center;">
-            <input type="date" name="date_from" class="filter-input"
-              hx-get="/search" hx-trigger="change"
-              hx-target="#results" hx-include="#search-form"
-              onchange="updateChips()">
-            <span style="color:var(--text-3); font-size:12px; flex-shrink:0;">bis</span>
-            <input type="date" name="date_to" class="filter-input"
-              hx-get="/search" hx-trigger="change"
-              hx-target="#results" hx-include="#search-form"
-              onchange="updateChips()">
-          </div>
-        </div>
-        <div>
-          <label class="filter-label">Dateigrösse</label>
-          <select name="filesize" class="filter-input"
-            hx-get="/search" hx-trigger="change"
-            hx-target="#results" hx-include="#search-form"
-            onchange="updateChips()">
-            <option value="">Beliebig</option>
-            <option value="1">über 1 MB</option>
-            <option value="10">über 10 MB</option>
-            <option value="100">über 100 MB</option>
-          </select>
-        </div>
-      </div>
-      <div style="margin-top:4px;">
-        <label class="filter-label">Nur Dubletten</label>
-        <select name="duplicates_only" class="filter-input" style="width:auto;"
-          hx-get="/search" hx-trigger="change"
-          hx-target="#results" hx-include="#search-form"
-          onchange="updateChips()">
-          <option value="">Alle Dateien</option>
-          <option value="1">Nur Dubletten</option>
-        </select>
-      </div>
+    <div class="field" style="margin-top:10px;">
+      <span class="field-prefix" aria-hidden="true">Betreff</span>
+      <input type="text" name="subject_filter" placeholder="z.B. Baubeschrieb" aria-label="Betreff enthält"
+        hx-get="/search" hx-trigger="input changed delay:400ms"
+        hx-target="#results" hx-include="#search-form"
+        oninput="scheduleChipUpdate()">
     </div>
 
-    <div class="filter-section">
-      <div class="filter-section-title">Tags</div>
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-        <button type="button" class="scope-btn active" data-tag="" onclick="setSearchTagFilter('')">Alle</button>
-        <input type="text" id="search-tag-search" class="filter-input" style="width:220px;"
-          placeholder="Tags filtern…" oninput="filterSearchTagChips()">
-        <span id="search-tag-count" style="font-size:11px; color:var(--text-3);"></span>
+    <div class="field gap-top">
+      <span class="field-prefix" aria-hidden="true">Datum</span>
+      <input type="date" name="date_from" aria-label="Datum von"
+        hx-get="/search" hx-trigger="change"
+        hx-target="#results" hx-include="#search-form"
+        onchange="updateChips()">
+      <span class="field-date-sep" aria-hidden="true">bis</span>
+      <input type="date" name="date_to" aria-label="Datum bis"
+        hx-get="/search" hx-trigger="change"
+        hx-target="#results" hx-include="#search-form"
+        onchange="updateChips()">
+    </div>
+
+    <div class="gap-top" style="margin-top:14px;">
+      <div class="cell-inline" style="margin-bottom:6px;">
+        <div class="field">
+          <span class="field-prefix" aria-hidden="true">Tags</span>
+          <input type="text" id="search-tag-search"
+            placeholder="Tags filtern…" aria-label="Tags filtern" oninput="filterSearchTagChips()">
+        </div>
+        <button type="button" class="scope-btn scope-btn-quiet active" data-tag="" onclick="setSearchTagFilter('')">Alle Tags</button>
       </div>
       <div id="search-tag-list" class="ordner-tags-scroll"></div>
       <input type="hidden" name="tag_id" id="search_tag_id_input" value="">
+      {# Dubletten-Filter vorhanden, aber aktuell ausgeblendet -- kein erkennbarer
+         Bedarf zurzeit. Funktion bleibt erhalten (Backend, Chip, Zähler), nur die
+         UI ist unsichtbar. #}
+      <select name="duplicates_only" class="filter-input" style="display:none;"
+        hx-get="/search" hx-trigger="change"
+        hx-target="#results" hx-include="#search-form"
+        onchange="updateChips()">
+        <option value="">Dubletten: alle</option>
+        <option value="1">Dubletten: nur Dubletten</option>
+      </select>
     </div>
 
   </div>
@@ -255,62 +252,99 @@
   </div>{# /search-mode-block #}
 
   <div id="gallery-mode-block" style="display:none;">
+
+   <div class="search-wrap">
+     <input class="search-input" id="gallery-q" type="search"
+       placeholder="Foto Dateinamen durchsuchen…" autocomplete="off"
+       oninput="scheduleGalleryReload()">
+   </div>
+
+   <div class="search-scope-row">
+     <select id="gallery-format-select" class="type-select" onchange="reloadGallery(); updateGalleryChips();">
+       <option value="">Alle Dateiformate</option>
+       <option value="jpg">JPG</option>
+       <option value="png">PNG</option>
+       <option value="heic">HEIC</option>
+       <option value="gif">GIF</option>
+       <option value="bmp">BMP</option>
+       <option value="webp">WEBP</option>
+       <option value="tiff">TIFF</option>
+     </select>
+     <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn"
+       onclick="selectAllVisible()" title="Alle sichtbaren auswählen">☑ Sichtbare wählen</button>
+     <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
+       aria-expanded="false" aria-controls="gallery-filter-panel"
+       onclick="toggleGalleryFilterPanel()">⚙ Filter</button>
+   </div>
+
+   <div id="gallery-active-chips"></div>
    <div id="gallery-filter-panel" class="mehr-filter-panel" style="display:none;">
     <div class="search-scope-row">
       <div class="search-scope-group">
         <span class="search-scope-label">Bewertung:</span>
         <button type="button" class="scope-btn active" data-sterne="" onclick="setSterneFilter('')">Alle</button>
-        <button type="button" class="scope-btn" data-sterne="5" onclick="setSterneFilter('5')">≥5 ⭐</button>
-        <button type="button" class="scope-btn" data-sterne="4" onclick="setSterneFilter('4')">≥4 ⭐</button>
-        <button type="button" class="scope-btn" data-sterne="3" onclick="setSterneFilter('3')">≥3 ⭐</button>
-        <button type="button" class="scope-btn" data-sterne="2" onclick="setSterneFilter('2')">≥2 ⭐</button>
-        <button type="button" class="scope-btn" data-sterne="1" onclick="setSterneFilter('1')">≥1 ⭐</button>
-        <button type="button" class="scope-btn" data-sterne="unbewertet" onclick="setSterneFilter('unbewertet')">Unbewertet</button>
+        <button type="button" class="scope-btn star-filter-btn" data-sterne="unbewertet"
+          aria-label="Unbewertet" title="Unbewertet" onclick="setSterneFilter('unbewertet')">
+          <svg class="star" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.6 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/>
+            <line x1="4" y1="20" x2="20" y2="4"/>
+          </svg>
+        </button>
+        <span class="scope-divider-sm" aria-hidden="true"></span>
+        <div class="star-rating-filter" role="radiogroup" aria-label="Mindestbewertung"
+          id="sterne-star-group" onkeydown="sterneStarKeydown(event)">
+          {% for n in range(1, 6) %}
+          <button type="button" class="star-filter-btn" role="radio" aria-checked="false"
+            data-n="{{ n }}" aria-label="Mindestens {{ n }} Stern{{ 'e' if n != 1 else '' }}" tabindex="-1"
+            onmouseenter="previewSterneHover({{ n }})" onmouseleave="previewSterneHover(0)"
+            onclick="clickSterneStar({{ n }})" onfocus="previewSterneHover({{ n }})" onblur="previewSterneHover(0)">
+            <svg class="star" viewBox="0 0 24 24" aria-hidden="true">
+              <path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.6 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/>
+            </svg>
+          </button>
+          {% endfor %}
+        </div>
+        <span class="scope-divider-sm" aria-hidden="true"></span>
+        <span class="gallery-key-hint" style="padding:0;">Taste <kbd>0–5</kbd></span>
+        <span class="scope-divider-sm" aria-hidden="true"></span>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
+          <input type="checkbox" id="gallery-show-stars" checked onchange="toggleStarsVisibility()">
+          Sterne zeigen
+        </label>
       </div>
     </div>
 
-    <div class="search-scope-row">
-      <div class="search-scope-group">
-        <span class="search-scope-label">Format:</span>
-        <button type="button" class="scope-btn format-btn active" data-format="jpg" onclick="toggleFormat('jpg')">JPG</button>
-        <button type="button" class="scope-btn format-btn active" data-format="png" onclick="toggleFormat('png')">PNG</button>
-        <button type="button" class="scope-btn format-btn active" data-format="heic" onclick="toggleFormat('heic')">HEIC</button>
-        <button type="button" class="scope-btn format-btn active" data-format="gif" onclick="toggleFormat('gif')">GIF</button>
-        <button type="button" class="scope-btn format-btn active" data-format="bmp" onclick="toggleFormat('bmp')">BMP</button>
-        <button type="button" class="scope-btn format-btn active" data-format="webp" onclick="toggleFormat('webp')">WEBP</button>
-        <button type="button" class="scope-btn format-btn active" data-format="tiff" onclick="toggleFormat('tiff')">TIFF</button>
-      </div>
+
+    <div class="field gap-top">
+      <span class="field-prefix" aria-hidden="true">Datum</span>
+      <input type="date" id="gallery_date_from" aria-label="Datum von" onchange="reloadGallery(); updateGalleryChips();">
+      <span class="field-date-sep" aria-hidden="true">bis</span>
+      <input type="date" id="gallery_date_to" aria-label="Datum bis" onchange="reloadGallery(); updateGalleryChips();">
     </div>
 
-    <div class="filter-row-2" style="max-width:320px;">
-      <div>
-        <label class="filter-label">Datum von</label>
-        <input type="date" id="gallery_date_from" class="filter-input" onchange="reloadGallery()">
-      </div>
-      <div>
-        <label class="filter-label">Datum bis</label>
-        <input type="date" id="gallery_date_to" class="filter-input" onchange="reloadGallery()">
-      </div>
-    </div>
-
-    <div id="gallery-ordner-row" style="display:none;">
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-        <span class="search-scope-label">Ordner:</span>
-        <button type="button" class="scope-btn active" data-ordner="" onclick="setOrdnerFilter('')">Alle</button>
-        <input type="text" id="gallery-ordner-search" class="filter-input" style="width:220px;"
-          placeholder="Ordner filtern…" oninput="filterOrdnerTags()">
-        <span id="gallery-ordner-count" style="font-size:11px; color:var(--text-3);"></span>
+    <div id="gallery-ordner-row" style="margin-top:14px;">
+      <div class="cell-inline" style="margin-bottom:6px;">
+        <div class="field">
+          <span class="field-prefix" aria-hidden="true">Ordner</span>
+          <input type="text" id="gallery-ordner-search"
+            placeholder="Ordner filtern…" aria-label="Ordner filtern" oninput="filterOrdnerTags()">
+        </div>
+        <button type="button" class="scope-btn scope-btn-quiet active" data-ordner="" onclick="setOrdnerFilter('')">Alle Ordner</button>
       </div>
       <div id="gallery-ordner-tags" class="ordner-tags-scroll"></div>
     </div>
 
-    <div id="gallery-tag-row" style="display:none;">
-      <div style="display:flex; align-items:center; gap:8px; margin-bottom:6px;">
-        <span class="search-scope-label">Tags:</span>
-        <button type="button" class="scope-btn active" data-tag="" onclick="setTagFilter('')">Alle</button>
-        <input type="text" id="gallery-tag-search" class="filter-input" style="width:220px;"
-          placeholder="Tags filtern…" oninput="filterTagChips()">
-        <span id="gallery-tag-count" style="font-size:11px; color:var(--text-3);"></span>
+    <div id="gallery-tag-row" style="margin-top:14px;">
+      <div class="cell-inline" style="margin-bottom:6px;">
+        <div class="field" style="position:relative;">
+          <span class="field-prefix" aria-hidden="true">Tags</span>
+          <input type="text" id="gallery-tag-search"
+            placeholder="Tags filtern…" aria-label="Tags filtern" oninput="filterTagChips(); updateInlineHint('gallery-tag-search','gallery-tag-hint');"
+            onfocus="updateInlineHint('gallery-tag-search','gallery-tag-hint')"
+            onblur="updateInlineHint('gallery-tag-search','gallery-tag-hint')">
+          <span class="field-inline-hint" id="gallery-tag-hint">Taste <kbd>T</kbd> zum taggen</span>
+        </div>
+        <button type="button" class="scope-btn scope-btn-quiet active" data-tag="" onclick="setTagFilter('')">Alle Tags</button>
       </div>
       <div id="gallery-tag-list" class="ordner-tags-scroll"></div>
     </div>
@@ -318,36 +352,33 @@
     <div class="search-scope-row">
       <div class="search-scope-group">
         <span class="search-scope-label">Sortierung:</span>
-        <button type="button" class="scope-btn active" data-sort="datum_neu" onclick="setGallerySort('datum_neu')">Datum (neu zuerst)</button>
-        <button type="button" class="scope-btn" data-sort="datum_alt" onclick="setGallerySort('datum_alt')">Datum (alt zuerst)</button>
-        <button type="button" class="scope-btn" data-sort="name_az" onclick="setGallerySort('name_az')">Name A–Z</button>
-        <button type="button" class="scope-btn" data-sort="name_za" onclick="setGallerySort('name_za')">Name Z–A</button>
+        <button type="button" class="scope-btn sort-field-btn active" data-sort-field="datum" onclick="toggleSortField('datum')">
+          Datum <span class="sort-arrow">↓</span>
+        </button>
+        <button type="button" class="scope-btn sort-field-btn" data-sort-field="name" onclick="toggleSortField('name')">
+          A–Z <span class="sort-arrow">→</span>
+        </button>
+        <span class="scope-divider-sm" aria-hidden="true"></span>
+        <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
+          <input type="checkbox" id="gallery-show-group-dividers" checked onchange="toggleGroupDividers()">
+          Ordnertrennung zeigen
+        </label>
       </div>
     </div>
 
-    <div class="search-scope-row">
-      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2); cursor:pointer;">
-        <input type="checkbox" id="gallery-show-stars" checked onchange="toggleStarsVisibility()">
-        Sterne ein-/ausblenden
-      </label>
-    </div>
 
-    <div class="search-scope-row">
-      <label style="display:flex; align-items:center; gap:6px; font-size:13px; color:var(--text-2);">
-        Bilder anzeigen bis:
-        <select id="gallery-max-size" class="filter-input" style="width:auto; padding:4px 8px;" onchange="reloadGallery()">
-          <option value="5">5 MB</option>
-          <option value="10">10 MB</option>
-          <option value="15" selected>15 MB</option>
-          <option value="20">20 MB</option>
-          <option value="30">30 MB</option>
-          <option value="alle">Alle</option>
-        </select>
-      </label>
-    </div>
-
-    <div class="search-scope-row" style="font-size:11px; color:var(--text-3);">
-      Tipp: Taste <kbd style="border:1px solid var(--border); border-radius:3px; padding:0 5px; font-family:inherit;">T</kbd> vergibt ein Tag auf das fokussierte/geöffnete Foto oder die ganze Mehrfachauswahl.
+    {# Dateigrössen-Filter vorhanden, aber aktuell ausgeblendet -- kein erkennbarer
+       Bedarf zurzeit. Funktion bleibt erhalten (Backend, Chip, Zähler), nur die UI
+       ist unsichtbar. #}
+    <div class="search-scope-row" style="display:none;">
+      <select id="gallery-max-size" class="filter-input" style="width:auto; padding:4px 8px;" onchange="reloadGallery(); updateGalleryChips();">
+        <option value="5">Max. Grösse: 5 MB</option>
+        <option value="10">Max. Grösse: 10 MB</option>
+        <option value="15" selected>Max. Grösse: 15 MB</option>
+        <option value="20">Max. Grösse: 20 MB</option>
+        <option value="30">Max. Grösse: 30 MB</option>
+        <option value="alle">Alle Grössen</option>
+      </select>
     </div>
 
    </div>{# /gallery-filter-panel #}
@@ -420,29 +451,88 @@
 </div>
 
 <script>
-function toggleScope(scope) {
-  var btn = document.getElementById('scope-' + scope);
-  btn.classList.toggle('active');
-  if (scope !== 'plans') {
-    // mindestens einer der Inhalts-Scopes muss aktiv bleiben
-    var anyActive = ['docs','folders','filenames'].some(function(s) {
-      return document.getElementById('scope-' + s).classList.contains('active');
-    });
-    if (!anyActive) btn.classList.add('active');
-  }
-  var parts = ['docs','folders','filenames','plans'].filter(function(s) {
-    return document.getElementById('scope-' + s).classList.contains('active');
+var _SEARCH_IN_SCOPES = ['', 'docs', 'folders', 'filenames'];
+
+function setSearchInScope(value) {
+  document.getElementById('search_in_input').value = value;
+  document.querySelectorAll('#search-in-group .segmented-btn').forEach(function(b) {
+    var active = (b.dataset.searchIn || '') === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-checked', active ? 'true' : 'false');
+    b.tabIndex = active ? 0 : -1;
   });
-  document.getElementById('search_in_input').value = parts.join(',');
+  updateChips();
   htmx.trigger(document.getElementById('q'), 'search');
 }
 
-function toggleMehrFilter() {
+function searchInKeydown(e) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault();
+  var current = document.getElementById('search_in_input').value;
+  var idx = _SEARCH_IN_SCOPES.indexOf(current);
+  var next = e.key === 'ArrowRight'
+    ? _SEARCH_IN_SCOPES[(idx + 1) % _SEARCH_IN_SCOPES.length]
+    : _SEARCH_IN_SCOPES[(idx - 1 + _SEARCH_IN_SCOPES.length) % _SEARCH_IN_SCOPES.length];
+  setSearchInScope(next);
+  document.querySelector('#search-in-group .segmented-btn[data-search-in="' + next + '"]').focus();
+}
+
+var _RESULT_SCOPES = ['', 'plans', 'norms'];
+
+function setResultScope(value) {
+  document.getElementById('result_scope_input').value = value;
+  document.querySelectorAll('#result-scope-group .segmented-btn').forEach(function(b) {
+    var active = (b.dataset.scope || '') === value;
+    b.classList.toggle('active', active);
+    b.setAttribute('aria-checked', active ? 'true' : 'false');
+    b.tabIndex = active ? 0 : -1;
+  });
+  updateChips();
+  htmx.trigger(document.getElementById('q'), 'search');
+}
+
+function resultScopeKeydown(e) {
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault();
+  var current = document.getElementById('result_scope_input').value;
+  var idx = _RESULT_SCOPES.indexOf(current);
+  var next = e.key === 'ArrowRight'
+    ? _RESULT_SCOPES[(idx + 1) % _RESULT_SCOPES.length]
+    : _RESULT_SCOPES[(idx - 1 + _RESULT_SCOPES.length) % _RESULT_SCOPES.length];
+  setResultScope(next);
+  document.querySelector('#result-scope-group .segmented-btn[data-scope="' + next + '"]').focus();
+}
+
+var _TIER1_FIELDS = ['from_addr', 'to_addr', 'subject_filter', 'date_from', 'date_to',
+                      'duplicates_only', 'tag_id', 'scope', 'search_in'];
+
+function countActiveTier1Filters() {
+  return _TIER1_FIELDS.filter(function(n) {
+    var el = document.querySelector('[name="' + n + '"]');
+    return el && el.value;
+  }).length;
+}
+
+function updateMehrFilterCount() {
+  var btn = document.getElementById('mehr-filter-btn');
+  var n = countActiveTier1Filters();
+  btn.textContent = '⚙ Filter' + (n ? ' · ' + n : '');
+}
+
+function toggleMehrFilter(forceOpen) {
   var panel = document.getElementById('mehr-filter-panel');
   var btn   = document.getElementById('mehr-filter-btn');
-  var open  = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : 'block';
-  btn.classList.toggle('active', !open);
+  var open  = typeof forceOpen === 'boolean' ? forceOpen : panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  try { localStorage.setItem('archivio_mehr_filter_open', open ? '1' : '0'); } catch (e) {}
+}
+
+function focusMehrFilterField(name) {
+  toggleMehrFilter(true);
+  var el = document.querySelector('#mehr-filter-panel [name="' + name + '"]');
+  if (el) el.focus();
 }
 
 var _chipTimer = null;
@@ -452,27 +542,28 @@ function scheduleChipUpdate() {
 }
 
 function updateChips() {
+  updateMehrFilterCount();
   var container = document.getElementById('active-chips');
   container.innerHTML = '';
   var defs = [
-    { name: 'project_id', label: function(v) {
-        var o = document.querySelector('select[name=project_id] option[value="'+v+'"]');
-        return o ? o.text : v;
-    }},
-    { name: 'type', label: function(v) {
-        var o = document.querySelector('select[name=type] option[value="'+v+'"]');
-        return o ? o.text : v;
-    }},
     { name: 'from_addr',       label: function(v) { return 'Von: '+v; } },
     { name: 'to_addr',         label: function(v) { return 'An/CC: '+v; } },
     { name: 'subject_filter',  label: function(v) { return 'Betreff: '+v; } },
     { name: 'date_from',       label: function(v) { return 'Ab: '+fmtDate(v); } },
     { name: 'date_to',         label: function(v) { return 'Bis: '+fmtDate(v); } },
-    { name: 'filesize',        label: function(v) {
-        var o = document.querySelector('select[name=filesize] option[value="'+v+'"]');
+    { name: 'duplicates_only', label: function(v) {
+        var o = document.querySelector('select[name=duplicates_only] option[value="'+v+'"]');
         return o ? o.text : v;
     }},
-    { name: 'duplicates_only', label: function() { return 'Nur Dubletten'; } },
+    { name: 'tag_id', label: function() {
+        var b = document.querySelector('#search-tag-list .scope-btn.active');
+        return 'Tag: ' + (b ? b.textContent : '');
+    }},
+    { name: 'scope', label: function(v) { return v === 'plans' ? 'Nur Pläne' : 'Nur Normen'; } },
+    { name: 'search_in', label: function(v) {
+        var b = document.querySelector('#search-in-group .segmented-btn[data-search-in="'+v+'"]');
+        return b ? b.textContent : v;
+    }},
   ];
   defs.forEach(function(def) {
     var el = document.querySelector('[name="'+def.name+'"]');
@@ -480,13 +571,20 @@ function updateChips() {
     var chip = document.createElement('span');
     chip.className = 'filter-chip';
     var n = def.name;
-    chip.innerHTML = def.label(el.value)
-      + ' <button onclick="clearFilter(\''+n+'\')">×</button>';
+    var text = def.label(el.value);
+    var full = text;
+    if (text.length > 27) text = text.slice(0, 26) + '…';
+    chip.title = full;
+    chip.innerHTML = '<span onclick="focusMehrFilterField(\''+n+'\')" style="cursor:pointer;">'
+      + text + '</span> <button onclick="clearFilter(\''+n+'\')" aria-label="Filter entfernen">×</button>';
     container.appendChild(chip);
   });
 }
 
 function clearFilter(name) {
+  if (name === 'tag_id') { setSearchTagFilter(''); return; }
+  if (name === 'scope') { setResultScope(''); return; }
+  if (name === 'search_in') { setSearchInScope(''); return; }
   var el = document.querySelector('[name="'+name+'"]');
   if (!el) return;
   el.value = '';
@@ -498,6 +596,13 @@ function fmtDate(iso) {
   if (!iso) return '';
   var p = iso.split('-');
   return p[2]+'.'+p[1]+'.'+p[0];
+}
+
+function todayISO() {
+  var d = new Date();
+  var mm = String(d.getMonth() + 1).padStart(2, '0');
+  var dd = String(d.getDate()).padStart(2, '0');
+  return d.getFullYear() + '-' + mm + '-' + dd;
 }
 
 function togglePreview(btn, docId, q) {
@@ -563,15 +668,13 @@ document.body.addEventListener('htmx:afterRequest', function(evt) {
 
 function switchSearchMode(aiOn) {
   var input  = document.getElementById('q');
-  var wrap   = document.querySelector('.ai-toggle-wrap');
-  var thumb  = document.querySelector('.ai-toggle-thumb');
+  document.getElementById('mode-volltext-btn').classList.toggle('active', !aiOn);
+  document.getElementById('mode-ki-btn').classList.toggle('active', aiOn);
   if (aiOn) {
-    wrap.classList.add('ai-on');
     input.setAttribute('hx-get', '/search/ai');
     input.setAttribute('hx-trigger', 'search');
     input.placeholder = 'Frage stellen und Enter drücken…';
   } else {
-    wrap.classList.remove('ai-on');
     input.setAttribute('hx-get', '/search');
     input.setAttribute('hx-trigger', 'input changed delay:300ms, search');
     input.placeholder = 'Dokumente und Mails durchsuchen…';
@@ -609,22 +712,38 @@ function switchMode(mode) {
   document.getElementById('gallery-mode-block').style.display = mode === 'gallery' ? '' : 'none';
   document.getElementById('results').style.display = mode === 'search' ? '' : 'none';
   document.getElementById('gallery-results').style.display = mode === 'gallery' ? '' : 'none';
-  document.getElementById('gallery-filter-btn').style.display = mode === 'gallery' ? '' : 'none';
-  document.getElementById('gallery-select-all-btn').style.display = mode === 'gallery' ? '' : 'none';
   if (mode === 'gallery' && !galleryLoaded) {
     galleryLoaded = true;
+    renderSterneStars('');
     reloadGallery();
     refreshOrdnerTags();
     refreshTagFilterList();
+    var wasOpen;
+    try { wasOpen = localStorage.getItem('archivio_gallery_filter_open') === '1'; } catch (e) { wasOpen = false; }
+    if (wasOpen) toggleGalleryFilterPanel(true);
+    updateGalleryChips();
   }
   if (mode === 'search') {
     refreshSearchTagFilterList();
   }
 }
 
+function updateInlineHint(inputId, hintId) {
+  var input = document.getElementById(inputId);
+  var hint  = document.getElementById(hintId);
+  var show  = document.activeElement !== input && !input.value;
+  hint.style.display = show ? '' : 'none';
+}
+
 function toggleStarsVisibility() {
   var show = document.getElementById('gallery-show-stars').checked;
   document.getElementById('gallery-results').classList.toggle('hide-stars', !show);
+}
+
+function toggleGroupDividers() {
+  var show = document.getElementById('gallery-show-group-dividers').checked;
+  document.getElementById('gallery-results').classList.toggle('hide-group-dividers', !show);
+  reloadGallery();
 }
 
 // ── Auswahl + Kontaktbogen ──────────────────────────────────────────────────
@@ -646,14 +765,40 @@ function toggleSelect(id, evt) {
 }
 
 function selectAllVisible() {
-  document.querySelectorAll('#gallery-results .photo-tile').forEach(function(tile) {
-    var id = parseInt(tile.dataset.id, 10);
-    gallerySelection.add(id);
-    tile.classList.add('selected');
-    var cb = tile.querySelector('.photo-select input');
-    if (cb) cb.checked = true;
+  // Trotz des Namens (historisch): waehlt nicht nur die per Infinite-Scroll bereits
+  // geladenen Kacheln, sondern ALLE Fotos, die zum aktuellen Filter passen -- sonst
+  // "vergisst" die Aktion bei grossen Ordnern alles jenseits der ersten Seite.
+  var params = new URLSearchParams({
+    project_id:  document.getElementById('project_id_select').value,
+    sterne:      document.getElementById('sterne_input').value,
+    ordner:      document.getElementById('gallery-ordner-row').dataset.selected || '',
+    tag_id:      document.getElementById('gallery-tag-row').dataset.selected || '',
+    date_from:   document.getElementById('gallery_date_from').value,
+    date_to:     document.getElementById('gallery_date_to').value,
+    formate:     document.getElementById('gallery-format-select').value,
+    max_size_mb: document.getElementById('gallery-max-size').value,
+    q:           document.getElementById('gallery-q').value,
   });
-  updateSelectionBar();
+  fetch('/galerie/select-all?' + params.toString())
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var ids = d.ids || [];
+      if (ids.length > 100) {
+        if (!confirm('Mehr als 100 Objekte (' + ids.length + ') werden ausgewählt. Sind Sie sicher?')) return;
+        if (ids.length > 500) {
+          if (!confirm('Das sind sehr viele Objekte (' + ids.length + '). Wirklich ALLE auswählen?')) return;
+        }
+      }
+      ids.forEach(function(id) { gallerySelection.add(id); });
+      document.querySelectorAll('#gallery-results .photo-tile').forEach(function(tile) {
+        var id = parseInt(tile.dataset.id, 10);
+        if (!gallerySelection.has(id)) return;
+        tile.classList.add('selected');
+        var cb = tile.querySelector('.photo-select input');
+        if (cb) cb.checked = true;
+      });
+      updateSelectionBar();
+    });
 }
 
 function clearSelection() {
@@ -807,19 +952,101 @@ function contextMenuAction(action) {
   else if (action === 'reveal') helperReveal(contextMenuPath);
 }
 
-function toggleGalleryFilterPanel() {
+function toggleGalleryFilterPanel(forceOpen) {
   var panel = document.getElementById('gallery-filter-panel');
   var btn   = document.getElementById('gallery-filter-btn');
-  var open  = panel.style.display !== 'none';
-  panel.style.display = open ? 'none' : 'block';
-  btn.classList.toggle('active', !open);
+  var open  = typeof forceOpen === 'boolean' ? forceOpen : panel.style.display === 'none';
+  panel.style.display = open ? 'block' : 'none';
+  btn.classList.toggle('active', open);
+  btn.setAttribute('aria-expanded', open ? 'true' : 'false');
+  try { localStorage.setItem('archivio_gallery_filter_open', open ? '1' : '0'); } catch (e) {}
 }
 
-function activeFormats() {
-  return Array.prototype.map.call(
-    document.querySelectorAll('.format-btn.active'),
-    function(b) { return b.dataset.format; }
-  );
+function countActiveGalleryFilters() {
+  var n = 0;
+  if (document.getElementById('sterne_input').value) n++;
+  if (document.getElementById('gallery-format-select').value) n++;
+  if (document.getElementById('gallery_date_from').value || document.getElementById('gallery_date_to').value) n++;
+  if (parseSelectedList(document.getElementById('gallery-ordner-row').dataset.selected).length) n++;
+  if (parseSelectedList(document.getElementById('gallery-tag-row').dataset.selected).length) n++;
+  if (document.getElementById('gallery-max-size').value !== '15') n++;
+  return n;
+}
+
+function updateGalleryChips() {
+  var btn = document.getElementById('gallery-filter-btn');
+  var n = countActiveGalleryFilters();
+  btn.textContent = '⚙ Filter' + (n ? ' · ' + n : '');
+
+  var container = document.getElementById('gallery-active-chips');
+  container.innerHTML = '';
+  var chips = [];
+
+  var sterne = document.getElementById('sterne_input').value;
+  if (sterne) {
+    var sterneLabel = sterne === 'unbewertet' ? 'Unbewertet' : '≥' + sterne + ' Sterne';
+    chips.push({ label: 'Bewertung: ' + sterneLabel, clear: function() { setSterneFilter(''); } });
+  }
+  var formatSel = document.getElementById('gallery-format-select');
+  if (formatSel.value) {
+    chips.push({ label: formatSel.options[formatSel.selectedIndex].text, clear: function() {
+      formatSel.value = '';
+      reloadGallery(); updateGalleryChips();
+    }});
+  }
+  var dFrom = document.getElementById('gallery_date_from').value;
+  var dTo   = document.getElementById('gallery_date_to').value;
+  if (dFrom || dTo) {
+    chips.push({ label: 'Datum: ' + (dFrom ? fmtDate(dFrom) : '…') + '–' + (dTo ? fmtDate(dTo) : '…'), clear: function() {
+      document.getElementById('gallery_date_from').value = '';
+      document.getElementById('gallery_date_to').value = '';
+      reloadGallery(); updateGalleryChips();
+    }});
+  }
+  var ordnerSelected = parseSelectedList(document.getElementById('gallery-ordner-row').dataset.selected);
+  if (ordnerSelected.length) {
+    chips.push({ label: 'Ordner: ' + ordnerSelected.join(', '), clear: function() { setOrdnerFilter(''); } });
+  }
+  var tagSelected = parseSelectedList(document.getElementById('gallery-tag-row').dataset.selected);
+  if (tagSelected.length) {
+    var tagNames = tagSelected.map(function(id) {
+      var b = document.querySelector('#gallery-tag-list .scope-btn[data-tag="' + id + '"]');
+      return b ? b.textContent : id;
+    });
+    chips.push({ label: 'Tag: ' + tagNames.join(', '), clear: function() { setTagFilter(''); } });
+  }
+  var maxSize = document.getElementById('gallery-max-size').value;
+  if (maxSize !== '15') {
+    var szOpt = document.querySelector('#gallery-max-size option[value="' + maxSize + '"]');
+    chips.push({ label: (szOpt ? szOpt.text : maxSize), clear: function() {
+      document.getElementById('gallery-max-size').value = '15';
+      reloadGallery(); updateGalleryChips();
+    }});
+  }
+
+  chips.forEach(function(c) {
+    var chip = document.createElement('span');
+    chip.className = 'filter-chip';
+    var text = c.label.length > 27 ? c.label.slice(0, 26) + '…' : c.label;
+    chip.title = c.label;
+    var span = document.createElement('span');
+    span.textContent = text;
+    span.style.cursor = 'pointer';
+    span.onclick = function() { toggleGalleryFilterPanel(true); };
+    var xBtn = document.createElement('button');
+    xBtn.textContent = '×';
+    xBtn.setAttribute('aria-label', 'Filter entfernen');
+    xBtn.onclick = c.clear;
+    chip.appendChild(span);
+    chip.appendChild(xBtn);
+    container.appendChild(chip);
+  });
+}
+
+var _galleryReloadTimer = null;
+function scheduleGalleryReload() {
+  clearTimeout(_galleryReloadTimer);
+  _galleryReloadTimer = setTimeout(reloadGallery, 300);
 }
 
 function reloadGallery() {
@@ -829,15 +1056,15 @@ function reloadGallery() {
   var tagId    = document.getElementById('gallery-tag-row').dataset.selected || '';
   var dateFrom = document.getElementById('gallery_date_from').value;
   var dateTo   = document.getElementById('gallery_date_to').value;
-  var formats  = activeFormats();
-  var allFormats = document.querySelectorAll('.format-btn').length;
-  var formate = formats.length === allFormats ? '' : formats.join(',');
+  var formate  = document.getElementById('gallery-format-select').value;
   var maxSizeMb = document.getElementById('gallery-max-size').value;
   var sort = document.getElementById('gallery_sort_input').value;
+  var q = document.getElementById('gallery-q').value;
+  var group = document.getElementById('gallery-show-group-dividers').checked ? '1' : '0';
   var params = new URLSearchParams({
     project_id: pid, sterne: sterne, ordner: ordner, tag_id: tagId,
     date_from: dateFrom, date_to: dateTo, formate: formate, max_size_mb: maxSizeMb,
-    sort: sort,
+    sort: sort, q: q, group: group,
   });
   htmx.ajax('GET', '/galerie?' + params.toString(), { target: '#gallery-results', swap: 'innerHTML' });
 }
@@ -847,32 +1074,128 @@ function setSterneFilter(v) {
   document.querySelectorAll('#gallery-mode-block .scope-btn[data-sterne]').forEach(function(b) {
     b.classList.toggle('active', b.dataset.sterne === v);
   });
+  renderSterneStars(v);
   reloadGallery();
+  updateGalleryChips();
 }
+
+function renderSterneStars(v) {
+  var n = parseInt(v, 10) || 0;
+  var stars = document.querySelectorAll('#sterne-star-group .star-filter-btn');
+  stars.forEach(function(s) {
+    var starN = parseInt(s.dataset.n, 10);
+    s.classList.toggle('filled', starN <= n);
+    s.setAttribute('aria-checked', starN === n ? 'true' : 'false');
+    s.tabIndex = starN === n ? 0 : -1;
+  });
+  if (n === 0) {
+    // Kein Stern aktiv gewaehlt ("Alle"/"Unbewertet") -- erster Stern bleibt per
+    // Tastatur erreichbar, ohne optisch als ausgewaehlt zu gelten.
+    var first = stars[0];
+    if (first && !Array.from(stars).some(function(s) { return s.tabIndex === 0; })) first.tabIndex = 0;
+  }
+}
+
+function previewSterneHover(n) {
+  var stars = document.querySelectorAll('#sterne-star-group .star-filter-btn');
+  if (n === 0) {
+    // Hover verlassen -- zurueck zum tatsaechlich gesetzten Wert.
+    renderSterneStars(document.getElementById('sterne_input').value);
+    return;
+  }
+  stars.forEach(function(s) {
+    s.classList.toggle('filled', parseInt(s.dataset.n, 10) <= n);
+  });
+}
+
+function clickSterneStar(n) {
+  var current = document.getElementById('sterne_input').value;
+  // Klick auf den bereits aktiven Stern setzt zurueck auf "Alle".
+  setSterneFilter(String(n) === current ? '' : String(n));
+}
+
+function sterneStarKeydown(e) {
+  var stars = Array.from(document.querySelectorAll('#sterne-star-group .star-filter-btn'));
+  if (e.key >= '1' && e.key <= '5') {
+    e.preventDefault();
+    clickSterneStar(parseInt(e.key, 10));
+    stars[parseInt(e.key, 10) - 1].focus();
+    return;
+  }
+  if (e.key === '0') {
+    e.preventDefault();
+    setSterneFilter('');
+    stars[0].focus();
+    return;
+  }
+  if (e.key !== 'ArrowRight' && e.key !== 'ArrowLeft') return;
+  e.preventDefault();
+  var focused = document.activeElement;
+  var idx = stars.indexOf(focused);
+  if (idx === -1) idx = 0;
+  var next = e.key === 'ArrowRight'
+    ? Math.min(stars.length - 1, idx + 1)
+    : Math.max(0, idx - 1);
+  stars[next].focus();
+}
+
+var _SORT_ARROWS = { datum_neu: '↓', datum_alt: '↑', name_az: '→', name_za: '←' };
 
 function setGallerySort(v) {
   document.getElementById('gallery_sort_input').value = v;
-  document.querySelectorAll('#gallery-mode-block .scope-btn[data-sort]').forEach(function(b) {
-    b.classList.toggle('active', b.dataset.sort === v);
+  var field = v.indexOf('datum') === 0 ? 'datum' : 'name';
+  document.querySelectorAll('.sort-field-btn').forEach(function(b) {
+    var isActive = b.dataset.sortField === field;
+    b.classList.toggle('active', isActive);
+    if (isActive) b.querySelector('.sort-arrow').textContent = _SORT_ARROWS[v];
   });
   reloadGallery();
+  updateGalleryChips();
 }
 
-function toggleFormat(fmt) {
-  var btn = document.querySelector('.format-btn[data-format="' + fmt + '"]');
-  btn.classList.toggle('active');
-  var anyActive = activeFormats().length > 0;
-  if (!anyActive) btn.classList.add('active');  // mindestens ein Format muss aktiv bleiben
-  reloadGallery();
+function toggleSortField(field) {
+  var current = document.getElementById('gallery_sort_input').value;
+  var currentField = current.indexOf('datum') === 0 ? 'datum' : 'name';
+  var next;
+  if (currentField === field) {
+    // Gleiches Feld erneut geklickt -- Richtung umkehren.
+    next = { datum_neu: 'datum_alt', datum_alt: 'datum_neu',
+              name_az: 'name_za', name_za: 'name_az' }[current];
+  } else {
+    // Anderes Feld gewaehlt -- mit Standardrichtung starten.
+    next = field === 'datum' ? 'datum_neu' : 'name_az';
+  }
+  setGallerySort(next);
+}
+
+// Mehrfachauswahl bei Tags/Ordnern wird als JSON-Array-String in dataset.selected
+// gehalten (statt eines einzelnen Werts) -- so kann ein Foto auf mehrere gewaehlte
+// Ordner/Tags gleichzeitig matchen (ODER-Verknuepfung), nicht nur auf genau einen.
+function parseSelectedList(v) {
+  if (!v) return [];
+  try {
+    var arr = JSON.parse(v);
+    return Array.isArray(arr) ? arr : [];
+  } catch (e) { return []; }
 }
 
 function setOrdnerFilter(tag) {
   var row = document.getElementById('gallery-ordner-row');
-  row.dataset.selected = tag;
+  if (tag === '') {
+    row.dataset.selected = '[]';
+  } else {
+    var selected = parseSelectedList(row.dataset.selected);
+    var idx = selected.indexOf(tag);
+    if (idx === -1) selected.push(tag); else selected.splice(idx, 1);
+    row.dataset.selected = JSON.stringify(selected);
+  }
+  var current = parseSelectedList(row.dataset.selected);
   row.querySelectorAll('.scope-btn').forEach(function(b) {
-    b.classList.toggle('active', b.dataset.ordner === tag);
+    var t = b.dataset.ordner;
+    b.classList.toggle('active', t === '' ? current.length === 0 : current.indexOf(t) !== -1);
   });
   reloadGallery();
+  updateGalleryChips();
 }
 
 function refreshOrdnerTags() {
@@ -880,36 +1203,27 @@ function refreshOrdnerTags() {
   var row      = document.getElementById('gallery-ordner-row');
   var tagsEl   = document.getElementById('gallery-ordner-tags');
   var searchEl = document.getElementById('gallery-ordner-search');
-  var countEl  = document.getElementById('gallery-ordner-count');
-  row.dataset.selected = '';
+  row.dataset.selected = '[]';
   searchEl.value = '';
-  countEl.textContent = '';
-  if (!pid) { row.style.display = 'none'; tagsEl.innerHTML = ''; return; }
+  document.querySelector('#gallery-ordner-row .scope-btn[data-ordner=""]').classList.add('active');
+  if (!pid) { tagsEl.innerHTML = ''; return; }
   fetch('/galerie/ordner-tags?project_id=' + encodeURIComponent(pid))
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (!d.tags || !d.tags.length) { row.style.display = 'none'; tagsEl.innerHTML = ''; return; }
-      row.style.display = '';
-      document.querySelector('#gallery-ordner-row .scope-btn[data-ordner=""]').classList.add('active');
+      if (!d.tags || !d.tags.length) { tagsEl.innerHTML = ''; return; }
       tagsEl.innerHTML = d.tags.map(function(t) {
         return '<button type="button" class="scope-btn" data-ordner="' + t.replace(/"/g, '&quot;') + '" '
           + 'onclick="setOrdnerFilter(\'' + t.replace(/'/g, "\\'") + '\')">' + t + '</button>';
       }).join('');
-      countEl.textContent = d.tags.length + ' Ordner';
     });
 }
 
 function filterOrdnerTags() {
-  var q = document.getElementById('gallery-ordner-search').value.trim().toLowerCase();
-  var shown = 0;
+  var q = document.getElementById('gallery-ordner-search').value.trim().toLowerCase().normalize('NFC');
   document.querySelectorAll('#gallery-ordner-tags .scope-btn').forEach(function(b) {
-    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    var match = !q || b.textContent.toLowerCase().normalize('NFC').indexOf(q) !== -1;
     b.style.display = match ? '' : 'none';
-    if (match) shown++;
   });
-  var total = document.querySelectorAll('#gallery-ordner-tags .scope-btn').length;
-  var countEl = document.getElementById('gallery-ordner-count');
-  countEl.textContent = q ? (shown + ' von ' + total + ' Ordnern') : (total + ' Ordner');
 }
 
 function escapeHtml(s) {
@@ -920,25 +1234,35 @@ function escapeHtml(s) {
 
 function setTagFilter(tagId) {
   var row = document.getElementById('gallery-tag-row');
-  row.dataset.selected = tagId ? String(tagId) : '';
+  var val = tagId ? String(tagId) : '';
+  if (val === '') {
+    row.dataset.selected = '[]';
+  } else {
+    var selected = parseSelectedList(row.dataset.selected);
+    var idx = selected.indexOf(val);
+    if (idx === -1) selected.push(val); else selected.splice(idx, 1);
+    row.dataset.selected = JSON.stringify(selected);
+  }
+  var current = parseSelectedList(row.dataset.selected);
   row.querySelectorAll('.scope-btn').forEach(function(b) {
-    b.classList.toggle('active', (b.dataset.tag || '') === (tagId ? String(tagId) : ''));
+    var t = b.dataset.tag || '';
+    b.classList.toggle('active', t === '' ? current.length === 0 : current.indexOf(t) !== -1);
   });
   reloadGallery();
+  updateGalleryChips();
 }
 
 function refreshTagFilterList() {
   var row      = document.getElementById('gallery-tag-row');
   var listEl   = document.getElementById('gallery-tag-list');
   var searchEl = document.getElementById('gallery-tag-search');
-  var countEl  = document.getElementById('gallery-tag-count');
+  row.dataset.selected = '[]';
   searchEl.value = '';
   fetch('/galerie/tags')
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (!d.tags || !d.tags.length) { row.style.display = 'none'; listEl.innerHTML = ''; return; }
-      row.style.display = '';
       document.querySelector('#gallery-tag-row .scope-btn[data-tag=""]').classList.add('active');
+      if (!d.tags || !d.tags.length) { listEl.innerHTML = ''; return; }
       listEl.innerHTML = d.tags.map(function(t) {
         return '<span class="tag-filter-item">'
           + '<button type="button" class="scope-btn" data-tag="' + t.id + '" '
@@ -949,7 +1273,6 @@ function refreshTagFilterList() {
           + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
           + '</span>';
       }).join('');
-      countEl.textContent = d.tags.length + ' Tags';
     });
 }
 
@@ -957,11 +1280,11 @@ function deleteTagGlobally(tagId, name) {
   if (!confirm('Tag „' + name + '“ von allen Dateien löschen?')) return;
   fetch('/tags/' + tagId, { method: 'DELETE' }).then(function() {
     var row = document.getElementById('gallery-tag-row');
-    var wasActiveGallery = row.dataset.selected === String(tagId);
+    var wasActiveGallery = parseSelectedList(row.dataset.selected).indexOf(String(tagId)) !== -1;
     var wasActiveSearch = document.getElementById('search_tag_id_input').value === String(tagId);
     refreshTagFilterList();
     refreshSearchTagFilterList();
-    if (wasActiveGallery) { row.dataset.selected = ''; reloadGallery(); }
+    if (wasActiveGallery) { reloadGallery(); }
     if (wasActiveSearch) { setSearchTagFilter(''); }
   });
 }
@@ -988,28 +1311,22 @@ function renameTagGlobally(tagId, oldName) {
 }
 
 function filterTagChips() {
-  var q = document.getElementById('gallery-tag-search').value.trim().toLowerCase();
-  var shown = 0;
+  var q = document.getElementById('gallery-tag-search').value.trim().toLowerCase().normalize('NFC');
   document.querySelectorAll('#gallery-tag-list .scope-btn').forEach(function(b) {
-    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    var match = !q || b.textContent.toLowerCase().normalize('NFC').indexOf(q) !== -1;
     b.style.display = match ? '' : 'none';
-    if (match) shown++;
   });
-  var total = document.querySelectorAll('#gallery-tag-list .scope-btn').length;
-  var countEl = document.getElementById('gallery-tag-count');
-  countEl.textContent = q ? (shown + ' von ' + total + ' Tags') : (total + ' Tags');
 }
 
 // ── Tag-Filter in der normalen Suche (gleicher Aufbau wie Galerie) ──────────
 function refreshSearchTagFilterList() {
   var listEl   = document.getElementById('search-tag-list');
   var searchEl = document.getElementById('search-tag-search');
-  var countEl  = document.getElementById('search-tag-count');
   searchEl.value = '';
   fetch('/galerie/tags')
     .then(function(r) { return r.json(); })
     .then(function(d) {
-      if (!d.tags || !d.tags.length) { listEl.innerHTML = ''; countEl.textContent = ''; return; }
+      if (!d.tags || !d.tags.length) { listEl.innerHTML = ''; return; }
       document.querySelectorAll('#mehr-filter-panel .scope-btn[data-tag=""]').forEach(function(b) {
         b.classList.add('active');
       });
@@ -1023,21 +1340,15 @@ function refreshSearchTagFilterList() {
           + 'onclick="event.stopPropagation(); deleteTagGlobally(' + t.id + ', \'' + t.name.replace(/'/g, "\\'") + '\')">×</button>'
           + '</span>';
       }).join('');
-      countEl.textContent = d.tags.length + ' Tags';
     });
 }
 
 function filterSearchTagChips() {
-  var q = document.getElementById('search-tag-search').value.trim().toLowerCase();
-  var shown = 0;
+  var q = document.getElementById('search-tag-search').value.trim().toLowerCase().normalize('NFC');
   document.querySelectorAll('#search-tag-list .scope-btn').forEach(function(b) {
-    var match = !q || b.textContent.toLowerCase().indexOf(q) !== -1;
+    var match = !q || b.textContent.toLowerCase().normalize('NFC').indexOf(q) !== -1;
     b.style.display = match ? '' : 'none';
-    if (match) shown++;
   });
-  var total = document.querySelectorAll('#search-tag-list .scope-btn').length;
-  var countEl = document.getElementById('search-tag-count');
-  countEl.textContent = q ? (shown + ' von ' + total + ' Tags') : (total + ' Tags');
 }
 
 function setSearchTagFilter(tagId) {
@@ -1112,13 +1423,15 @@ function refreshCurrentTagChips() {
 
 function removeTagFromTargets(tagId) {
   var ids = tagFlyoverTargetIds.slice();
+  var row = document.getElementById('gallery-tag-row');
+  var wasActive = parseSelectedList(row.dataset.selected).indexOf(String(tagId)) !== -1;
   Promise.all(ids.map(function(id) {
     return fetch('/foto/' + id + '/tags/' + tagId, { method: 'DELETE' });
   })).then(function() {
     refreshCurrentTagChips();
     refreshTagFilterList();
     refreshSearchTagFilterList();
-    if (document.getElementById('gallery-tag-row').dataset.selected) reloadGallery();
+    if (wasActive) reloadGallery();
   });
 }
 
@@ -1215,28 +1528,32 @@ document.addEventListener('click', function(e) {
 // ── Auswahl in neuen Ordner speichern ───────────────────────────────────────
 function saveSelectionToFolder() {
   if (!gallerySelection.size) return;
-  var paths = [];
-  gallerySelection.forEach(function(id) {
-    var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
-    if (tile && tile.dataset.path) paths.push(tile.dataset.path);
-  });
-  if (!paths.length) {
-    alert('Keine Dateipfade gefunden -- die ausgewählten Fotos sind evtl. nicht mehr geladen (bitte in der Galerie sichtbar halten).');
-    return;
-  }
-  fetch(HELPER + '/copy-to-folder', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paths: paths }),
-  }).then(function(r) { return r.json(); }).then(function(d) {
-    if (d.cancelled) return;
-    if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
-    var msg = d.copied + ' Foto(s) kopiert nach:\n' + d.folder;
-    if (d.errors && d.errors.length) msg += '\n\nNicht kopiert:\n' + d.errors.join('\n');
-    alert(msg);
-  }).catch(function() {
-    alert('Archivio Helper läuft nicht. Bitte starten.');
-  });
+  // Pfade serverseitig per ID aufloesen statt aus dem DOM (.photo-tile.dataset.path) --
+  // bei einer über selectAllVisible()/select-all getroffenen grossen Auswahl sind
+  // laengst nicht alle ausgewaehlten Fotos per Infinite-Scroll geladen.
+  var ids = Array.from(gallerySelection);
+  fetch('/galerie/paths?ids=' + ids.join(','))
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var paths = ids.map(function(id) { return d.paths[id]; }).filter(Boolean);
+      if (!paths.length) {
+        alert('Keine Dateipfade gefunden.');
+        return null;
+      }
+      return fetch(HELPER + '/copy-to-folder', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ paths: paths }),
+      }).then(function(r) { return r.json(); });
+    }).then(function(d) {
+      if (!d || d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      var msg = d.copied + ' Foto(s) kopiert nach:\n' + d.folder;
+      if (d.errors && d.errors.length) msg += '\n\nNicht kopiert:\n' + d.errors.join('\n');
+      alert(msg);
+    }).catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten.');
+    });
 }
 
 function refreshGalleryPhotoIds() {
@@ -1337,7 +1654,7 @@ function updateTileRating(id, rating) {
   var tile = document.querySelector('.photo-tile[data-id="' + id + '"]');
   if (tile) {
     tile.dataset.rating = rating;
-    tile.querySelectorAll('.photo-stars .star').forEach(function(s, i) {
+    tile.querySelectorAll('.photo-stars .star-tile-btn').forEach(function(s, i) {
       s.classList.toggle('filled', (i + 1) <= rating);
     });
   }
@@ -1363,11 +1680,14 @@ function renderLoupe() {
   updateLoupeStars(tile ? parseInt(tile.dataset.rating || '0', 10) : 0);
 }
 
+var _STAR_PATH = 'M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.6 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z';
+
 function updateLoupeStars(rating) {
   var el = document.getElementById('loupe-stars');
   var html = '';
   for (var i = 1; i <= 5; i++) {
-    html += '<span class="star ' + (i <= rating ? 'filled' : '') + '" onclick="ratePhoto(' + loupeCurrentId + ',' + i + ')">★</span>';
+    html += '<span class="star-tile-btn ' + (i <= rating ? 'filled' : '') + '" onclick="ratePhoto(' + loupeCurrentId + ',' + i + ')">'
+      + '<svg class="star" viewBox="0 0 24 24" aria-hidden="true"><path d="' + _STAR_PATH + '"/></svg></span>';
   }
   el.innerHTML = html;
 }
@@ -1444,5 +1764,52 @@ document.addEventListener('keydown', function(e) {
 });
 
 refreshSearchTagFilterList();  // Suche ist der Standard-Modus beim Laden
+
+document.addEventListener('DOMContentLoaded', function() {
+  // Deep-Link von /norms ("In der Suche anzeigen") — Ergebnis-Umfang vorausfüllen und
+  // Suche auslösen. "scope" ist der aktuelle Parameter, "norms=only" der veraltete.
+  var params = new URLSearchParams(location.search);
+  var scopeParam = params.get('scope') || (params.get('norms') === 'only' ? 'norms' : '');
+  if (scopeParam && _RESULT_SCOPES.indexOf(scopeParam) !== -1) {
+    setResultScope(scopeParam);
+    // Kleine Verzögerung: htmx hängt seine Listener teils erst kurz nach
+    // DOMContentLoaded vollständig ein, ein sofortiger Trigger direkt beim Laden
+    // würde sonst manchmal ins Leere laufen.
+    setTimeout(function() { htmx.trigger(document.getElementById('q'), 'search'); }, 50);
+  }
+
+  // Mehr-Filter-Panel: Zustand aus vorheriger Sitzung wiederherstellen (localStorage),
+  // ausser es ist beim Laden bereits ein Tier-1-Filter gesetzt.
+  var hasTier1 = countActiveTier1Filters() > 0;
+  var wasOpen;
+  try { wasOpen = localStorage.getItem('archivio_mehr_filter_open') === '1'; } catch (e) { wasOpen = false; }
+  if (hasTier1 || wasOpen) toggleMehrFilter(true);
+  updateMehrFilterCount();
+
+  checkMissedScan();
+});
+
+// Hinweis, falls der geplante taegliche Scan (Einstellungen -> Automatischer Scan)
+// nicht gelaufen ist -- typischerweise weil der Rechner ueber Nacht ausgeschaltet war
+// (der Scheduler laeuft nur, waehrend der Server laeuft).
+function checkMissedScan() {
+  fetch('/api/scan/missed-check').then(function(r) { return r.json(); }).then(function(d) {
+    if (!d.missed) return;
+    document.getElementById('missed-scan-text').textContent =
+      'Letzter Scan am ' + d.last_scan_date + '. Willst du jetzt neu scannen? Tipp: Stelle die ' +
+      'Zeit in den Einstellungen so ein, dass der Scan automatisch durchgeführt werden kann -- ' +
+      'schaltest du den Computer z.B. über Nacht aus, leg die Zeit auf die Mittagszeit, so ist ' +
+      'Archivio immer aktuell.';
+    document.getElementById('missed-scan-banner').style.display = 'flex';
+  }).catch(function() {});
+}
+
+function runMissedScanNow() {
+  fetch('/api/scan/all', { method: 'POST' }).then(dismissMissedScanBanner);
+}
+
+function dismissMissedScanBanner() {
+  document.getElementById('missed-scan-banner').style.display = 'none';
+}
 </script>
 {% endblock %}

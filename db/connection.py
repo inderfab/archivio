@@ -2,10 +2,20 @@ from __future__ import annotations
 
 import os
 import sqlite3
+import unicodedata
 from pathlib import Path
 from config import settings
 
 _DB_PATH: Path | None = None
+
+
+def _nfc(s: str | None) -> str | None:
+    """SQLite-Funktion nfc(x) -- macOS liefert Datei-/Ordnernamen mit Umlauten beim
+    Scan oft NFD-zerlegt (u + kombinierender Trema statt ü), waehrend Browser-Eingaben
+    ueblicherweise NFC-komponiert sind. Ohne Normalisierung schlagen LIKE-Vergleiche
+    zwischen getippten Ordnernamen und gespeicherten Pfaden lautlos fehl (sichtbar
+    identischer Text, unterschiedliche Byte-Folge)."""
+    return unicodedata.normalize("NFC", s) if s is not None else None
 
 
 def _resolve_path() -> Path:
@@ -29,6 +39,7 @@ def get_connection() -> sqlite3.Connection:
     conn.execute("PRAGMA foreign_keys = ON")
     conn.execute("PRAGMA cache_size = -8192")   # max 8 MB Seitencache
     conn.execute("PRAGMA mmap_size = 0")        # kein Memory-Mapping
+    conn.create_function("nfc", 1, _nfc)
     return conn
 
 

@@ -1,3 +1,17 @@
+{% if doc.is_norm %}
+<div class="preview-meta" style="color:#991b1b; margin-bottom:8px;">
+  🔒 Als Norm klassifiziert{% if doc.norm_reason %} ({{ doc.norm_reason }}){% endif %} —
+  Volltext nicht über MCP/KI zugänglich.
+</div>
+{% else %}
+<div style="margin-bottom:8px;">
+  <button class="btn btn-sm" hx-post="/toggle-norm/{{ doc.id }}?q={{ q | urlencode }}"
+          hx-target="#preview-{{ doc.id }}" hx-swap="innerHTML">
+    Als Norm markieren
+  </button>
+</div>
+{% endif %}
+
 {% if doc.source_type == 'email' %}
 
   <div class="preview-meta">

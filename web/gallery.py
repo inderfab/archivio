@@ -5,8 +5,10 @@ nie ein Dateipfad als Client-Parameter.
 """
 from __future__ import annotations
 
+import json
 import logging
 import re
+import unicodedata
 from pathlib import Path
 
 from fastapi import APIRouter, Query, Request
@@ -101,23 +103,58 @@ def _date_filter_sql(date_from: str, date_to: str) -> tuple[str, list]:
     return sql, params
 
 
+def _filename_filter_sql(q: str) -> tuple[str, list]:
+    if not q:
+        return "", []
+    return " AND d.filename LIKE ?", [f"%{q}%"]
+
+
+def _parse_multi(value: str) -> list[str]:
+    """Frontend schickt eine Mehrfachauswahl als JSON-Array-String (z.B. '["a","b"]'),
+    damit einzelne Werte beliebige Zeichen (Kommas, Ordnernamen) enthalten duerfen,
+    ohne mit einem Trennzeichen zu kollidieren. Einzelwerte ohne JSON-Klammern (alte
+    Aufrufe / direkte Query-Param-Eingabe) werden als Ein-Element-Liste behandelt."""
+    if not value:
+        return []
+    try:
+        parsed = json.loads(value)
+    except (ValueError, TypeError):
+        return [value]
+    if isinstance(parsed, list):
+        return [str(v) for v in parsed if v not in (None, "")]
+    return [str(parsed)]
+
+
 def _folder_filter_sql(project_id: str, ordner: str) -> tuple[str, list]:
     """Ordner-Tag-Filter: direkter Elternordner, nur sinnvoll innerhalb eines Projekts
-    (ohne Projektfilter wird nach Projekt statt Ordner gruppiert)."""
-    if not ordner or not project_id:
+    (ohne Projektfilter wird nach Projekt statt Ordner gruppiert). Mehrfachauswahl =
+    ODER-Verknuepfung (Foto passt, wenn es in irgendeinem der gewaehlten Ordner liegt).
+
+    nfc(...) auf beiden Seiten: macOS liefert Ordnernamen mit Umlauten beim Scan oft
+    NFD-zerlegt, der hier ankommende Wert (angeklickter/getippter Tag aus dem Browser)
+    ist ueblicherweise NFC -- ohne Normalisierung liefert LIKE trotz sichtbar
+    identischem Namen keinen Treffer (siehe db/connection.py::_nfc)."""
+    folders = _parse_multi(ordner) if project_id else []
+    if not folders:
         return "", []
-    return " AND (dp.path || '/') LIKE ?", [f"%/{ordner}/%"]
+    clauses = " OR ".join(["nfc(dp.path || '/') LIKE nfc(?)"] * len(folders))
+    return f" AND ({clauses})", [f"%/{f}/%" for f in folders]
 
 
 def _tag_filter_sql(tag_id: str) -> tuple[str, list]:
-    """Globaler Foto-Tag-Filter (ordnerübergreifend, projektunabhängig)."""
-    if not tag_id:
+    """Globaler Foto-Tag-Filter (ordnerübergreifend, projektunabhängig). Mehrfachauswahl
+    = ODER-Verknuepfung (Foto passt, wenn es mindestens einen der gewaehlten Tags hat)."""
+    tids = []
+    for v in _parse_multi(tag_id):
+        try:
+            tids.append(int(v))
+        except ValueError:
+            continue
+    if not tids:
         return "", []
-    try:
-        tid = int(tag_id)
-    except ValueError:
-        return "", []
-    return " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)", [tid]
+    placeholders = ",".join("?" * len(tids))
+    return (f" AND d.id IN (SELECT document_id FROM photo_tag_assignments "
+            f"WHERE tag_id IN ({placeholders}))", tids)
 
 
 _DATE_SORT_OPTIONS = {
@@ -171,7 +208,7 @@ def _size_filter_sql(max_size_mb: str) -> tuple[str, list]:
 def _fetch_photos(
     conn, project_id: str, sterne: str, offset: int, limit: int,
     date_from: str = "", date_to: str = "", formate: str = "", ordner: str = "",
-    tag_id: str = "", max_size_mb: str = "15", sort: str = "datum_neu",
+    tag_id: str = "", max_size_mb: str = "15", sort: str = "datum_neu", q: str = "",
 ) -> list[dict]:
     pf_sql, pf_params = _project_filter_sql(project_id)
     rf_sql, rf_params = _rating_filter_sql(sterne)
@@ -180,6 +217,7 @@ def _fetch_photos(
     of_sql, of_params = _folder_filter_sql(project_id, ordner)
     tf_sql, tf_params = _tag_filter_sql(tag_id)
     lt_sql, lt_params = _size_filter_sql(max_size_mb)
+    qf_sql, qf_params = _filename_filter_sql(q)
     placeholders = ",".join("?" * len(_GALLERY_EXTS))
     sql = f"""
         SELECT d.id AS id, d.filename AS filename, d.extension AS extension,
@@ -198,10 +236,11 @@ def _fetch_photos(
         {of_sql}
         {tf_sql}
         {lt_sql}
+        {qf_sql}
         {{ORDER_LIMIT}}
     """
     params = (list(_GALLERY_EXTS) + pf_params + rf_params + ff_params + df_params + of_params
-              + tf_params + lt_params)
+              + tf_params + lt_params + qf_params)
 
     if sort in _NAME_SORT_MODES:
         # Natuerliches Sortieren (1, 2, 10 statt 1, 10, 2) laesst sich nicht in
@@ -214,7 +253,7 @@ def _fetch_photos(
         photos = []
         for row in rows:
             d = dict(row)
-            d["group"] = _parent_folder_name(d["path"]) if project_id else (d["project_name"] or "")
+            d["group"] = unicodedata.normalize("NFC", _parent_folder_name(d["path"])) if project_id else (d["project_name"] or "")
             photos.append(d)
         photos = _sort_photos_naturally(photos, sort)
         return photos[offset:offset + limit]
@@ -251,14 +290,18 @@ def _fetch_folder_tags(conn, project_id: str) -> list[str]:
     # misszuverstehen). Pro DISTINCTEM Elternordner nur einmal pruefen statt pro Datei.
     folder_paths = {str(Path(r["path"]).parent) for r in rows}
     existing_folders = {fp for fp in folder_paths if Path(fp).exists()}
+    # NFC normalisieren -- siehe _folder_filter_sql: macOS liefert Ordnernamen mit
+    # Umlauten beim Scan oft NFD-zerlegt, dieselbe Normalisierung wie beim Filtern.
     tags = sorted({
-        _parent_folder_name(r["path"]) for r in rows
+        unicodedata.normalize("NFC", _parent_folder_name(r["path"])) for r in rows
         if str(Path(r["path"]).parent) in existing_folders
     })
     return tags
 
 
-def _group_photos(photos: list[dict]) -> list[dict]:
+def _group_photos(photos: list[dict], group: bool = True) -> list[dict]:
+    if not group:
+        return [{"name": "", "photos": photos}] if photos else []
     groups: list[dict] = []
     current = None
     for p in photos:
@@ -282,15 +325,17 @@ async def galerie(
     tag_id: str = Query(default=""),
     max_size_mb: str = Query(default="15"),
     sort: str = Query(default="datum_neu"),
+    q: str = Query(default=""),
+    group: str = Query(default="1"),
 ):
     conn = connection.get_connection()
     try:
         photos = _fetch_photos(conn, project_id, sterne, offset, PAGE_SIZE,
                                 date_from, date_to, formate, ordner, tag_id,
-                                max_size_mb, sort)
+                                max_size_mb, sort, q)
     finally:
         conn.close()
-    groups = _group_photos(photos)
+    groups = _group_photos(photos, group=group != "0")
     return templates.TemplateResponse("_gallery_grid.html", {
         "request": request,
         "groups": groups,
@@ -305,8 +350,82 @@ async def galerie(
         "tag_id": tag_id,
         "max_size_mb": max_size_mb,
         "sort": sort,
+        "q": q,
+        "group": group,
         "is_empty": offset == 0 and not photos,
     })
+
+
+def _fetch_all_photo_ids(
+    conn, project_id: str, sterne: str, date_from: str = "", date_to: str = "",
+    formate: str = "", ordner: str = "", tag_id: str = "", max_size_mb: str = "15", q: str = "",
+) -> list[int]:
+    """Wie _fetch_photos(), aber ALLE passenden IDs ohne Limit/Offset -- für 'Sichtbare
+    wählen', das trotz des Namens den kompletten aktuellen Filter auswählen soll, nicht
+    nur die per Infinite-Scroll bereits ins DOM geladene erste Seite."""
+    pf_sql, pf_params = _project_filter_sql(project_id)
+    rf_sql, rf_params = _rating_filter_sql(sterne)
+    ff_sql, ff_params = _format_filter_sql(formate)
+    df_sql, df_params = _date_filter_sql(date_from, date_to)
+    of_sql, of_params = _folder_filter_sql(project_id, ordner)
+    tf_sql, tf_params = _tag_filter_sql(tag_id)
+    lt_sql, lt_params = _size_filter_sql(max_size_mb)
+    qf_sql, qf_params = _filename_filter_sql(q)
+    placeholders = ",".join("?" * len(_GALLERY_EXTS))
+    sql = f"""
+        SELECT d.id AS id
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.extension IN ({placeholders})
+        {pf_sql} {rf_sql} {ff_sql} {df_sql} {of_sql} {tf_sql} {lt_sql} {qf_sql}
+    """
+    params = (list(_GALLERY_EXTS) + pf_params + rf_params + ff_params + df_params + of_params
+              + tf_params + lt_params + qf_params)
+    return [r["id"] for r in conn.execute(sql, params).fetchall()]
+
+
+@router.get("/galerie/select-all")
+async def galerie_select_all(
+    project_id: str = Query(default=""),
+    sterne: str = Query(default=""),
+    date_from: str = Query(default=""),
+    date_to: str = Query(default=""),
+    formate: str = Query(default=""),
+    ordner: str = Query(default=""),
+    tag_id: str = Query(default=""),
+    max_size_mb: str = Query(default="15"),
+    q: str = Query(default=""),
+):
+    conn = connection.get_connection()
+    try:
+        ids = _fetch_all_photo_ids(conn, project_id, sterne, date_from, date_to,
+                                    formate, ordner, tag_id, max_size_mb, q)
+    finally:
+        conn.close()
+    return JSONResponse({"ids": ids})
+
+
+@router.get("/galerie/paths")
+async def galerie_paths(ids: str = Query(default="")):
+    """Löst ausgewählte Foto-IDs serverseitig zu Dateipfaden auf -- 'In neuen Ordner
+    speichern' kann sich bei einer über /galerie/select-all getroffenen Auswahl nicht
+    auf im DOM geladene .photo-tile-Elemente verlassen (Fotos jenseits der ersten
+    Infinite-Scroll-Seite existieren dort schlicht nicht)."""
+    id_list = [int(i) for i in ids.split(",") if i.strip().isdigit()]
+    if not id_list:
+        return JSONResponse({"paths": {}})
+    conn = connection.get_connection()
+    try:
+        placeholders = ",".join("?" * len(id_list))
+        rows = conn.execute(f"""
+            SELECT d.id AS id, dp.path AS path
+            FROM documents d
+            JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE d.id IN ({placeholders})
+        """, id_list).fetchall()
+    finally:
+        conn.close()
+    return JSONResponse({"paths": {str(r["id"]): r["path"] for r in rows}})
 
 
 @router.get("/galerie/kontaktbogen", response_class=HTMLResponse)

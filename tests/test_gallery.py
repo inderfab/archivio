@@ -224,6 +224,32 @@ def test_galerie_ordner_tags_and_filter(tmp_db, tmp_path):
     assert "b.jpg" not in r.text
 
 
+def test_galerie_ordner_filter_handles_nfd_nfc_mismatch(tmp_db, tmp_path):
+    """macOS liefert Ordnernamen mit Umlauten beim Scan oft NFD-zerlegt (z.B. 'u' +
+    kombinierender Trema statt 'ü'), waehrend eine Browser-Eingabe/ein angeklickter Chip
+    ueblicherweise NFC-komponiert ist -- sichtbar identischer Name, andere Byte-Folge.
+    Ohne Normalisierung (db/connection.py::_nfc) liefert weder die Tag-Liste den
+    richtigen Namen noch der Ordner-Filter einen Treffer."""
+    import unicodedata
+
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    nfd_name = unicodedata.normalize("NFD", "Südfassade")
+    assert nfd_name != "Südfassade"  # sonst testet dieser Test nichts
+    folder = tmp_path / nfd_name
+    folder.mkdir()
+    photo = folder / "a.jpg"
+    photo.write_bytes(_jpeg_bytes())
+    doc_id = _make_photo(tmp_db, p, photo)
+
+    c = _client()
+    r = c.get("/galerie/ordner-tags", params={"project_id": str(p)})
+    assert r.json()["tags"] == ["Südfassade"]  # NFC in der Anzeige, nicht das rohe NFD
+
+    r = c.get("/galerie", params={"project_id": str(p), "ordner": "Südfassade"})
+    assert f'data-id="{doc_id}"' in r.text
+
+
 def test_galerie_ordner_tags_excludes_deleted_folder(tmp_db, tmp_path):
     """Ordner koennen nach dem Scan geloescht werden (die DB behaelt die Dokumente
     absichtlich, siehe _fetch_folder_tags-Kommentar) -- der Ordner-Filter soll einen

@@ -1,0 +1,186 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Normen{% endblock %}
+
+{% block content %}
+<style>
+  .norms-page { padding: 32px 0 64px; max-width: 780px; }
+  .norms-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
+  .norms-page .intro { color: var(--text-2); font-size: 14px; margin-bottom: 24px; }
+  .norms-section { margin-bottom: 28px; }
+  .norms-section h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text-2); margin-bottom: 10px; }
+  .norm-folder-row { display: flex; align-items: center; gap: 10px; padding: 10px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; }
+  .norm-folder-path { flex: 1; font-size: 13px; font-family: ui-monospace, monospace; word-break: break-all; }
+  .norm-folder-meta { font-size: 12px; color: var(--text-3); white-space: nowrap; }
+  .norm-folder-actions { display: flex; gap: 6px; }
+  .norm-empty { color: var(--text-3); font-size: 13px; font-style: italic; }
+  .norms-total-row { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+
+  .norm-add-folder-form { display: flex; gap: 8px; margin-top: 10px; }
+  .norm-add-folder-form input {
+    flex: 1; padding: 7px 10px; font-size: 13px; font-family: ui-monospace, monospace;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg); outline: none;
+  }
+  .norm-add-folder-form input:focus { border-color: var(--accent); }
+
+  .norm-search-box {
+    padding: 8px 10px; font-size: 13px; font-family: inherit; width: 100%;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg); outline: none; margin-bottom: 8px;
+  }
+  .norm-search-box:focus { border-color: var(--accent); }
+  #norm-candidates:empty { margin: 0; }
+
+  .norm-list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .norm-list-row {
+    display: flex; align-items: center; gap: 10px; padding: 8px 12px; font-size: 12px;
+    border-bottom: 1px solid var(--border);
+  }
+  .norm-list-row:last-child { border-bottom: none; }
+  .norm-list-type {
+    flex: 0 0 46px; font-weight: 700; font-size: 11px; color: var(--text-2);
+    text-align: center; background: var(--bg-2); border-radius: 4px; padding: 2px 0;
+  }
+  .norm-list-filename { flex: 0 0 220px; font-weight: 500; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .norm-list-path { flex: 1; color: var(--text-3); font-family: ui-monospace, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  #norms-list-box { max-height: 770px; overflow-y: auto; margin-top: 14px; }
+  .norms-sentinel { height: 1px; }
+
+  /* Einklappbare "Erkannte Normen" -- bei 300+ Normen sonst extrem lang */
+  details.norms-collapsible {
+    border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden;
+  }
+  details.norms-collapsible > summary {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 10px 14px; background: var(--bg-2); cursor: pointer;
+    list-style: none; user-select: none;
+  }
+  details.norms-collapsible > summary::-webkit-details-marker { display: none; }
+  .norms-collapsible-body { padding: 14px; }
+  .sec-arrow { font-size: 10px; transition: transform .18s; display: inline-block; }
+  details.norms-collapsible[open] > summary .sec-arrow { transform: rotate(90deg); }
+  .norm-file-picker-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .norm-file-picker-row .norm-search-box { margin-bottom: 0; }
+</style>
+<div class="norms-page">
+  <h1>Normen</h1>
+  <p class="intro">
+    Technische Normen (SIA/VSS/EN/DIN/ISO) werden lokal weiterhin durchsucht und angezeigt —
+    ihr Volltext wird aber nicht über die KI/MCP-Schnittstelle ausgegeben (Urheber-/Lizenzrecht).
+    Eine einmal gesetzte Norm-Markierung lässt sich hier bewusst nicht wieder entfernen
+    (im Zweifel gesperrt statt versehentlich freigegeben).
+  </p>
+
+  <div class="norms-section">
+    <details class="norms-collapsible" open>
+      <summary>
+        <span><span class="sec-arrow">▶</span> Erkannte Normen ({{ total_norms }})</span>
+        <form onclick="event.stopPropagation()" hx-post="/norms/reclassify" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+          <button class="btn btn-sm" type="submit" title="Klassifiziert den kompletten Bestand anhand des bereits gespeicherten Volltexts neu -- nötig nach dem Rescan eines Ordners, der schon vor der Norm-Erkennung indexiert war">
+            🔄 Alle Dokumente nochmals auf Normen prüfen
+          </button>
+        </form>
+      </summary>
+      <div class="norms-collapsible-body">
+        <div class="norm-file-picker-row">
+          <input type="text" class="norm-search-box" placeholder="Dokument als Norm hinzufügen: Dateiname oder Pfad eingeben…"
+            hx-get="/norms/search-candidates" hx-trigger="input changed delay:300ms"
+            hx-target="#norm-candidates" name="q" id="norm-search-input">
+          <button type="button" class="btn btn-sm" onclick="chooseNormFile()" title="Dokument im Finder auswählen" style="flex-shrink:0;">
+            📁 Datei wählen
+          </button>
+        </div>
+        <div id="norm-candidates" class="norm-list"></div>
+
+        <div class="norm-list" id="norms-list-box" hx-get="/norms/list" hx-trigger="load" hx-swap="innerHTML"></div>
+      </div>
+    </details>
+  </div>
+
+  <div class="norms-section">
+    <h2>Ordner-Vorschläge ({{ proposed | length }})</h2>
+    {% if not proposed %}
+      <p class="norm-empty">Keine offenen Vorschläge — nach einem vollständigen Scan schlägt Archivio
+        automatisch Ordner vor, in denen ein hoher Anteil erkannter Normen liegt.</p>
+    {% endif %}
+    {% for f in proposed %}
+    <div class="norm-folder-row">
+      <span class="norm-folder-path">{{ f.path }}</span>
+      <span class="norm-folder-meta">{{ f.n_norms }} von {{ f.n_docs }} Normen</span>
+      <div class="norm-folder-actions">
+        <form hx-post="/norms/confirm" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+          <input type="hidden" name="path" value="{{ f.path }}">
+          <button class="btn btn-sm" type="submit">Bestätigen</button>
+        </form>
+        <form hx-post="/norms/reject" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+          <input type="hidden" name="path" value="{{ f.path }}">
+          <button class="btn btn-sm" type="submit">Ablehnen</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+
+    <form class="norm-add-folder-form" hx-post="/norms/add-folder" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+      <input type="text" name="path" placeholder="/Pfad/zu/einem/Ordner mit Normen" required>
+      <button class="btn btn-sm" type="submit">+ Ordner hinzufügen</button>
+    </form>
+  </div>
+
+  <div class="norms-section">
+    <h2>Bestätigte Norm-Ordner ({{ confirmed | length }})</h2>
+    {% if not confirmed %}
+      <p class="norm-empty">Keine bestätigten Ordner.</p>
+    {% endif %}
+    {% for f in confirmed %}
+    <div class="norm-folder-row">
+      <span class="norm-folder-path">{{ f.path }}</span>
+      <span class="norm-folder-meta">{{ f.n_norms }} von {{ f.n_docs }} Normen</span>
+      <div class="norm-folder-actions">
+        <form hx-post="/norms/reject" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+          <input type="hidden" name="path" value="{{ f.path }}">
+          <button class="btn btn-sm" type="submit">Zurücksetzen</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+
+  {% if rejected %}
+  <div class="norms-section">
+    <h2>Abgelehnte Vorschläge ({{ rejected | length }})</h2>
+    {% for f in rejected %}
+    <div class="norm-folder-row">
+      <span class="norm-folder-path">{{ f.path }}</span>
+      <span class="norm-folder-meta">{{ f.n_norms }} von {{ f.n_docs }} Normen</span>
+      <div class="norm-folder-actions">
+        <form hx-post="/norms/confirm" hx-target=".norms-page" hx-select=".norms-page" hx-swap="outerHTML">
+          <input type="hidden" name="path" value="{{ f.path }}">
+          <button class="btn btn-sm" type="submit">Doch bestätigen</button>
+        </form>
+      </div>
+    </div>
+    {% endfor %}
+  </div>
+  {% endif %}
+</div>
+
+<script>
+function chooseNormFile() {
+  fetch(HELPER + '/choose-file', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      var input = document.getElementById('norm-search-input');
+      input.value = d.path;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })
+    .catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten, oder den Dateinamen von Hand eingeben.');
+    });
+}
+</script>
+{% endblock %}

@@ -55,6 +55,7 @@
       <span class="result-title">{{ r.filename }}</span>
       <span class="badge badge-{{ ext }}">{{ 'MAIL' if is_mail else ext | upper }}</span>
       {% if r.page_number %}<span class="badge badge-page">Seite {{ r.page_number }}</span>{% endif %}
+      {% if r.is_norm %}<span class="badge badge-norm" title="Als Norm klassifiziert — Volltext nicht über MCP/KI zugänglich">🔒 Norm</span>{% endif %}
     </div>
 
     <div class="result-meta">

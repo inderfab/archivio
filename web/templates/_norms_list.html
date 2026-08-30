@@ -1,0 +1,14 @@
+{% for d in docs %}
+<div class="norm-list-row">
+  <span class="norm-list-type">{{ d.type }}</span>
+  <span class="norm-list-filename" title="{{ d.filename }}">{{ d.filename }}</span>
+  <span class="norm-list-path" title="{{ d.path }}">{{ d.path }}</span>
+</div>
+{% endfor %}
+{% if has_more %}
+<div class="norms-sentinel" hx-get="/norms/list?offset={{ next_offset }}"
+     hx-trigger="intersect root:#norms-list-box threshold:0" hx-swap="outerHTML"></div>
+{% endif %}
+{% if is_empty %}
+<p class="norm-empty">Keine Normen gefunden.</p>
+{% endif %}

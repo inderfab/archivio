@@ -666,6 +666,17 @@ def scan_project(project_id: int, root: Path,
     except Exception as exc:
         log.warning("Aufräumen gelöschter Dateien fehlgeschlagen: %s", exc)
 
+    try:
+        from scanner.norms import load_config
+        from scanner.norms_learn import learn_norm_folders
+        _norms_conn = connection.get_connection()
+        try:
+            learn_norm_folders(_norms_conn, load_config())
+        finally:
+            _norms_conn.close()
+    except Exception as exc:
+        log.warning("Norm-Ordner-Lernen fehlgeschlagen: %s", exc)
+
     # FTS5-Automerge wieder aktivieren (billig). Das teure optimize() wird NICHT
     # hier angestossen — es hielte eine Schreibsperre, die bei "Alle scannen" die
     # Inserts des nächsten Projekts blockiert (database is locked → 0 Dokumente).
@@ -920,6 +931,29 @@ def _process_file(conn, project_id: int, path: Path) -> str:
 _EXTRACT_TIMEOUT = 30
 
 
+def _classify_norm(conn, doc_id: int, path: Path, text: str) -> None:
+    """Norm-Erkennung (SIA/VSS/EN/DIN/ISO) nach der Textextraktion -- siehe
+    scanner/norms.py. norm_manual=1 (von Hand gesetzt/aufgehoben) wird NIE
+    angefasst, sonst geht jede Korrektur beim naechsten Scan verloren. Fehler
+    hier duerfen den Scan nicht abbrechen (z.B. norms.yaml fehlt in einem
+    Dev-Checkout) -- deshalb breit abgefangen."""
+    try:
+        from scanner.norms import get_classifier
+        row = conn.execute(
+            "SELECT norm_manual FROM documents WHERE id = ?", (doc_id,)
+        ).fetchone()
+        if row and row["norm_manual"]:
+            return
+        verdict = get_classifier(conn).classify(str(path), text)
+        with conn:
+            conn.execute(
+                "UPDATE documents SET is_norm = ?, norm_reason = ? WHERE id = ?",
+                (1 if verdict.is_norm else 0, verdict.reason, doc_id),
+            )
+    except Exception as exc:
+        log.warning("Norm-Klassifikation fehlgeschlagen für %s: %s", path.name, exc)
+
+
 def _extract_and_store(conn, doc_id: int, path: Path) -> str:
     """Extrahiert Text und speichert ihn. Gibt 'ok', 'unsupported' oder 'error' zurück."""
     if extractors._IN_WORKER_PROCESS:
@@ -969,6 +1003,8 @@ def _extract_and_store(conn, doc_id: int, path: Path) -> str:
             queries.upsert_content(conn, doc_id, text, "")
         if chunks:
             queries.save_chunks(conn, doc_id, chunks)
+
+    _classify_norm(conn, doc_id, path, text)
 
     # PDF-Metadaten (Creator/Producer) für Plan-Erkennung
     if path.suffix.lower() == ".pdf":

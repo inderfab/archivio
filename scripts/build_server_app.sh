@@ -120,6 +120,8 @@ rm -f "$APP/Contents/Resources/config/entitlements.plist"
 # (der auch Build-/Dev-Tooling wie build_server_app.sh selbst enthält).
 mkdir -p "$APP/Contents/Resources/scripts"
 cp scripts/backfill_rubrica.py "$APP/Contents/Resources/scripts/"
+cp scripts/backfill_norms.py "$APP/Contents/Resources/scripts/"
+cp scripts/find_orphaned_projects.py "$APP/Contents/Resources/scripts/"
 cp -r helper/ArchivioLink.workflow "$APP/Contents/Resources/"
 cp helper/archivio_mcp.py  "$APP/Contents/Resources/"
 cp shared/menubar_bridge.py "$APP/Contents/Resources/"

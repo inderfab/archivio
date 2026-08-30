@@ -8,6 +8,7 @@ import re
 import subprocess
 import threading
 import zipfile
+from datetime import datetime
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -110,6 +111,16 @@ async def mcp_search(
         }
         for r in results[:limit]
     ]
+
+    from scanner.norms import assert_no_norm_text, redact_hits
+
+    _norms_conn = connection.get_connection()
+    try:
+        cleaned = redact_hits(_norms_conn, cleaned)
+    finally:
+        _norms_conn.close()
+    assert_no_norm_text(cleaned)
+
     return JSONResponse({"results": cleaned, "folders": folders})
 
 
@@ -148,6 +159,16 @@ async def mcp_semantic_search(
         }
         for s in (sources or [])[:limit]
     ]
+
+    from scanner.norms import assert_no_norm_text, redact_hits
+
+    _norms_conn = connection.get_connection()
+    try:
+        cleaned = redact_hits(_norms_conn, cleaned)
+    finally:
+        _norms_conn.close()
+    assert_no_norm_text(cleaned)
+
     return JSONResponse({"sources": cleaned, "error": error, "ollama_missing": ollama_missing})
 
 
@@ -167,15 +188,25 @@ async def mcp_document(document_id: int):
         path_row = conn.execute(
             "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1", (document_id,)
         ).fetchone()
+        filepath = path_row["path"] if path_row else None
         result = {
             "id":                document_id,
             "filename":          doc["filename"],
             "extension":         doc["extension"],
             "source_type":       doc["source_type"],
             "extraction_status": doc["extraction_status"],
-            "filepath":          path_row["path"] if path_row else None,
+            "filepath":          filepath,
             "content":           (content_row["content"] if content_row else "") or "",
         }
+
+        from scanner.norms import guard_read
+
+        notice = guard_read(conn, document_id, doc["filename"], filepath)
+        if notice is not None:
+            result["is_norm"] = True
+            result["content"] = notice
+            return JSONResponse(result)
+
         if doc["source_type"] == "email":
             m = conn.execute(
                 "SELECT sender, recipients, cc, subject, date, mailbox_name "
@@ -297,6 +328,46 @@ async def scan_nav_status():
         return _HTML(f'<span class="nav-scan-pill">{label}</span>')
 
     return _HTML("")
+
+
+@router.get("/scan/missed-check")
+async def scan_missed_check():
+    """Prüft, ob der geplante tägliche Scan (Einstellungen → Automatischer Scan)
+    heute schon hätte laufen sollen, aber nicht gelaufen ist -- typischerweise weil
+    der Rechner über Nacht ausgeschaltet war (der Scheduler läuft nur, während der
+    Server läuft, siehe web/main.py::_scheduler_loop). Rein informativ für den
+    "Jetzt scannen?"-Hinweis auf der Startseite -- kein Ersatz für den Scheduler."""
+    scan_time = (settings.get("scheduler.scan_time") or "").strip()
+    if not scan_time:
+        return JSONResponse({"missed": False})
+    try:
+        hour, minute = map(int, scan_time.split(":"))
+    except ValueError:
+        return JSONResponse({"missed": False})
+    now = datetime.now()
+    if now < now.replace(hour=hour, minute=minute, second=0, microsecond=0):
+        return JSONResponse({"missed": False})  # geplante Zeit heute noch nicht erreicht
+
+    conn = connection.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT MAX(last_scanned_at) AS last FROM projects WHERE active = 1"
+        ).fetchone()
+    finally:
+        conn.close()
+    last = row["last"] if row else None
+    if not last:
+        return JSONResponse({"missed": False})  # noch nie gescannt -- eigene Erststart-Situation
+    last_date, today_date = last[:10], now.strftime("%Y-%m-%d")
+    if last_date >= today_date:
+        return JSONResponse({"missed": False})  # heute schon gescannt
+
+    y, m, d = last_date.split("-")
+    return JSONResponse({
+        "missed": True,
+        "last_scan_date": f"{d}.{m}.{y}",
+        "scheduled_time": scan_time,
+    })
 
 
 @router.get("/debug/page-number-stats")

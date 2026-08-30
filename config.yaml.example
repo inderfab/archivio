@@ -9,6 +9,12 @@ office:
   name: ""
   language: de
 
+scheduler:
+  # Tägliche automatische Neu-Indexierung. 22:00 als Standard, da die meisten Büros um
+  # diese Zeit nicht mehr aktiv arbeiten -- bei Bedarf in den Einstellungen anpassen
+  # oder leer lassen zum Deaktivieren.
+  scan_time: "22:00"
+
 scanner:
   base_folders: []
   workers: 2  # Parallele Extraktions-Threads (1 = sequenziell, 2–4 empfohlen)

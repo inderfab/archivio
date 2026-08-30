@@ -1,6 +1,7 @@
 """Dashboard: Projektverwaltung und Ordner-Browser."""
 from __future__ import annotations
 
+import asyncio
 import gc
 import json
 import logging
@@ -1247,26 +1248,53 @@ async def settings_page(
             "username": old.get("username", ""),
             "password": old.get("password", ""),
         }]
-    available, version = _helper_info()
-    # Schneller FDA-Test: Desktop lesbar?
+    # Schneller FDA-Test: Desktop lesbar? Über run_in_executor+wait_for statt direkt --
+    # ohne angehängte GUI-Session (z.B. via Launchd/Terminal-Automation, bevor macOS
+    # je einen TCC-Zugriffsdialog für diesen Prozess gezeigt hat) kann scandir() auf
+    # einem geschützten Ordner (Desktop/Documents/Downloads) unbegrenzt blockieren
+    # statt sofort PermissionError zu werfen. Ein simples thread.join(timeout=..) würde
+    # den Event-Loop trotzdem bis zum Timeout blockieren (und damit JEDE andere
+    # gleichzeitige Anfrage an den Server) -- run_in_executor lagert den blockierenden
+    # Aufruf in einen Worker-Thread aus, der Loop bleibt frei, nur DIESE Anfrage wartet.
+    # Bei Timeout: Status unbekannt, Banner lieber nicht zeigen als den ganzen Server
+    # lahmzulegen (der hängende Executor-Thread ist ein Daemon-Thread, kein Leak-Risiko
+    # für den Prozess).
     import os as _os
-    _desktop = Path(_os.environ.get("HOME", str(Path.home()))) / "Desktop"
+
+    def _fda_check() -> bool:
+        _desktop = Path(_os.environ.get("HOME", str(Path.home()))) / "Desktop"
+        try:
+            list(_os.scandir(str(_desktop)))
+            return False
+        except PermissionError:
+            return True
+        except FileNotFoundError:
+            return False
+
     try:
-        list(_os.scandir(str(_desktop)))
-        fda_missing = False
-    except PermissionError:
-        fda_missing = True
-    except FileNotFoundError:
+        fda_missing = await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _fda_check), timeout=2,
+        )
+    except asyncio.TimeoutError:
         fda_missing = False
     return templates.TemplateResponse("settings.html", {
+        "request":     request,
+        "cfg":         cfg,
+        "saved":       bool(saved),
+        "restart":     bool(restart),
+        "fda_missing": fda_missing,
+    })
+
+
+@router.get("/helper", response_class=HTMLResponse)
+async def helper_page(request: Request):
+    cfg = settings.load_all()
+    available, version = _helper_info()
+    return templates.TemplateResponse("helper.html", {
         "request":          request,
-        "cfg":              cfg,
-        "saved":            bool(saved),
-        "restart":          bool(restart),
         "helper_available": available,
         "helper_version":   version,
         "helper_url_hint":  _helper_url_hint(cfg),
-        "fda_missing":      fda_missing,
     })
 
 
@@ -1349,6 +1377,35 @@ async def settings_save(request: Request):
         "rubrica": {"enabled": rubrica_enabled},
     }
     settings.save(updates)
+
+    # Auto-entdeckte Fotos-Projekte (direkte Unterordner eines Base-Folders, siehe
+    # _discovered_projects_for_base) deaktivieren, wenn ihr Base-Folder hier entfernt
+    # oder geändert wird. Sonst bleiben sie in der DB active=1 -- unsichtbar in den
+    # Settings (nur aktuelle base_folders werden angezeigt) UND im Dashboard (die
+    # Gruppierung läuft nur über die aktuellen base_folders), aber /api/scan/all und
+    # der geplante Scan holen weiterhin blind "WHERE active=1" und scannen munter
+    # weiter -- ein Geisterprojekt, das nirgends im UI mehr auftaucht.
+    old_base_paths = {
+        f.get("path") for f in old_cfg.get("scanner", {}).get("base_folders", []) if f.get("path")
+    }
+    new_base_paths = {f.get("path") for f in base_folders if f.get("path")}
+    removed_base_paths = old_base_paths - new_base_paths
+    if removed_base_paths:
+        conn = connection.get_connection()
+        try:
+            rows = conn.execute("SELECT id, path FROM projects WHERE active=1").fetchall()
+            stale_ids = [
+                r["id"] for r in rows if os.path.dirname(r["path"]) in removed_base_paths
+            ]
+            if stale_ids:
+                with conn:
+                    conn.executemany(
+                        "UPDATE projects SET active=0 WHERE id=?", [(i,) for i in stale_ids]
+                    )
+                log.info("Base-Folder entfernt/geändert — %d verwaiste(s) Projekt(e) deaktiviert: %s",
+                          len(stale_ids), stale_ids)
+        finally:
+            conn.close()
 
     restart_required = (server_host != old_host or str(server_port) != old_port)
     params = "?saved=1" + ("&restart=1" if restart_required else "")

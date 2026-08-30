@@ -36,7 +36,7 @@ def _setup_logging() -> None:
 
 _setup_logging()
 
-from fastapi import FastAPI, Query, Request
+from fastapi import FastAPI, Form, Query, Request
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
@@ -374,21 +374,31 @@ async def search(
     date_to:         str = Query(default=""),
     filesize:        str = Query(default=""),
     duplicates_only: str = Query(default=""),
-    search_in:       str = Query(default="docs"),
+    search_in:       str = Query(default=""),
     tag_id:          str = Query(default=""),
+    scope:           str = Query(default=""),
+    norms:           str = Query(default=""),  # veraltet, siehe unten
 ):
-    scope = set(search_in.split(",")) if search_in else {"docs"}
-    if not scope:
-        scope = {"docs"}
-    filter_plans     = "plans" in scope
-    content_scope    = scope - {"plans"} or {"docs"}  # mindestens docs wenn nur plans aktiv
-    search_docs      = "docs" in content_scope
-    search_filenames = "filenames" in content_scope
-    search_folders   = "folders" in content_scope
+    # "scope" (all|plans|norms) ersetzt die frueheren getrennten Parameter "plans" (als
+    # search_in-Wert) und "norms" (only/exclude) durch ein einziges, sich gegenseitig
+    # ausschliessendes Segmented Control -- ein Dokument ist nie gleichzeitig "nur Plan"
+    # und "nur Norm". Alte Links bleiben funktionsfaehig: norms=only -> scope=norms,
+    # norms=exclude entfaellt ersatzlos (kein "Ohne Normen"-Zustand mehr vorgesehen).
+    if not scope and norms == "only":
+        scope = "norms"
+
+    # "search_in" ist jetzt Einfachauswahl (wie "Umfang"): "" = Alle drei Bereiche,
+    # sonst genau einer davon. Alte Komma-Listen-Links (z.B. "docs,filenames") bleiben
+    # kompatibel, da set(...) auch bei mehreren Werten korrekt aufloest.
+    in_scope = set(search_in.split(",")) if search_in else {"docs", "folders", "filenames"}
+    filter_plans     = scope == "plans"
+    search_docs      = "docs" in in_scope
+    search_filenames = "filenames" in in_scope
+    search_folders   = "folders" in in_scope
 
     results, error, total = [], None, 0
     folder_results = []
-    has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id])
+    has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id, scope, search_in])
     if q.strip() or has_filters:
         # run_in_executor: _run_scoped_search ist eine blockierende SQLite-Anfrage, die bei
         # Mehrwort-Queries mit vielen FTS-OR-Zweigen auf grossen Indizes mehrere Sekunden
@@ -405,9 +415,10 @@ async def search(
                     project_id, type, from_addr, to_addr, subject_filter,
                     date_from, date_to, filesize, duplicates_only,
                     filter_plans=filter_plans, tag_id=tag_id,
+                    norms="only" if scope == "norms" else "",
                 )
                 results, error = _run_scoped_search(conn, q.strip(), filters_str, filter_params,
-                                                     content_scope)
+                                                     in_scope)
                 folders = _search_folders(conn, q.strip(), project_id) if search_folders and q.strip() else []
                 _prefer_project_path(conn, results, project_id)
                 return results, error, folders
@@ -426,6 +437,167 @@ async def search(
         "folder_results": folder_results,
     })
 
+
+
+@app.get("/norms", response_class=HTMLResponse)
+async def norms_page(request: Request):
+    conn = connection.get_connection()
+    proposed = conn.execute(
+        "SELECT path, n_docs, n_norms, detected_at FROM norm_folders "
+        "WHERE status = 'proposed' ORDER BY detected_at DESC"
+    ).fetchall()
+    confirmed = conn.execute(
+        "SELECT path, n_docs, n_norms, decided_at FROM norm_folders "
+        "WHERE status = 'confirmed' ORDER BY path"
+    ).fetchall()
+    rejected = conn.execute(
+        "SELECT path, n_docs, n_norms, decided_at FROM norm_folders "
+        "WHERE status = 'rejected' ORDER BY path"
+    ).fetchall()
+    total_norms = conn.execute("SELECT COUNT(*) FROM documents WHERE is_norm = 1").fetchone()[0]
+    conn.close()
+    return templates.TemplateResponse("norms.html", {
+        "request":     request,
+        "proposed":    [dict(r) for r in proposed],
+        "confirmed":   [dict(r) for r in confirmed],
+        "rejected":    [dict(r) for r in rejected],
+        "total_norms": total_norms,
+    })
+
+
+@app.post("/norms/confirm", response_class=HTMLResponse)
+async def norms_confirm(request: Request, path: str = Form(...)):
+    from scanner.norms import reload_classifier
+    from scanner.norms_learn import confirm_norm_folder
+
+    conn = connection.get_connection()
+    confirm_norm_folder(conn, path)
+    reload_classifier(conn)
+    conn.close()
+    return await norms_page(request)
+
+
+@app.post("/norms/reject", response_class=HTMLResponse)
+async def norms_reject(request: Request, path: str = Form(...)):
+    from scanner.norms import reload_classifier
+    from scanner.norms_learn import reject_norm_folder
+
+    conn = connection.get_connection()
+    reject_norm_folder(conn, path)
+    reload_classifier(conn)
+    conn.close()
+    return await norms_page(request)
+
+
+@app.post("/norms/add-folder", response_class=HTMLResponse)
+async def norms_add_folder(request: Request, path: str = Form(...)):
+    """Manuell einen Ordner als Norm-Ordner eintragen -- für Ordner mit nur wenigen
+    echten Normen, die den automatischen Vorschlags-Schwellwert nie erreichen und
+    deshalb nie unter 'Ordner-Vorschläge' auftauchen."""
+    from scanner.norms import reload_classifier
+    from scanner.norms_learn import add_manual_norm_folder
+
+    path = path.strip().rstrip("/")
+    if path:
+        conn = connection.get_connection()
+        add_manual_norm_folder(conn, path)
+        reload_classifier(conn)
+        conn.close()
+    return await norms_page(request)
+
+
+@app.post("/norms/reclassify", response_class=HTMLResponse)
+async def norms_reclassify(request: Request):
+    """Klassifiziert den kompletten Bestand anhand des bereits gespeicherten Volltexts
+    neu (siehe scripts/backfill_norms.py) -- als Button direkt im UI, damit man dafür
+    nicht ins Terminal muss. Notwendig nach jedem Rescan eines Ordners, der schon VOR
+    der Norm-Erkennung indexiert war: ein normaler Scan überspringt unveränderte
+    Dateien komplett und klassifiziert sie deshalb nie (scanner/walker.py, Schnellpfad
+    in _process_file)."""
+    from scanner.norms import get_classifier
+
+    conn = connection.get_connection()
+    try:
+        classifier = get_classifier(conn)
+        if classifier.enabled:
+            rows = conn.execute("""
+                SELECT d.id AS id, d.is_norm AS is_norm, dp.path AS path,
+                       COALESCE(c.content, '') AS content
+                FROM documents d
+                JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+                LEFT JOIN document_content c ON c.document_id = d.id
+                WHERE d.norm_manual = 0
+            """).fetchall()
+            for row in rows:
+                verdict = classifier.classify(row["path"], row["content"])
+                new_is_norm = 1 if verdict.is_norm else 0
+                if new_is_norm != row["is_norm"]:
+                    conn.execute(
+                        "UPDATE documents SET is_norm = ?, norm_reason = ? WHERE id = ?",
+                        (new_is_norm, verdict.reason, row["id"]),
+                    )
+            conn.commit()
+    finally:
+        conn.close()
+    return await norms_page(request)
+
+
+_NORMS_PAGE_SIZE = 50
+
+
+@app.get("/norms/list", response_class=HTMLResponse)
+async def norms_list(request: Request, offset: int = Query(default=0)):
+    from scanner.norms import guess_norm_type
+
+    conn = connection.get_connection()
+    rows = conn.execute("""
+        SELECT d.id AS id, d.filename AS filename, dp.path AS path,
+               COALESCE(c.content, '') AS content
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content c ON c.document_id = d.id
+        WHERE d.is_norm = 1
+        ORDER BY dp.path
+        LIMIT ? OFFSET ?
+    """, (_NORMS_PAGE_SIZE, offset)).fetchall()
+    conn.close()
+    docs = [{
+        "id":       r["id"],
+        "filename": r["filename"],
+        "path":     r["path"],
+        "type":     guess_norm_type(r["filename"], r["content"]),
+    } for r in rows]
+    return templates.TemplateResponse("_norms_list.html", {
+        "request":     request,
+        "docs":        docs,
+        "has_more":    len(rows) == _NORMS_PAGE_SIZE,
+        "next_offset": offset + _NORMS_PAGE_SIZE,
+        "is_empty":    offset == 0 and not rows,
+    })
+
+
+@app.get("/norms/search-candidates", response_class=HTMLResponse)
+async def norms_search_candidates(request: Request, q: str = Query(default="")):
+    """Dokumente zum manuellen Hinzufügen als Norm -- nur Nicht-Normen, per Datei-
+    oder Pfadname gefiltert (kein Volltext -- hier geht es ums Finden eines konkreten
+    bekannten Dokuments, nicht um inhaltliche Suche)."""
+    q = q.strip()
+    if not q:
+        return HTMLResponse("")
+    conn = connection.get_connection()
+    rows = conn.execute("""
+        SELECT d.id AS id, d.filename AS filename, dp.path AS path
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.is_norm = 0 AND (d.filename LIKE ? OR dp.path LIKE ?)
+        ORDER BY d.filename
+        LIMIT 20
+    """, (f"%{q}%", f"%{q}%")).fetchall()
+    conn.close()
+    return templates.TemplateResponse("_norms_candidates.html", {
+        "request": request,
+        "docs":    [dict(r) for r in rows],
+    })
 
 
 @app.get("/open")
@@ -516,6 +688,24 @@ async def preview(request: Request, document_id: int, q: str = Query(default="")
 
     conn.close()
     return templates.TemplateResponse("_preview.html", ctx)
+
+
+@app.post("/toggle-norm/{document_id}", response_class=HTMLResponse)
+async def toggle_norm(request: Request, document_id: int, q: str = Query(default="")):
+    """Manuelle Norm-Markierung -- bewusst EINWEG (nur markieren, nie entfernen).
+    'Im Zweifel sperren': eine einmal gesetzte Markierung bleibt auch bei einem
+    Fehlalarm bestehen -- lokale Suche/Anzeige funktioniert unverändert weiter, nur
+    der MCP/KI-Export bleibt für dieses Dokument dauerhaft gesperrt. norm_manual=1
+    verhindert, dass ein Rescan (scanner/walker.py::_classify_norm) das je überschreibt."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE documents SET is_norm = 1, norm_manual = 1, norm_reason = 'manuell markiert' "
+            "WHERE id = ?",
+            (document_id,),
+        )
+    conn.close()
+    return await preview(request, document_id, q)
 
 
 # ── Such-Logik ────────────────────────────────────────────────────────────────
@@ -667,9 +857,11 @@ def _build_filters(
     from_addr: str = "", to_addr: str = "", subject_filter: str = "",
     date_from: str = "", date_to: str = "",
     filesize: str = "", duplicates_only: str = "",
-    filter_plans: bool = False, tag_id: str = "",
+    filter_plans: bool = False, tag_id: str = "", norms: str = "",
 ) -> tuple[str, list]:
     filters, params = "", []
+    if norms == "only":
+        filters += " AND d.is_norm = 1"
     if tag_id:
         try:
             filters += " AND d.id IN (SELECT document_id FROM photo_tag_assignments WHERE tag_id = ?)"
@@ -743,7 +935,7 @@ def _build_filters(
 def _search_filtered(conn, filters: str, filter_params: list):
     sql = f"""
         SELECT d.id, d.filename, d.extension, d.filesize, d.modified_at,
-               d.extraction_status, d.source_type,
+               d.extraction_status, d.source_type, d.is_norm,
                COALESCE(p.name, m.mailbox_name) AS project_name,
                dp.path     AS filepath,
                dc.content  AS raw_content,

@@ -148,8 +148,48 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 except Exception:
                     body = {}
                 self._handle_copy_to_folder(body.get("paths") or [])
+            elif parsed.path == "/choose-folder":
+                self._handle_choose_folder()
+            elif parsed.path == "/choose-file":
+                self._handle_choose_file()
             else:
                 self._cors_headers(404)
+
+        def _handle_choose_folder(self):
+            """Nativer Finder-Ordner-Picker OHNE Datei-Kopie -- für die Einstellungen
+            (Base-Folder auswählen), damit der Pfad nicht von Hand getippt werden muss."""
+            try:
+                result = subprocess.run(
+                    ["osascript",
+                     "-e", "tell me to activate",
+                     "-e", 'POSIX path of (choose folder with prompt "Ordner wählen")'],
+                    capture_output=True, text=True, timeout=300,
+                )
+            except Exception as e:
+                self._json_response(500, {"ok": False, "error": str(e)})
+                return
+            if result.returncode != 0:
+                self._json_response(200, {"ok": False, "cancelled": True})
+                return
+            self._json_response(200, {"ok": True, "path": result.stdout.strip()})
+
+        def _handle_choose_file(self):
+            """Nativer Finder-Datei-Picker -- für 'Dokument als Norm hinzufügen', wenn
+            man das Dokument im Finder statt über die Namenssuche finden will."""
+            try:
+                result = subprocess.run(
+                    ["osascript",
+                     "-e", "tell me to activate",
+                     "-e", 'POSIX path of (choose file with prompt "Dokument wählen")'],
+                    capture_output=True, text=True, timeout=300,
+                )
+            except Exception as e:
+                self._json_response(500, {"ok": False, "error": str(e)})
+                return
+            if result.returncode != 0:
+                self._json_response(200, {"ok": False, "cancelled": True})
+                return
+            self._json_response(200, {"ok": True, "path": result.stdout.strip()})
 
         def _handle_copy_to_folder(self, paths):
             """Öffnet einen nativen Finder-Ordner-Picker (choose folder) und kopiert
@@ -159,9 +199,16 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 self._json_response(400, {"ok": False, "error": "Keine Dateien ausgewählt"})
                 return
             try:
+                # "tell me to activate": ohne das bekommt der Dialog als Kind eines
+                # Hintergrundprozesses (Menubar-Helper, kein Dock-Icon) manchmal nicht
+                # den Tastaturfokus -- Escape trifft dann das zuletzt aktive Fenster
+                # (den Browser) statt den Dialog abzubrechen, und ein spaeteres Return
+                # bestaetigt den Dialog mit seinem Default-Ordner statt "cancelled" zu
+                # liefern. Mit "activate" bekommt der Dialog garantiert den Fokus.
                 result = subprocess.run(
-                    ["osascript", "-e",
-                     'POSIX path of (choose folder with prompt "Zielordner für die Auswahl wählen")'],
+                    ["osascript",
+                     "-e", "tell me to activate",
+                     "-e", 'POSIX path of (choose folder with prompt "Zielordner für die Auswahl wählen")'],
                     capture_output=True, text=True, timeout=300,
                 )
             except Exception as e:

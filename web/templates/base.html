@@ -65,10 +65,10 @@
     }
     nav a:hover { color: var(--text); background: var(--bg-2); }
     nav a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
-    .version-badge { font-size: 11px; color: var(--text-3); margin-left: 8px; }
+    .version-badge { font-size: 12px; color: var(--text-3); margin-left: 8px; }
     .nav-scan-pill {
       display: inline-flex; align-items: center; gap: 5px;
-      font-size: 11px; font-weight: 500;
+      font-size: 12px; font-weight: 500;
       background: #fef3c7; color: #92400e;
       border: 1px solid #fde68a;
       border-radius: 99px; padding: 2px 8px; margin-left: 6px;
@@ -77,30 +77,25 @@
     @keyframes scan-pulse { 0%,100% { opacity:1 } 50% { opacity:.6 } }
 
     /* ── Suchfeld ── */
-    .search-wrap { padding: 48px 0 16px; position: relative; }
+    .search-wrap { padding: 16px 0 8px; position: relative; }
 
-    /* ── KI-Toggle ── */
+    /* ── Volltext/KI-Suche-Toggle -- gleiche Pillenform wie Suche/Fotos (.mode-switch),
+       nur kleiner, optisch im Suchbalken integriert (absolut positioniert am rechten
+       Rand) statt als eigene Zeile darunter. ── */
     .ai-toggle-wrap {
-      display: inline-flex; align-items: center; gap: 7px;
-      margin-top: 10px; cursor: pointer; user-select: none;
+      /* .search-wrap hat oben/unten ungleiches Padding (16px/8px) fuer den Abstand
+         zu Nachbarzeilen -- 50% relativ zum Wrap waere daher 4px zu tief. */
+      position: absolute; right: 8px; top: calc(50% + 4px); transform: translateY(-50%);
+      display: inline-flex; padding: 2px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--bg-2);
     }
-    .ai-toggle-label { font-size: 12px; color: var(--text-2); transition: color .15s; }
-    .ai-toggle-left  { color: var(--text); font-weight: 500; }
-    .ai-toggle-wrap.ai-on .ai-toggle-left  { color: var(--text-2); font-weight: 400; }
-    .ai-toggle-wrap.ai-on .ai-toggle-right { color: var(--text);   font-weight: 500; }
-    .ai-toggle-track {
-      width: 40px; height: 22px; border-radius: 11px;
-      background: var(--border); position: relative;
-      transition: background .2s; flex-shrink: 0;
+    .ai-toggle-btn {
+      font-size: 12px; font-weight: 600; font-family: inherit;
+      padding: 5px 12px; border: none; border-radius: 999px;
+      background: none; color: var(--text-2); cursor: pointer; white-space: nowrap;
     }
-    .ai-toggle-wrap.ai-on .ai-toggle-track { background: var(--accent); }
-    .ai-toggle-thumb {
-      position: absolute; top: 3px; left: 3px;
-      width: 16px; height: 16px; border-radius: 50%;
-      background: white; box-shadow: 0 1px 3px rgba(0,0,0,.2);
-      transition: left .2s;
-    }
-    .ai-toggle-wrap.ai-on .ai-toggle-thumb { left: 21px; }
+    .ai-toggle-btn:hover { color: var(--text); }
+    .ai-toggle-btn.active { color: #fff; background: #111; }
 
     /* ── KI-Antwort ── */
     .ai-answer-block {
@@ -111,17 +106,17 @@
       display: flex; align-items: center; gap: 8px; margin-bottom: 10px;
     }
     .ai-label {
-      font-size: 11px; font-weight: 600; letter-spacing: .04em;
+      font-size: 12px; font-weight: 600; letter-spacing: .04em;
       text-transform: uppercase; color: #0369a1;
     }
-    .ai-model { font-size: 11px; color: #64748b; }
+    .ai-model { font-size: 12px; color: #64748b; }
     .ai-answer-text { font-size: 14px; line-height: 1.7; color: var(--text); white-space: pre-wrap; }
     .ai-answer-sources {
       margin-top: 14px; padding-top: 12px;
       border-top: 1px solid #bae6fd;
     }
     .ai-answer-sources-label {
-      font-size: 11px; font-weight: 600; color: #0369a1;
+      font-size: 12px; font-weight: 600; color: #0369a1;
       text-transform: uppercase; letter-spacing: .04em;
       display: block; margin-bottom: 6px;
     }
@@ -151,7 +146,7 @@
     }
     .btn-ollama-install:hover { background: #1e40af; }
     .ai-score {
-      margin-left: auto; font-size: 11px; color: var(--text-3);
+      margin-left: auto; font-size: 12px; color: var(--text-3);
       background: var(--bg-2); padding: 1px 6px; border-radius: 10px;
     }
 
@@ -187,7 +182,7 @@
     }
     .search-input {
       width: 100%;
-      padding: 14px 18px;
+      padding: 14px 160px 14px 18px;
       font-size: 17px;
       font-family: inherit;
       border: 2px solid var(--border);
@@ -203,6 +198,7 @@
       box-shadow: 0 0 0 3px rgba(17,24,39,.08);
     }
     .search-input::placeholder { color: var(--text-3); }
+    #gallery-q { padding-right: 18px; }  /* kein KI-Toggle in Fotos, kein reservierter Platz noetig */
 
     /* ── Basis-Filter ── */
     .filters-basic {
@@ -227,29 +223,61 @@
 
     /* ── Suche-Scope ── */
     .search-scope-row {
-      display: flex; align-items: center; justify-content: space-between;
+      display: flex; align-items: center; flex-wrap: wrap;
       gap: 8px; padding: 6px 0 10px;
     }
-    .search-scope-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; }
-    .search-scope-label { font-size: 12px; color: var(--text-3); flex-shrink: 0; margin-right: 2px; }
+    .search-scope-row .type-select { width: auto; max-width: 200px; flex-shrink: 0; font-weight: 600; }
+    .search-scope-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; flex: 0 1 auto; }
+    .search-scope-label {
+      font-size: 12px; color: var(--text-3); flex-shrink: 0;
+      display: inline-block; min-width: 4.5rem;
+    }
     .scope-btn {
       font-size: 13px; font-family: inherit;
-      padding: 5px 12px;
+      padding: 5px 12px; white-space: nowrap;
       border: 1px solid var(--border); border-radius: var(--radius);
       background: var(--bg); color: var(--text-2); cursor: pointer;
     }
     .scope-btn:hover { border-color: #9ca3af; }
     .scope-btn.active {
-      background: var(--bg-2); color: var(--text);
-      font-weight: 600; border-color: #9ca3af;
+      background: #111; color: #fff;
+      font-weight: 600; border-color: #111;
     }
+    /* Reset-Buttons neben einem Eingabefeld (Alle Ordner/Alle Tags) -- bleiben
+       optisch ruhig statt schwarz gefuellt, auch wenn sie der aktuelle Zustand sind. */
+    .scope-btn-quiet.active {
+      background: var(--bg-2); color: var(--text); border-color: #9ca3af;
+    }
+
+    /* ── Segmented Control (Ergebnis-Umfang: Alle / Nur Pläne / Nur Normen) ──
+       Gemeinsamer Aussenrahmen + Haarlinien zwischen den Segmenten, damit als
+       Gruppe mit Einfachauswahl erkennbar -- nicht wie einzelne Beschriftungen. ── */
+    .scope-divider { width: 1px; align-self: stretch; background: var(--border); margin: 0 16px; flex-shrink: 0; }
+    .segmented-control {
+      display: inline-flex; flex-shrink: 0;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; background: var(--bg);
+    }
+    .segmented-btn {
+      font-size: 13px; font-family: inherit; white-space: nowrap;
+      padding: 5px 12px; min-width: 108px; text-align: center;
+      border: 0; border-left: 1px solid var(--border);
+      background: transparent; color: var(--text-2); cursor: pointer;
+    }
+    .segmented-btn:first-child { border-left: 0; }
+    .segmented-btn:hover { color: var(--text); }
+    .segmented-btn.active {
+      background: #111; color: #fff; font-weight: 600;
+    }
+    .segmented-btn:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; }
+    .search-scope-row > .btn-mehr-filter { margin-left: auto; }
 
     /* ── Mehr-Filter ── */
     .btn-mehr-filter {
-      font-size: 13px; font-family: inherit;
-      padding: 6px 14px; flex-shrink: 0;
+      font-size: 14px; font-weight: 600; font-family: inherit;
+      padding: 9px 16px; flex-shrink: 0;
       border: 1px solid var(--border); border-radius: var(--radius);
-      background: var(--bg); color: var(--text-2); cursor: pointer; white-space: nowrap;
+      background: var(--bg); color: var(--text); cursor: pointer; white-space: nowrap;
     }
     .btn-mehr-filter:hover { background: var(--bg-2); }
     .btn-mehr-filter.active { background: var(--bg-2); color: var(--text); border-color: #9ca3af; }
@@ -278,6 +306,86 @@
       background: var(--bg); color: var(--text); outline: none;
     }
     .filter-input:focus { border-color: #9ca3af; }
+
+    /* ── Feld mit eingebettetem Präfix statt gestapeltem Label (siehe
+       archivio-suchfilter-ui.md §4.1) — der Platzhalter verschwindet beim Tippen,
+       das Präfix bleibt stehen und identifiziert das Feld weiterhin. ── */
+    .field-grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+    .field-grid-2.gap-top, .field.gap-top { margin-top: 14px; }
+    .field {
+      display: flex; align-items: stretch;
+      border: 1px solid var(--border); border-radius: var(--radius);
+      overflow: hidden; background: var(--bg);
+    }
+    .field:focus-within { border-color: #9ca3af; }
+    .field-prefix {
+      flex: 0 0 auto; min-width: 4.5rem; padding: 7px 10px;
+      color: var(--text-3); background: var(--bg-2);
+      border-right: 1px solid var(--border); font-size: 12px;
+      display: flex; align-items: center; user-select: none; white-space: nowrap;
+    }
+    .field input {
+      flex: 1 1 auto; border: 0; outline: none; background: transparent;
+      padding: 7px 10px; min-width: 0; font-size: 13px; font-family: inherit; color: var(--text);
+    }
+    /* Datumsfelder brauchen Platz fuer "tt.mm.jjjj" + Kalender-Icon -- ohne feste
+       Mindestbreite schneidet der Flex-Container das Jahr ab. */
+    .field input[type="date"] { min-width: 150px; flex: 1 1 150px; }
+    .field-date-sep {
+      color: var(--text-3); font-size: 12px; padding: 0 8px; flex-shrink: 0;
+      align-self: stretch; display: flex; align-items: center;
+      border-left: 1px solid var(--border);
+    }
+    .cell-inline { display: flex; gap: 8px; align-items: center; }
+    .cell-inline .field { flex: 1 1 auto; min-width: 0; }
+    .cell-inline .scope-btn-quiet { margin-left: auto; }
+    .sort-arrow { margin-left: 3px; color: var(--text-3); }
+    .sort-field-btn.active .sort-arrow { color: #fff; }
+    .missed-scan-banner {
+      display: flex; align-items: center; justify-content: space-between; gap: 12px;
+      background: #fffbeb; border: 1px solid #fde68a; color: #92400e;
+      padding: 10px 14px; border-radius: var(--radius); font-size: 13px;
+      margin: 16px 0 0; line-height: 1.5;
+    }
+    .missed-scan-actions { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
+    .missed-scan-close {
+      background: none; border: none; color: #92400e; font-size: 16px;
+      cursor: pointer; line-height: 1; padding: 0 4px;
+    }
+    .gallery-key-hint {
+      font-size: 12px; color: var(--text-3); padding: 6px 2px 10px; text-align: left;
+    }
+    .gallery-key-hint kbd {
+      border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-family: inherit;
+    }
+    /* Kompakter Tipp innerhalb eines Eingabefelds -- verschwindet bei Fokus/Eingabe,
+       damit er nicht mit dem getippten Text kollidiert. */
+    .field-inline-hint {
+      position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+      font-size: 12px; color: var(--text-3); pointer-events: none; white-space: nowrap;
+    }
+    .field-inline-hint kbd {
+      border: 1px solid var(--border); border-radius: 3px; padding: 0 5px; font-family: inherit;
+    }
+
+    /* ── Sterne als SVG (currentColor statt Emoji, siehe B1/B2) ──
+       Ein <path>, Fuellung/Kontur je nach .filled-Modifier -- Umriss fuer leer,
+       gefuellt fuer gesetzt. Ueber Fotos weiss mit Schatten, sonst Textfarbe geerbt. ── */
+    .star { width: 1.15em; height: 1.15em; vertical-align: -.2em; fill: none; stroke: currentColor; stroke-width: 1.6; opacity: .45; }
+    .filled .star, .star.filled { fill: currentColor; stroke: none; opacity: 1; }
+    .scope-divider-sm { width: 1px; align-self: stretch; background: var(--border); margin: 0 4px; }
+    .star-rating-filter { display: inline-flex; gap: 1px; }
+    .star-filter-btn {
+      border: 0; background: transparent; padding: 4px 2px; cursor: pointer;
+      color: var(--text-3); line-height: 0;
+    }
+    .star-filter-btn:focus-visible { outline: 2px solid var(--accent, #2563eb); outline-offset: 1px; border-radius: 3px; }
+    .star-filter-btn.filled { color: #d97706; }
+    /* Kachel-/Vollbild-Overlay: weiss mit Schatten, damit auf hellen wie dunklen Fotos lesbar */
+    .photo-stars .star, .loupe-stars .star { color: #fff; filter: drop-shadow(0 1px 2px rgba(0,0,0,.6)); }
+    @media (max-width: 900px) {
+      .field-grid-2 { grid-template-columns: 1fr; }
+    }
 
     /* ── Filter-Chips ── */
     #active-chips { display: flex; gap: 6px; flex-wrap: wrap; padding: 0 0 12px; }
@@ -317,7 +425,7 @@
     }
 
     .result-title {
-      font-size: 15px;
+      font-size: 14px;
       font-weight: 600;
       color: var(--accent);
       text-decoration: none;
@@ -364,6 +472,7 @@
     .badge-mov  { background: #f3f4f6; color: #6b7280; }
     .badge-zip  { background: #f3f4f6; color: #6b7280; }
     .badge-page { background: #e0f2fe; color: #075985; font-variant-numeric: tabular-nums; }
+    .badge-norm { background: #fef2f2; color: #991b1b; text-transform: none; letter-spacing: 0; }
 
     .no-content-hint {
       font-size: 12px;
@@ -381,7 +490,7 @@
     }
     .result-path {
       font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
-      font-size: 11px;
+      font-size: 12px;
       color: var(--text-3);
       margin-bottom: 7px;
       word-break: break-all;
@@ -406,7 +515,7 @@
       text-align: center;
       color: var(--text-3);
     }
-    .empty-state p { font-size: 15px; }
+    .empty-state p { font-size: 14px; }
 
     /* ── HTMX Indicator ── */
     .htmx-indicator { display: none; }
@@ -438,12 +547,12 @@
       list-style: none;
     }
     .problem-docs-summary::-webkit-details-marker { display: none; }
-    .problem-docs-summary::before { content: '▶'; font-size: 9px; transition: transform .15s; }
+    .problem-docs-summary::before { content: '▶'; font-size: 10px; transition: transform .15s; }
     details[open] .problem-docs-summary::before { transform: rotate(90deg); }
     .problem-docs-badge {
       background: var(--bg-2); border: 1px solid var(--border);
       border-radius: 10px; padding: 1px 7px;
-      font-size: 11px; font-weight: 700; color: var(--text-3);
+      font-size: 12px; font-weight: 700; color: var(--text-3);
     }
     .problem-docs-list {
       max-height: 260px; overflow-y: auto;
@@ -460,7 +569,7 @@
       text-overflow: ellipsis; white-space: nowrap;
       font-weight: 500; color: var(--text);
     }
-    .problem-doc-reason { flex: 1; color: var(--text-3); font-size: 11px; }
+    .problem-doc-reason { flex: 1; color: var(--text-3); font-size: 12px; }
     .problem-doc-error .problem-doc-reason { color: #b45309; }
     .problem-doc-no_text .problem-doc-reason { color: var(--text-3); }
 
@@ -496,7 +605,7 @@
 
     .project-name  { font-weight: 600; font-size: 14px; color: var(--accent); }
     .project-meta  { font-size: 12px; color: var(--text-2); margin-top: 2px; }
-    .project-path  { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 11px; color: var(--text-3); }
+    .project-path  { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 12px; color: var(--text-3); }
     .project-actions { margin-left: auto; display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
     .btn {
@@ -509,7 +618,7 @@
     .btn-primary:hover { background: #374151; border-color: #374151; }
     .btn-danger  { color: #b91c1c; border-color: #fecaca; }
     .btn-danger:hover  { background: #fef2f2; }
-    .btn-cancel  { color: var(--text-2); border-color: var(--border); font-size: 11px; padding: 3px 8px; }
+    .btn-cancel  { color: var(--text-2); border-color: var(--border); font-size: 12px; padding: 3px 8px; }
     .btn-cancel:hover  { background: var(--bg-2); }
 
     .scan-badge { font-size: 12px; padding: 3px 8px; border-radius: 4px; }
@@ -540,7 +649,7 @@
     .spb-error   .spb-bar-fill { background: #ef4444; }
     .spb-bar-fill { height: 100%; border-radius: 4px; transition: width 0.4s ease; }
     .spb-counts  { font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
-    .spb-current { font-size: 11px; color: var(--text-3); margin-bottom: 6px;
+    .spb-current { font-size: 12px; color: var(--text-3); margin-bottom: 6px;
                    white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
     .spb-stats   { font-size: 12px; color: var(--text-3); margin-top: 4px; }
 
@@ -586,8 +695,8 @@
     .browse-entry.browse-is-project:hover  { background: #bbf7d0; }
     .browse-entry.browse-has-subproject:hover { background: #dcfce7; }
     .browse-arrow { margin-left: auto; color: var(--text-3); font-size: 10px; }
-    .browse-project-badge    { margin-left: auto; color: #16a34a; font-size: 11px; }
-    .browse-subproject-badge { margin-left: auto; color: #86efac; font-size: 11px; }
+    .browse-project-badge    { margin-left: auto; color: #16a34a; font-size: 12px; }
+    .browse-subproject-badge { margin-left: auto; color: #86efac; font-size: 12px; }
     .browse-tag {
       font-size: 10px; padding: 1px 5px; border-radius: 3px;
       background: rgba(0,0,0,.08); color: inherit; white-space: nowrap;
@@ -614,7 +723,7 @@
       display: flex; gap: 6px; margin-top: 8px; flex-wrap: wrap;
     }
     .btn-sm {
-      padding: 3px 9px; font-size: 11px; font-family: inherit;
+      padding: 3px 9px; font-size: 12px; font-family: inherit;
       border: 1px solid var(--border); border-radius: var(--radius);
       background: var(--bg); color: var(--text-2); cursor: pointer;
     }
@@ -623,7 +732,7 @@
     /* ── Vorschau ── */
     .preview-toggle {
       background: none; border: none; cursor: pointer;
-      color: var(--text-3); font-size: 11px; padding: 0 2px;
+      color: var(--text-3); font-size: 12px; padding: 0 2px;
       font-family: inherit; flex-shrink: 0;
     }
     .preview-toggle:hover { color: var(--text); }
@@ -632,7 +741,7 @@
       border: 1px solid var(--border); border-radius: var(--radius);
     }
     .preview-meta { display: flex; gap: 14px; flex-wrap: wrap; margin-bottom: 8px; }
-    .preview-label { color: var(--text-3); font-size: 11px; }
+    .preview-label { color: var(--text-3); font-size: 12px; }
     .preview-text { font-size: 13px; color: var(--text-2); line-height: 1.6; }
 
     /* ── Error ── */
@@ -642,21 +751,32 @@
       padding: 16px 0;
     }
 
-    /* ── Modus-Umschalter (Suche | Galerie) ── */
-    .mode-switch { display: flex; gap: 4px; padding-top: 20px; }
+    /* ── Kopfzeile: Modus-Umschalter + Projekt (siehe archivio-suchfilter-ui.md ──
+       Beides in einer Zeile statt gestapelt, damit "Kontext oben" nicht selbst schon
+       zwei Zeilen Höhe kostet. ── */
+    .header-row {
+      display: flex; align-items: center; justify-content: space-between;
+      gap: 12px; padding-top: 16px; flex-wrap: wrap;
+    }
+    /* Segmented Pill-Toggle (siehe Vorlage) statt Unterstrich-Tabs -- gleiche Form
+       wie die uebrigen Segmented Controls, aktive Seite schwarz gefuellt. */
+    .mode-switch {
+      display: inline-flex; padding: 3px;
+      border: 1px solid var(--border); border-radius: 999px; background: var(--bg-2);
+    }
     .mode-btn {
       font-size: 13px; font-weight: 600; font-family: inherit;
-      padding: 6px 14px; border: none; border-bottom: 2px solid transparent;
-      background: none; color: var(--text-3); cursor: pointer;
+      padding: 6px 16px; border: none; border-radius: 999px;
+      background: none; color: var(--text-2); cursor: pointer;
     }
-    .mode-btn:hover { color: var(--text-2); }
-    .mode-btn.active { color: var(--text); border-bottom-color: var(--accent); }
-    .shared-filter-row { padding: 12px 0 0; max-width: 320px; }
+    .mode-btn:hover { color: var(--text); }
+    .mode-btn.active { color: #fff; background: #111; }
+    .shared-filter-row { max-width: none; }
 
     /* ── Galerie / Foto-Browser ── */
     .gallery-group { margin: 22px 0; }
     .gallery-group-title {
-      font-size: 11px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
+      font-size: 12px; font-weight: 700; letter-spacing: .06em; text-transform: uppercase;
       color: var(--text-3); padding-bottom: 8px; border-bottom: 1px solid var(--border);
       margin-bottom: 12px;
     }
@@ -676,9 +796,8 @@
       display: flex; justify-content: center; gap: 1px;
       padding: 4px 0; background: linear-gradient(transparent, rgba(0,0,0,.55));
     }
-    .photo-stars .star { color: rgba(255,255,255,.45); font-size: 14px; cursor: pointer; line-height: 1; }
-    .photo-stars .star.filled { color: #fbbf24; }
-    .photo-stars .star:hover { color: #fbbf24; }
+    .photo-stars .star-tile-btn { border: 0; background: transparent; padding: 0; cursor: pointer; line-height: 0; }
+    .photo-stars .star-tile-btn:hover .star, .photo-stars .star-tile-btn.filled:hover .star { color: #fbbf24; }
 
     .gallery-sentinel { height: 1px; }
     .ordner-tags-scroll {
@@ -691,6 +810,7 @@
     .ordner-tags-scroll:empty { border: none; padding: 0; }
     .ordner-tags-scroll .scope-btn { flex-shrink: 0; }
     .hide-stars .photo-stars { display: none; }
+    .hide-group-dividers .gallery-group-title { border-bottom: none; padding-bottom: 0; }
 
     .photo-select {
       position: absolute; top: 6px; left: 6px; z-index: 2;
@@ -709,8 +829,12 @@
       box-shadow: 0 6px 20px rgba(0,0,0,.25); font-size: 13px;
     }
     .gallery-selection-bar .btn { font-size: 12px; }
-    .gallery-selection-bar .btn-primary { background: #fff; color: var(--accent); border-color: #fff; }
-    .gallery-selection-bar .btn:not(.btn-primary) { background: transparent; color: #fff; border-color: rgba(255,255,255,.4); }
+    .gallery-selection-bar .btn,
+    .gallery-selection-bar .btn-primary {
+      background: #fff; color: var(--text); border-color: #fff;
+    }
+    .gallery-selection-bar .btn:hover,
+    .gallery-selection-bar .btn-primary:hover { background: #e5e7eb; }
 
     .context-menu {
       position: fixed; z-index: 1100; background: var(--bg); border: 1px solid var(--border);
@@ -725,7 +849,10 @@
     .context-menu button:hover { background: var(--bg-2); }
 
     .tag-flyover {
-      position: fixed; top: 28%; left: 50%; transform: translateX(-50%);
+      /* Oben links statt über der Bildmitte -- verdeckt sonst genau den Bildausschnitt,
+         den man gerade taggen will (siehe Loupe: Bild ist zentriert, .loupe-close sitzt
+         oben rechts, oben links bleibt frei). */
+      position: fixed; top: 16px; left: 16px;
       background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
       box-shadow: 0 10px 40px rgba(0,0,0,.25); padding: 10px; width: 320px; z-index: 1200;
     }
@@ -743,7 +870,7 @@
     .tag-flyover-item.create { color: #2563eb; font-weight: 500; }
     .tag-flyover-item.highlighted { background: var(--accent); color: #fff; }
     .tag-flyover-pin {
-      display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-3);
+      display: flex; align-items: center; gap: 6px; font-size: 12px; color: var(--text-3);
       cursor: pointer; margin-bottom: 8px;
     }
 
@@ -775,7 +902,7 @@
     .tag-filter-rename {
       position: absolute; top: 50%; right: 20px; transform: translateY(-50%);
       width: 14px; height: 14px; border-radius: 50%; background: var(--text-3); color: #fff;
-      border: none; font-size: 9px; line-height: 1; cursor: pointer; display: none;
+      border: none; font-size: 10px; line-height: 1; cursor: pointer; display: none;
       align-items: center; justify-content: center; padding: 0;
     }
     .tag-filter-item:hover .tag-filter-delete,
@@ -803,8 +930,9 @@
       margin-top: 18px; display: flex; align-items: center; gap: 20px;
       color: #fff; font-size: 12px;
     }
-    .loupe-stars .star { font-size: 22px; color: rgba(255,255,255,.35); cursor: pointer; margin: 0 2px; }
-    .loupe-stars .star.filled { color: #fbbf24; }
+    .loupe-stars .star { width: 22px; height: 22px; }
+    .loupe-stars .star-tile-btn { border: 0; background: transparent; padding: 0; cursor: pointer; margin: 0 2px; line-height: 0; }
+    .loupe-stars .star-tile-btn:hover .star { color: #fbbf24; }
     .loupe-auto { display: flex; align-items: center; gap: 6px; color: var(--text-3); cursor: pointer; }
   </style>
 </head>
@@ -820,6 +948,8 @@
       <nav>
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Suche</a>
         <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
+        <a href="/dashboard/helper" class="{{ 'active' if request.url.path == '/dashboard/helper' else '' }}">Helper</a>
+        <a href="/norms" class="{{ 'active' if request.url.path == '/norms' else '' }}">Normen</a>
         <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
         <span class="version-badge" id="nav-version"></span>
         <span id="nav-scan-status"
@@ -842,7 +972,7 @@
 </main>
 
 <footer style="margin-top:60px;padding:20px 0;border-top:1px solid #e8e8e8;text-align:center;">
-  <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback" style="display:inline-flex;align-items:center;gap:6px;background:#111;color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;">Feedback senden</a>
+  <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback" style="display:inline-flex;align-items:center;gap:6px;background:var(--bg-2);color:var(--text-2);padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;border:1px solid var(--border);">Feedback senden</a>
 </footer>
 
 <script>

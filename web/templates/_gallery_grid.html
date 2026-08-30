@@ -1,8 +1,8 @@
-{% for group in groups %}
+{% for g in groups %}
 <div class="gallery-group">
-  <div class="gallery-group-title">{{ group.name }}</div>
+  {% if g.name %}<div class="gallery-group-title">{{ g.name }}</div>{% endif %}
   <div class="gallery-grid">
-    {% for p in group.photos %}
+    {% for p in g.photos %}
     <div class="photo-tile" data-id="{{ p.id }}" data-rating="{{ p.rating or 0 }}" data-path="{{ p.path }}"
          tabindex="0" title="{{ p.filename }}"
          onclick="openLoupe({{ p.id }})" onfocus="focusTile({{ p.id }})">
@@ -12,8 +12,12 @@
       </label>
       <div class="photo-stars" onclick="event.stopPropagation()">
         {% for i in range(1, 6) %}
-        <span class="star {{ 'filled' if i <= (p.rating or 0) else '' }}"
-              onclick="ratePhoto({{ p.id }}, {{ i }}, event)">★</span>
+        <span class="star-tile-btn {{ 'filled' if i <= (p.rating or 0) else '' }}"
+              onclick="ratePhoto({{ p.id }}, {{ i }}, event)">
+          <svg class="star" viewBox="0 0 24 24" aria-hidden="true">
+            <path d="M12 2.6l2.9 6 6.6.9-4.8 4.6 1.2 6.5L12 17.6 6.1 20.6l1.2-6.5L2.5 9.5l6.6-.9z"/>
+          </svg>
+        </span>
         {% endfor %}
       </div>
     </div>
@@ -23,7 +27,7 @@
 {% endfor %}
 {% if has_more %}
 <div class="gallery-sentinel"
-     hx-get="/galerie?project_id={{ project_id|urlencode }}&sterne={{ sterne|urlencode }}&offset={{ next_offset }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&formate={{ formate|urlencode }}&ordner={{ ordner|urlencode }}&tag_id={{ tag_id|urlencode }}&max_size_mb={{ max_size_mb|urlencode }}&sort={{ sort|urlencode }}"
+     hx-get="/galerie?project_id={{ project_id|urlencode }}&sterne={{ sterne|urlencode }}&offset={{ next_offset }}&date_from={{ date_from|urlencode }}&date_to={{ date_to|urlencode }}&formate={{ formate|urlencode }}&ordner={{ ordner|urlencode }}&tag_id={{ tag_id|urlencode }}&max_size_mb={{ max_size_mb|urlencode }}&sort={{ sort|urlencode }}&q={{ q|urlencode }}&group={{ group|urlencode }}"
      hx-trigger="revealed" hx-swap="outerHTML"></div>
 {% endif %}
 {% if is_empty %}

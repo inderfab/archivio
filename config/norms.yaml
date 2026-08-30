@@ -1,0 +1,76 @@
+# Norm-Erkennung — Konfiguration, siehe PROJEKT_STATUS.md / archivio-normerkennung-spec.md
+#
+# Enthält NUR portable Regeln. Keine Pfade, keine bürospezifischen Einträge. Diese Datei
+# wird unverändert ausgeliefert und muss beim Kunden nicht angefasst werden -- alles
+# Bürospezifische (welcher Ordner Normen enthält) wird gelernt (db/norm_folders),
+# nicht hier eingetragen.
+version: 2
+enabled: true
+
+# --- Notwendige Bedingung -------------------------------------------------
+# Ohne mindestens einen Treffer hier ist ein Dokument NIE eine Norm,
+# unabhängig vom Punktestand. Verhindert, dass Aktennotizen und Protokolle,
+# die Normen zitieren, gesperrt werden.
+publisher_markers:
+  - "Schweizerischer Ingenieur- und Architektenverein"
+  - "Schweizerischer Verband der Strassen- und Verkehrsfachleute"
+  - "Schweizerische Normen-Vereinigung"
+  - "Schweizerische Norm"
+  - "Schweizer Norm"
+  - "Norme suisse"
+  - "swiss standard"
+  - "Deutsches Institut für Normung"
+  - "European Committee for Standardization"
+
+license_markers:
+  - "Lizenziert für"
+  - "Lizenz-Nr"
+  - "Einzellizenz"
+  - "Nachdruck verboten"
+  - "Copyright © SIA"
+  - "Copyright © VSS"
+  # iNorm-Wasserzeichen (Vertriebsplattform für SIA/VSS-Normen) — steht auf praktisch
+  # jedem legal erworbenen Normen-PDF, unabhaengig von Jahr/Norm. Robuster als der
+  # Herausgeber-Vermerk, dessen Wortumbruch auf Deckblaettern durch die PDF-Textreihenfolge
+  # (Spalten/ueberlagerte Stempel) haeufig zerrissen wird.
+  - "by SIA Zurich"
+  - "by SIA Zürich"
+  - "iNorm License"
+
+# --- Punktesignale --------------------------------------------------------
+# Normnummer im Kopfbereich des Dokuments (nicht irgendwo im Fliesstext)
+norm_number_patterns:
+  - '(?i)\bSIA[ _-]?\d{3,4}(/\d)?\b'
+  - '(?i)\bSN[ _-]?\d{2,3}[ _-]?\d{3}[a-z]?\b'
+  - '(?i)\b(EN|DIN|ISO|IEC)[ _-]?\d{3,5}\b'
+  - '(?i)\bprEN[ _-]?\d+'
+
+filename_patterns:
+  - '(?i)\bSIA[ _-]?\d{3,4}(/\d)?\b'
+  - '(?i)\bSN[ _-]?\d{2,3}[ _-]?\d{3}[a-z]?\b'
+  - '(?i)\b(EN|DIN|ISO|IEC)[ _-]?\d{3,5}\b'
+  - '(?i)\bVSS\b'
+
+# Generische Boilerplate — kommt auch in Verträgen und Offerten vor
+weak_markers:
+  - "Alle Rechte vorbehalten"
+  - "Vervielfältigung"
+  - "Urheberrecht"
+
+content_scan_chars: 4000     # nur Anfang des Dokuments (Deckblatt/Impressum)
+
+scores:
+  license_marker:   3
+  publisher_marker: 2
+  norm_number_text: 2
+  filename:         2
+  weak_marker:      1
+  weak_marker_max:  2
+threshold: 4
+
+# --- Lernen von Norm-Ordnern ---------------------------------------------
+folder_learning:
+  enabled: true
+  min_norm_docs: 3       # absolute Untergrenze, damit Zufall nicht greift
+  min_ratio: 0.6         # Anteil erkannter Normen im Ordner
+  auto_confirm: false    # immer vom Nutzer bestätigen lassen

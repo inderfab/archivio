@@ -1,0 +1,14 @@
+{% if not docs %}
+<p class="norm-empty">Keine passenden Dokumente gefunden.</p>
+{% endif %}
+{% for d in docs %}
+<div class="norm-list-row">
+  <span class="norm-list-filename" title="{{ d.filename }}">{{ d.filename }}</span>
+  <span class="norm-list-path" title="{{ d.path }}">{{ d.path }}</span>
+  <button type="button" class="btn btn-sm"
+          hx-post="/toggle-norm/{{ d.id }}" hx-swap="none"
+          hx-on::after-request="this.closest('.norm-list-row').remove()">
+    Als Norm hinzufügen
+  </button>
+</div>
+{% endfor %}

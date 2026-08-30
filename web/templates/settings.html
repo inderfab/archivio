@@ -79,6 +79,14 @@
   }
   .remove-btn:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
 
+  .browse-btn {
+    flex-shrink: 0; width: 26px; height: 26px;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text-2); cursor: pointer;
+    font-size: 13px; display: flex; align-items: center; justify-content: center;
+  }
+  .browse-btn:hover { border-color: #9ca3af; background: var(--bg-2); }
+
   .add-btn {
     align-self: flex-start; margin-top: 2px; padding: 5px 10px;
     font-size: 13px; font-family: inherit;
@@ -147,6 +155,8 @@
                 placeholder="Label" value="{{ f.get('label', '') }}" style="max-width: 160px;">
               <input type="text" name="base_folder_path"
                 placeholder="/Volumes/NAS/Projekte" value="{{ f.get('path', '') }}">
+              <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
+                onclick="chooseBaseFolder(this)">📁</button>
               <button type="button" class="remove-btn"
                 onclick="this.closest('.list-item').remove()">×</button>
             </div>
@@ -323,58 +333,6 @@
     </div>
   </details>
 
-  {# ── Mitarbeiter-Setup ── #}
-  <details class="settings-section" open>
-    <summary><span class="sec-arrow">▶</span> Mitarbeiter-Setup</summary>
-    <div class="settings-body">
-      <p style="font-size:14px; color:var(--text-2); margin:0 0 14px; line-height:1.5;">
-        Der Archivio Helper ist eine kleine macOS Menubar-App für Mitarbeiter-Macs.
-        Sie ermöglicht das Öffnen von Dateien direkt aus dem Browser
-        via <code>archivio://</code>-Link.
-      </p>
-      {% if helper_available %}
-      <a href="/dashboard/download/helper"
-         style="display:inline-block; text-decoration:none;"
-         class="btn btn-primary">
-        ⬇ Helper herunterladen (v{{ helper_version }})
-      </a>
-      <p style="margin:12px 0 0; font-size:12px; color:var(--text-3); line-height:1.8;">
-        Nach dem Download: Installer öffnen und den Anweisungen folgen (Admin-Passwort
-        nötig). Die App landet dabei automatisch für <strong>alle Benutzer</strong>
-        des Macs in <em>Programme</em> — wichtig bei mehreren Accounts auf einem Gerät.<br>
-        Beim ersten Start werden Abhängigkeiten installiert (ca. 1–2 Min.).<br>
-        Der Helper findet den Server normalerweise automatisch im Netzwerk. Falls nicht,
-        im Helper-Menü unter „Server suchen" oder „Server ändern" manuell eintragen:
-        <code style="background:var(--bg); border:1px solid var(--border); border-radius:3px; padding:1px 6px; font-size:12px; user-select:all;">{{ helper_url_hint }}</code>
-      </p>
-      {% else %}
-      <p style="font-size:13px; color:var(--text-3); margin:0;">
-        Noch kein Build vorhanden — <code>bash helper/build.sh</code> ausführen.
-      </p>
-      {% endif %}
-
-      <p style="font-size:14px; color:var(--text-2); margin:22px 0 10px; line-height:1.5;">
-        <strong>Datei-Link teilen ("Archivio-Link kopieren"):</strong> Server und Helper
-        installieren dafür automatisch eine Schnellaktion im Finder. Damit kann jede
-        Kollegin/jeder Kollege mit installiertem Helper eine Datei direkt öffnen, ohne
-        selbst im Archivio-NAS-Ordner danach suchen zu müssen.
-      </p>
-      <ol style="font-size:13px; color:var(--text-3); line-height:1.9; margin:0 0 12px; padding-left:20px;">
-        <li>Datei im Finder mit <strong>Rechtsklick</strong> auswählen</li>
-        <li><em>Schnellaktionen</em> (bzw. <em>Quick Actions</em>) → <strong>„Archivio-Link kopieren"</strong></li>
-        <li>Link ist in der Zwischenablage — z.B. in eine Mail oder einen Chat einfügen</li>
-        <li>Empfänger:in mit installiertem Archivio Helper klickt den Link → Datei öffnet sich
-          bzw. wird im Finder angezeigt (je nach Voreinstellung im Helper-Menü)</li>
-      </ol>
-      <p style="font-size:12px; color:var(--text-3); line-height:1.7; margin:0;">
-        Der Klick öffnet die Datei sofort bzw. zeigt sie im Finder — je nachdem, was die
-        klickende Person im eigenen Helper-/Server-Menü unter „Archivio-Links: Direkt
-        öffnen"/„Zum Pfad gehen" eingestellt hat. Mail/Messages zeigen beim Einfügen des
-        Links eine Vorschau mit dem Dateinamen an.
-      </p>
-    </div>
-  </details>
-
 </div>
 
 <script>
@@ -438,9 +396,24 @@ function addBaseFolder() {
   item.innerHTML =
     '<input type="text" name="base_folder_label" placeholder="Label" style="max-width:160px;">' +
     '<input type="text" name="base_folder_path" placeholder="/Volumes/NAS/Projekte">' +
+    '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseBaseFolder(this)">📁</button>' +
     '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
   document.getElementById('base-folders-list').appendChild(item);
   item.querySelector('input').focus();
+}
+
+function chooseBaseFolder(btn) {
+  var input = btn.closest('.list-item').querySelector('input[name="base_folder_path"]');
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      input.value = d.path;
+    })
+    .catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.');
+    });
 }
 
 function addExcludedFolder() {

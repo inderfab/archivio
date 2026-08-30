@@ -25,6 +25,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "009_projects_last_scanned_at", _m009)
     _apply(conn, "010_photo_ratings", _m010)
     _apply(conn, "011_photo_tags", _m011)
+    _apply(conn, "012_norms", _m012)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -296,5 +297,48 @@ def _m011(conn: sqlite3.Connection):
             PRIMARY KEY (document_id, tag_id)
         );
         CREATE INDEX IF NOT EXISTS idx_photo_tag_assignments_tag ON photo_tag_assignments(tag_id);
+    """)
+    conn.commit()
+
+
+def _m012(conn: sqlite3.Connection):
+    """Norm-Erkennung: technische Normen (SIA/VSS/EN/DIN/ISO) werden markiert, ihr
+    Volltext verlässt Archivio nicht über MCP (Urheber-/Lizenzrecht der Herausgeber).
+    Siehe scanner/norms.py und config/norms.yaml.
+
+    Spalten auf documents, nicht eigene Tabelle -- anders als photo_ratings/-tags:
+    hier geht es um eine Eigenschaft JEDES Dokuments, die bei JEDER Suchabfrage
+    gebraucht wird (Redaktion auf dem heissen MCP-Pfad). Ein LEFT JOIN wäre
+    unnötiger Aufwand.
+
+    norm_manual=1: von Hand gesetzt/aufgehoben -- der Rescan (scanner/norms.py)
+    fasst solche Zeilen nie an, sonst geht jede Korrektur beim nächsten Scan verloren.
+
+    norm_folders: gelernte, vom Nutzer bestätigte Norm-Ordner (büro-spezifisch,
+    NICHT Teil von config/norms.yaml). status='confirmed' aktiviert Layer 2 der
+    Klassifikation (Ordnerregel) auch für noch ungescannte/textlose Dateien.
+    """
+    for stmt in [
+        "ALTER TABLE documents ADD COLUMN is_norm INTEGER NOT NULL DEFAULT 0",
+        "ALTER TABLE documents ADD COLUMN norm_reason TEXT",
+        "ALTER TABLE documents ADD COLUMN norm_manual INTEGER NOT NULL DEFAULT 0",
+    ]:
+        try:
+            conn.execute(stmt)
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+    conn.executescript("""
+        CREATE INDEX IF NOT EXISTS idx_documents_is_norm ON documents(is_norm);
+
+        CREATE TABLE IF NOT EXISTS norm_folders (
+            path        TEXT PRIMARY KEY,
+            status      TEXT NOT NULL CHECK(status IN ('proposed','confirmed','rejected')),
+            n_docs      INTEGER NOT NULL DEFAULT 0,
+            n_norms     INTEGER NOT NULL DEFAULT 0,
+            detected_at TEXT,
+            decided_at  TEXT
+        );
+        CREATE INDEX IF NOT EXISTS idx_norm_folders_status ON norm_folders(status);
     """)
     conn.commit()
