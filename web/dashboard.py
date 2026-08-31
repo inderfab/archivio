@@ -126,6 +126,7 @@ async def dashboard(request: Request):
     connection.init_schema()
     groups   = _project_groups(conn)
     stats    = _global_stats(conn)
+    orphans  = _orphaned_projects(conn)
     configs  = conn.execute("""
         SELECT msc.id, msc.mailbox_name, msc.active, msc.last_scanned_at, msc.mail_count,
                p.name AS project_name, p.id AS project_id
@@ -141,6 +142,7 @@ async def dashboard(request: Request):
         "request":      request,
         "groups":       groups,
         "stats":        stats,
+        "orphans":      orphans,
         "configs":      [dict(r) for r in configs],
         "projects":     [dict(r) for r in projects],
         "scan_status":  _mail_scan.get("status"),
@@ -226,11 +228,13 @@ async def download_server():
 async def projects_list(request: Request):
     """Projektliste neu laden (z.B. nach Abbrechen eines Dialogs)."""
     conn = connection.get_connection()
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
     conn.close()
     return templates.TemplateResponse("_dashboard_projects.html", {
         "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
     })
 
 
@@ -250,35 +254,45 @@ async def toggle_project(
                 (name, path),
             )
         _rematch_unassigned_mailboxes(conn)
-        groups = _project_groups(conn)
-        stats  = _global_stats(conn)
+        groups  = _project_groups(conn)
+        stats   = _global_stats(conn)
+        orphans = _orphaned_projects(conn)
         conn.close()
         return templates.TemplateResponse("_dashboard_projects.html", {
             "request": request, "groups": groups, "stats": stats,
+            "orphans": orphans,
         })
     elif row["active"]:
         # Aktives Projekt deaktivieren → Rückfrage ob aus DB entfernen
         doc_count = conn.execute(
             "SELECT COUNT(*) FROM documents WHERE project_id=?", (row["id"],)
         ).fetchone()[0]
+        # Fehlender Ordner ist oft ein VERSCHOBENER Ordner, kein wirklich gelöschter --
+        # "Aus DB entfernen" würde dann Dokumente/Tags/Bewertungen löschen, obwohl die
+        # Dateien anderswo quicklebendig sind. Deshalb hier warnen und "Verschieben"
+        # als Alternative anbieten statt direkt zum Löschen zu verleiten.
+        folder_missing = _folder_genuinely_missing(path)
         conn.close()
         return templates.TemplateResponse("_dashboard_project_confirm_remove.html", {
-            "request":   request,
-            "project_id": row["id"],
-            "name":      row["name"],
-            "path":      path,
-            "doc_count": doc_count,
+            "request":        request,
+            "project_id":     row["id"],
+            "name":           row["name"],
+            "path":           path,
+            "doc_count":      doc_count,
+            "folder_missing": folder_missing,
         })
     else:
         # Wieder aktivieren
         with conn:
             conn.execute("UPDATE projects SET active=1 WHERE id=?", (row["id"],))
         _rematch_unassigned_mailboxes(conn)
-        groups = _project_groups(conn)
-        stats  = _global_stats(conn)
+        groups  = _project_groups(conn)
+        stats   = _global_stats(conn)
+        orphans = _orphaned_projects(conn)
         conn.close()
         return templates.TemplateResponse("_dashboard_projects.html", {
             "request": request, "groups": groups, "stats": stats,
+            "orphans": orphans,
         })
 
 
@@ -289,11 +303,50 @@ async def deactivate_project(request: Request, project_id: int):
     with conn:
         conn.execute("UPDATE projects SET active=0 WHERE id=?", (project_id,))
     _rematch_unassigned_mailboxes(conn)
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
     conn.close()
     return templates.TemplateResponse("_dashboard_projects.html", {
         "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
+    })
+
+
+def _like_escape(s: str) -> str:
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
+@router.post("/projects/{project_id}/move", response_class=HTMLResponse)
+async def move_project(request: Request, project_id: int, new_path: str = Form(...)):
+    """Projekt an einen neuen Ordner umhängen -- z.B. wenn der Ordner ins Archiv
+    verschoben wurde. Behält bewusst dieselbe project_id: Dokumente (documents.
+    project_id ändert sich nie durch einen Rescan, siehe upsert_document() -- INSERT
+    OR IGNORE per Hash) sowie darauf hängende Tags/Bewertungen bleiben dadurch ohne
+    jede Neuerkennung korrekt zugeordnet. Nur die Pfade selbst werden umgeschrieben:
+    das Projekt und jeder Dateipfad darunter."""
+    new_path = new_path.rstrip("/")
+    conn = connection.get_connection()
+    row = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    if not row:
+        conn.close()
+        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+    old_path = row["path"]
+    with conn:
+        conn.execute("UPDATE projects SET path=? WHERE id=?", (new_path, project_id))
+        conn.execute(
+            "UPDATE document_paths SET path = ? || substr(path, ?) "
+            "WHERE path = ? OR path LIKE ? ESCAPE '\\'",
+            (new_path, len(old_path) + 1, old_path, _like_escape(old_path) + "/%"),
+        )
+    log.info("Projekt %s verschoben: %r -> %r", project_id, old_path, new_path)
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
     })
 
 
@@ -377,11 +430,13 @@ async def delete_project_status(request: Request, project_id: int):
         )
     _deletions.pop(project_id, None)
     conn = connection.get_connection()
-    groups = _project_groups(conn)
-    stats  = _global_stats(conn)
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
     conn.close()
     return templates.TemplateResponse("_dashboard_projects.html", {
         "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
     })
 
 
@@ -582,14 +637,17 @@ async def mail_dashboard(request: Request):
     projects = conn.execute(
         "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
     ).fetchall()
-    conn.close()
+    from scanner.mail_scanner import suggest_project_by_name
     cfg_list = []
     for r in configs:
         d = dict(r)
         _lbl, _cls = _scan_freshness(d.get("last_scanned_at"))
         d["scan_fresh_label"] = _lbl
         d["scan_fresh_class"] = _cls
+        if not d["project_id"]:
+            d["suggested_project"] = suggest_project_by_name(conn, d["mailbox_name"])
         cfg_list.append(d)
+    conn.close()
     return templates.TemplateResponse("_dashboard_mail.html", {
         "request":      request,
         "configs":      cfg_list,
@@ -635,11 +693,13 @@ async def mail_refresh(request: Request):
 async def _mail_section_response(request: Request, conn, context: str):
     """Liefert je nach Kontext die aktualisierte Projektliste oder den Mail-Bereich."""
     if context == "project":
-        groups = _project_groups(conn)
-        stats  = _global_stats(conn)
+        groups  = _project_groups(conn)
+        stats   = _global_stats(conn)
+        orphans = _orphaned_projects(conn)
         conn.close()
         return templates.TemplateResponse("_dashboard_projects.html", {
             "request": request, "groups": groups, "stats": stats,
+            "orphans": orphans,
         })
     conn.close()
     return await mail_dashboard(request)
@@ -1235,7 +1295,6 @@ def _helper_url_hint(cfg: dict) -> str:
 async def settings_page(
     request: Request,
     saved:   str = Query(default=""),
-    restart: str = Query(default=""),
 ):
     cfg = settings.load_all()
     # Einmal-Migration: altes mail-{} → mail_accounts: [{}]
@@ -1281,7 +1340,6 @@ async def settings_page(
         "request":     request,
         "cfg":         cfg,
         "saved":       bool(saved),
-        "restart":     bool(restart),
         "fda_missing": fda_missing,
     })
 
@@ -1303,8 +1361,6 @@ async def settings_save(request: Request):
     form = await request.form()
 
     old_cfg  = settings.load_all()
-    old_host = str(old_cfg.get("server", {}).get("host", ""))
-    old_port = str(old_cfg.get("server", {}).get("port", ""))
     old_accounts = old_cfg.get("mail_accounts", old_cfg.get("mail", []))
     if isinstance(old_accounts, dict):
         old_accounts = [old_accounts]
@@ -1313,9 +1369,10 @@ async def settings_save(request: Request):
     office_name     = form.get("office_name", "").strip()
     office_language = form.get("office_language", "de")
 
-    # Server
-    server_host = form.get("server_host", "127.0.0.1").strip()
-    server_port = int(form.get("server_port", "8000") or "8000")
+    # Host/Port sind bewusst nicht einstellbar (0.0.0.0:8000 ist die einzig sinnvolle
+    # Kombination, damit der Helper auf anderen Macs den Server im LAN findet) --
+    # "server" bleibt deshalb aus updates aussen vor, settings.save() mergt pro
+    # Sektion und lässt einen bestehenden Wert dadurch unangetastet.
     scan_time   = form.get("scan_time", "").strip()
     num_workers = max(1, min(4, int(form.get("num_workers", "1") or "1")))
 
@@ -1364,7 +1421,6 @@ async def settings_save(request: Request):
             "name":     office_name,
             "language": office_language,
         },
-        "server":        {"host": server_host, "port": server_port},
         "scheduler":     {"scan_time": scan_time},
         "mail_accounts": mail_accounts,
         # erstes Konto auch unter mail: {} für Rückwärtskompatibilität
@@ -1407,9 +1463,7 @@ async def settings_save(request: Request):
         finally:
             conn.close()
 
-    restart_required = (server_host != old_host or str(server_port) != old_port)
-    params = "?saved=1" + ("&restart=1" if restart_required else "")
-    return RedirectResponse(f"/dashboard/settings{params}", status_code=303)
+    return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
 
 
 @router.post("/settings/test-mail", response_class=HTMLResponse)
@@ -1437,6 +1491,60 @@ async def settings_test_mail(request: Request):
 
 # ── Interne Helpers ───────────────────────────────────────────────────────────
 
+def _path_is_under(path: str, base: str) -> bool:
+    """Präfix-Vergleich auf Pfadkomponenten (nicht auf Zeichenketten) --
+    '/x/Projekte2' liegt NICHT unter '/x/Projekte'."""
+    if not path or not base:
+        return False
+    base = base.rstrip(os.sep)
+    return path == base or path.startswith(base + os.sep)
+
+
+def _folder_genuinely_missing(path: str) -> bool:
+    """True nur wenn der Ordner fehlt UND das nicht nur an einem nicht gemounteten
+    NAS liegt (dann wäre auch jeder Vorfahre des Pfads unerreichbar). Postfach-
+    Projekte (path 'mailbox:…') haben keinen Ordner und gelten nie als fehlend."""
+    if path.startswith("mailbox:") or Path(path).exists():
+        return False
+    parent = Path(path).parent
+    for _ in range(4):  # Basisordner liegt meist 1-2 Ebenen über dem Projekt
+        if parent.exists():
+            return True  # ein Vorfahre ist da -- der Ordner selbst wurde gezielt entfernt
+        if parent == parent.parent:
+            break
+        parent = parent.parent
+    return False  # kein Vorfahre erreichbar -> vermutlich nur der Mount weg
+
+
+def _active_folder_projects(conn) -> list:
+    """Aktive Projekte mit echtem Ordnerpfad, für die Verschachtelungs-Suche in
+    _project_groups(). Postfach-Projekte (path 'mailbox:…') haben gar keinen Ordner
+    und würden hier ohnehin nie unter einem Basisordner landen -- ob sie noch mit
+    einem Postfach verknüpft sind, prüft stattdessen _orphaned_mail_projects()."""
+    return conn.execute(
+        "SELECT * FROM projects WHERE active=1 AND path NOT LIKE 'mailbox:%'"
+    ).fetchall()
+
+
+def _orphaned_mail_projects(conn) -> list:
+    """Postfach-Projekte (path 'mailbox:…'), deren Postfach nicht mehr aktiv mit
+    ihnen verknüpft ist -- z.B. weil es über 'Postfach löschen' (mail_delete())
+    entfernt wurde. Das setzt mail_scan_config nur auf active=0, löscht das dadurch
+    verwaiste Projekt aber nicht mit -- ohne diese Prüfung bliebe so ein Eintrag für
+    immer aktiv und dabei UNSICHTBAR (weder im Mail-Bereich als 'zu tun' erkennbar
+    noch im Ordner-Dashboard, das Postfach-Projekte bewusst nie zeigt)."""
+    linked_active = {
+        r["project_id"] for r in conn.execute(
+            "SELECT DISTINCT project_id FROM mail_scan_config "
+            "WHERE active=1 AND project_id IS NOT NULL"
+        ).fetchall()
+    }
+    rows = conn.execute(
+        "SELECT * FROM projects WHERE active=1 AND path LIKE 'mailbox:%'"
+    ).fetchall()
+    return [r for r in rows if r["id"] not in linked_active]
+
+
 def _project_groups(conn) -> list[dict]:
     base_folders = settings.get("scanner.base_folders", [])
     db_by_path   = {
@@ -1444,12 +1552,120 @@ def _project_groups(conn) -> list[dict]:
         for r in conn.execute("SELECT * FROM projects").fetchall()
     }
     groups = []
+    shown: set[str] = set()
     for folder in base_folders:
         label    = folder.get("label", "")
         base     = folder.get("path", "")
         projects = _discovered_projects_for_base(conn, base, db_by_path)
+        for p in projects:
+            shown.add(p["path"])
         groups.append({"label": label, "path": base, "projects": projects})
+
+    # Tiefer verschachtelte Projekte (via "Unterordner ▸" angelegt) tauchen im
+    # os.scandir()-Durchlauf oben NICHT auf, der nur eine Ebene tief geht -- sie waren
+    # dadurch im Dashboard unsichtbar, liefen aber weiter im Scan und in der
+    # Projekt-Auswahl der Suche mit. Hier unter ihren nächstgelegenen sichtbaren
+    # Elternordner einhängen, damit man sieht wo sie liegen und sie dort auch wieder
+    # deaktivieren kann.
+    #
+    # Zuordnung rein über den Pfad-Präfix, bewusst OHNE Existenzprüfung: bei nicht
+    # gemountetem NAS existiert kein einziger /Volumes/…-Pfad, eine Existenzprüfung
+    # würde dann schlagartig alle NAS-Projekte als "verwaist" melden.
+    for row in _active_folder_projects(conn):
+        path = row["path"]
+        if path in shown:
+            continue
+        grp = next((g for g in groups if _path_is_under(path, g["path"])), None)
+        if grp is None:
+            continue  # ausserhalb aller Basisordner -> _orphaned_projects()
+        parent = None
+        for p in grp["projects"]:
+            if _path_is_under(path, p["path"]) and (
+                parent is None or len(p["path"]) > len(parent["path"])
+            ):
+                parent = p
+        anchor = parent["path"] if parent else grp["path"]
+        rel    = os.path.relpath(path, anchor)
+        # Nur anzeigen wenn der relative Pfad mehr sagt als der Projektname selbst
+        # (also Zwischenordner enthält) -- sonst stünde derselbe Text doppelt da.
+        entry  = _db_project_entry(conn, dict(row), label=rel if rel != row["name"] else None)
+        # "Ordner nicht auffindbar" nur markieren, wenn der Basisordner SELBST
+        # erreichbar ist -- sonst (NAS nicht gemountet) würde jedes Projekt darunter
+        # fälschlich als verschwunden gelten, obwohl nur der Mount fehlt. Ist der
+        # Basisordner erreichbar, ist eine Einzelprüfung aussagekräftig: die Datei
+        # wurde nicht vom scandir()-Lauf oben gefunden (sonst stünde sie in "shown"),
+        # ihr eigener Ordner also entweder verschoben oder gelöscht.
+        if Path(grp["path"]).exists():
+            entry["exists"] = Path(path).exists()
+        # Ohne sichtbaren Elternordner (z.B. NAS nicht gemountet -> scandir lieferte
+        # nichts) direkt auf Gruppenebene zeigen statt das Projekt zu verschlucken.
+        (parent["nested"] if parent else grp["projects"]).append(entry)
     return groups
+
+
+def _orphaned_projects(conn) -> list[dict]:
+    """Aktive Projekte, die sonst nirgends im Dashboard auftauchen, aber weiter
+    gescannt werden und in der Projekt-Auswahl der Suche erscheinen. Zwei Ursachen:
+    - Ordner-Projekt ausserhalb jedes konfigurierten Basisordners (z.B. einzeln
+      aktiviert und der Ordner später verschoben/gelöscht).
+    - Postfach-Projekt, dessen Postfach nicht mehr aktiv verknüpft ist (siehe
+      _orphaned_mail_projects())."""
+    base_paths = [
+        f.get("path", "") for f in (settings.get("scanner.base_folders") or []) if f.get("path")
+    ]
+    orphans = []
+    for row in _active_folder_projects(conn):
+        if any(_path_is_under(row["path"], b) for b in base_paths):
+            continue
+        entry = _db_project_entry(conn, dict(row))
+        # exists bleibt unklar (kein "Ordner nicht auffindbar"-Badge), wenn wir es
+        # nicht sicher wissen -- z.B. ein Netzlaufwerk, das nur gerade nicht
+        # verbunden ist, siehe _folder_genuinely_missing().
+        if Path(row["path"]).exists():
+            entry["exists"] = True
+        elif _folder_genuinely_missing(row["path"]):
+            entry["exists"] = False
+        entry["orphan_reason"] = "folder"
+        orphans.append(entry)
+    for row in _orphaned_mail_projects(conn):
+        entry = _db_project_entry(conn, dict(row))
+        entry["exists"] = None
+        entry["orphan_reason"] = "mail"
+        orphans.append(entry)
+    return sorted(orphans, key=lambda e: e["name"].lower())
+
+
+def _db_project_entry(conn, db, label: str | None = None) -> dict:
+    """Baut die Anzeige-Struktur für ein Projekt, das in der DB steht.
+    label: abweichender Anzeigename (z.B. relativer Pfad bei verschachtelten
+    Projekten, damit man sieht WO sie liegen)."""
+    count = conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE project_id=?", (db["id"],)
+    ).fetchone()[0]
+    last_scan = conn.execute(
+        "SELECT MAX(indexed_at) FROM documents WHERE project_id=?", (db["id"],)
+    ).fetchone()[0]
+    mailboxes = conn.execute(
+        "SELECT * FROM mail_scan_config WHERE project_id=?", (db["id"],)
+    ).fetchall()
+    _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
+    _fresh_label, _fresh_class = _scan_freshness(_last_iso)
+    return {
+        "name":             db["name"],
+        "sub_label":        label,
+        "path":             db["path"],
+        "in_db":            True,
+        "id":               db["id"],
+        "active":           bool(db["active"]),
+        "doc_count":        count,
+        "last_scan":        _fmt_iso_date(last_scan),
+        "last_scanned":     _fmt_iso_datetime(_last_iso),
+        "scan_fresh_label": _fresh_label,
+        "scan_fresh_class": _fresh_class,
+        "scan_status":      _scans.get(db["id"], {}).get("status"),
+        "mailboxes":        [dict(m) for m in mailboxes],
+        "nested":           [],
+    }
 
 
 def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dict]:
@@ -1464,37 +1680,11 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                 path = entry.path
                 db   = db_by_path.get(path)
                 if db:
-                    count     = conn.execute(
-                        "SELECT COUNT(*) FROM documents WHERE project_id=?",
-                        (db["id"],),
-                    ).fetchone()[0]
-                    last_scan = conn.execute(
-                        "SELECT MAX(indexed_at) FROM documents WHERE project_id=?",
-                        (db["id"],),
-                    ).fetchone()[0]
-                    mailboxes = conn.execute(
-                        "SELECT * FROM mail_scan_config WHERE project_id=?",
-                        (db["id"],),
-                    ).fetchall()
-                    _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
-                    _fresh_label, _fresh_class = _scan_freshness(_last_iso)
-                    results.append({
-                        "name":            db["name"],
-                        "path":            path,
-                        "in_db":           True,
-                        "id":              db["id"],
-                        "active":          bool(db["active"]),
-                        "doc_count":       count,
-                        "last_scan":       _fmt_iso_date(last_scan),
-                        "last_scanned":    _fmt_iso_datetime(_last_iso),
-                        "scan_fresh_label": _fresh_label,
-                        "scan_fresh_class": _fresh_class,
-                        "scan_status":     _scans.get(db["id"], {}).get("status"),
-                        "mailboxes":       [dict(m) for m in mailboxes],
-                    })
+                    results.append(_db_project_entry(conn, db))
                 else:
                     results.append({
                         "name":        entry.name,
+                        "sub_label":   None,
                         "path":        path,
                         "in_db":       False,
                         "id":          None,
@@ -1503,6 +1693,7 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         "last_scan":   None,
                         "scan_status": None,
                         "mailboxes":   [],
+                        "nested":      [],
                     })
     except PermissionError:
         pass

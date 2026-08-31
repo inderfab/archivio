@@ -14,14 +14,39 @@
   .settings-banner.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
   /* Immer offene Sektionen (kein <details>/Einklappen mehr) */
-  .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+  .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: visible; }
   .settings-section-header {
     font-size: 12px; font-weight: 600; text-transform: uppercase;
     letter-spacing: .06em; color: var(--text-2);
     padding: 10px 16px; background: var(--bg-2);
     border-bottom: 1px solid var(--border);
+    border-radius: var(--radius) var(--radius) 0 0;
+    display: flex; align-items: center; justify-content: space-between;
+    position: relative;
   }
   .settings-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
+
+  /* "?"-Button im Sektions-Header -- öffnet ein Flyover mit Hilfetext für die
+     GANZE Sektion (statt einzelner Tooltips pro Feld). */
+  .section-help-btn {
+    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text-2);
+    font-size: 12px; font-weight: 700; font-family: inherit; text-transform: none;
+    letter-spacing: normal; cursor: pointer;
+    display: flex; align-items: center; justify-content: center;
+  }
+  .section-help-btn:hover { background: var(--bg); border-color: #9ca3af; color: var(--text); }
+  .section-help-panel {
+    display: none; position: absolute; top: 100%; right: 16px; margin-top: 8px; z-index: 40;
+    width: 320px; max-width: 80vw;
+    background: #111827; color: #fff; font-size: 12px; font-weight: 400;
+    text-transform: none; letter-spacing: normal; line-height: 1.6;
+    padding: 12px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+  }
+  .section-help-panel.open { display: block; }
+  .section-help-panel p { margin: 0 0 8px; }
+  .section-help-panel p:last-child { margin-bottom: 0; }
+  .section-help-panel strong { color: #fff; }
 
   /* Beschriftung + Eingabefeld in EINER Box, wie im Filter-Panel der Suche
      (.field/.field-prefix aus base.html) -- hier nur die Präfix-Breite an die
@@ -61,6 +86,20 @@
     color: var(--text); background: var(--bg); outline: none;
   }
   .list-item input:focus { border-color: var(--accent); }
+
+  /* Label + Pfad als EINE Box statt zwei getrennter Felder -- gleiche Optik wie
+     "Automatischer Scan" (Präfix links grau hinterlegt, Wert rechts editierbar). */
+  .list-item-box {
+    display: flex; align-items: stretch; flex: 1; min-width: 0;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    overflow: hidden; background: var(--bg);
+  }
+  .list-item-box:focus-within { border-color: #9ca3af; }
+  .list-item-box input { border: 0; border-radius: 0; }
+  .list-item-box .list-item-label {
+    flex: 0 0 160px; background: var(--bg-2); border-right: 1px solid var(--border);
+  }
+  .list-item-box .list-item-value { flex: 1 1 auto; min-width: 0; background: transparent; }
 
   .remove-btn {
     flex-shrink: 0; width: 26px; height: 26px;
@@ -106,19 +145,21 @@
   {% if saved %}
   <div class="settings-banner ok">Einstellungen gespeichert.</div>
   {% endif %}
-  {% if restart %}
-  <div class="settings-banner warning">
-    Host oder Port geändert — Server neu starten damit die Änderung wirksam wird.
-  </div>
-  {% endif %}
-
   <form method="POST" action="/dashboard/settings" id="settings-form">
     {# Hidden submit so Enter works in any text input #}
     <button type="submit" style="display:none"></button>
 
     {# ── Scanner ── #}
     <div class="settings-section">
-      <div class="settings-section-header">Scanner</div>
+      <div class="settings-section-header">
+        Scanner
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p><strong>Automatischer Scan:</strong> Aktive Projekte werden täglich um die eingestellte Uhrzeit (HH:MM) aktualisiert. Leer = deaktiviert. Die Uhrzeit so wählen, dass der Computer läuft — bleibt er immer an, eignet sich der Abend (z. B. 22:00); wird er über Nacht ausgeschaltet, eher die Mittagszeit (z. B. 12:15).</p>
+          <p><strong>Ausgeschlossene Ordner:</strong> werden standardmässig in allen Projekten ignoriert, z. B. „privat". Es zählt der exakte Ordnername (schliesst z. B. „Log" nicht „Analog" oder „Logitech" mit aus).</p>
+          <p><strong>Scanner-Worker:</strong> mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch. Standard ist 1 Worker — nur umstellen, wenn wirklich nötig.</p>
+        </div>
+      </div>
       <div class="settings-body">
 
         <div>
@@ -127,12 +168,6 @@
             <input type="text" name="scan_time" placeholder="z.B. 22:00"
               value="{{ cfg.get('scheduler', {}).get('scan_time', '') }}">
           </div>
-          <span class="hint">
-            Aktive Projekte werden täglich um diese Uhrzeit (HH:MM) aktualisiert. Leer =
-            deaktiviert. Die Uhrzeit so wählen, dass der Computer läuft — bleibt er immer an,
-            eignet sich der Abend (z. B. 22:00); wird er über Nacht ausgeschaltet, eher die
-            Mittagszeit (z. B. 12:15).
-          </span>
         </div>
 
         <div>
@@ -148,10 +183,12 @@
           <div class="list-items" id="base-folders-list">
             {% for f in cfg.get('scanner', {}).get('base_folders', []) %}
             <div class="list-item">
-              <input type="text" name="base_folder_label"
-                placeholder="Label" value="{{ f.get('label', '') }}" style="max-width: 160px;">
-              <input type="text" name="base_folder_path"
-                placeholder="/Volumes/NAS/Projekte" value="{{ f.get('path', '') }}">
+              <div class="list-item-box">
+                <input type="text" name="base_folder_label" class="list-item-label"
+                  placeholder="Label" value="{{ f.get('label', '') }}">
+                <input type="text" name="base_folder_path" class="list-item-value"
+                  placeholder="/Volumes/NAS/Projekte" value="{{ f.get('path', '') }}">
+              </div>
               <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
                 onclick="chooseBaseFolder(this)">📁</button>
               <button type="button" class="remove-btn"
@@ -166,11 +203,6 @@
           <label style="font-size:13px; font-weight:500; color:var(--text); display:block; margin-bottom:6px;">
             Ausgeschlossene Ordner
           </label>
-          <span class="hint" style="display:block; margin-bottom:6px;">
-            Diese Ordner werden standardmässig in allen Projekten ignoriert, z. B. „privat".
-            Es zählt der exakte Ordnername (z. B. schliesst „Log" nicht „Analog" oder
-            „Logitech" mit aus).
-          </span>
           <div class="list-items" id="excluded-folders-list">
             {% for f in cfg.get('scanner', {}).get('excluded_folders', []) %}
             <div class="list-item">
@@ -186,6 +218,19 @@
           <button type="button" class="add-btn" onclick="addExcludedFolder()">+ Ordner hinzufügen</button>
         </div>
 
+        <div>
+          <div class="field">
+            <span class="field-prefix">Scanner-Worker</span>
+            <select name="num_workers">
+              {% set nw = cfg.get('scanner', {}).get('num_workers', 1)|int %}
+              <option value="1" {% if nw == 1 %}selected{% endif %}>1 Worker (Standard)</option>
+              <option value="2" {% if nw == 2 %}selected{% endif %}>2 Worker</option>
+              <option value="3" {% if nw == 3 %}selected{% endif %}>3 Worker</option>
+              <option value="4" {% if nw == 4 %}selected{% endif %}>4 Worker</option>
+            </select>
+          </div>
+        </div>
+
         <div style="padding-top:4px;">
           <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
@@ -195,7 +240,14 @@
 
     {# ── Mail ── #}
     <div class="settings-section">
-      <div class="settings-section-header">Mail (IMAP)</div>
+      <div class="settings-section-header">
+        Mail (IMAP)
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Verknüpfe deinen Projekt-Mailaccount, um auch Mails in den Suchresultaten anzeigen zu können.</p>
+          <p><strong>Passwort:</strong> leer lassen, um das bestehende Passwort zu behalten.</p>
+        </div>
+      </div>
       <div class="settings-body">
 
         <div class="mail-accounts" id="mail-accounts-list">
@@ -224,14 +276,11 @@
                 <input type="text" name="mail_username"
                   value="{{ acc.get('username', '') }}" autocomplete="off">
               </div>
-              <div>
-                <div class="field">
-                  <span class="field-prefix">Passwort</span>
-                  <input type="password" name="mail_password"
-                    placeholder="{{ '••••••' if acc.get('password') else 'Passwort eingeben' }}"
-                    autocomplete="new-password">
-                </div>
-                <span class="hint">Leer lassen um bestehendes Passwort zu behalten</span>
+              <div class="field">
+                <span class="field-prefix">Passwort</span>
+                <input type="password" name="mail_password"
+                  placeholder="{{ '••••••' if acc.get('password') else 'Passwort eingeben' }}"
+                  autocomplete="new-password">
               </div>
               <div class="mail-test-row">
                 <button type="button" class="mail-test-btn"
@@ -251,46 +300,6 @@
           <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
 
-      </div>
-    </div>
-
-    {# ── Serverkonfiguration ── #}
-    <div class="settings-section">
-      <div class="settings-section-header">Serverkonfiguration</div>
-      <div class="settings-body">
-        <div class="field-row-2">
-          <div class="field">
-            <span class="field-prefix">Host</span>
-            <input type="text" name="server_host"
-              value="{{ cfg.get('server', {}).get('host', '127.0.0.1') }}">
-          </div>
-          <div class="field" style="flex:0 0 120px;">
-            <span class="field-prefix" style="min-width:0;">Port</span>
-            <input type="number" name="server_port" min="1" max="65535"
-              value="{{ cfg.get('server', {}).get('port', 8000) }}">
-          </div>
-        </div>
-
-        <div>
-          <div class="field">
-            <span class="field-prefix">Scanner-Worker</span>
-            <select name="num_workers">
-              {% set nw = cfg.get('scanner', {}).get('num_workers', 1)|int %}
-              <option value="1" {% if nw == 1 %}selected{% endif %}>1 Worker (Standard)</option>
-              <option value="2" {% if nw == 2 %}selected{% endif %}>2 Worker</option>
-              <option value="3" {% if nw == 3 %}selected{% endif %}>3 Worker</option>
-              <option value="4" {% if nw == 4 %}selected{% endif %}>4 Worker</option>
-            </select>
-          </div>
-          <span class="hint">
-            Mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch.
-            Empfehlung: 1 Worker, nur bei sehr starken Geräten mehr.
-          </span>
-        </div>
-
-        <div style="padding-top:4px;">
-          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
-        </div>
       </div>
     </div>
 
@@ -338,6 +347,19 @@
 </div>
 
 <script>
+function toggleSectionHelp(btn) {
+  var panel = btn.nextElementSibling;
+  var isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  if (!isOpen) panel.classList.add('open');
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.settings-section-header')) {
+    document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  }
+});
+
 function addMailAccount() {
   var tpl = document.createElement('div');
   tpl.className = 'mail-account';
@@ -361,11 +383,9 @@ function addMailAccount() {
         <span class="field-prefix">Benutzername</span>
         <input type="text" name="mail_username" autocomplete="off">
       </div>
-      <div>
-        <div class="field">
-          <span class="field-prefix">Passwort</span>
-          <input type="password" name="mail_password" placeholder="Passwort eingeben" autocomplete="new-password">
-        </div>
+      <div class="field">
+        <span class="field-prefix">Passwort</span>
+        <input type="password" name="mail_password" placeholder="Passwort eingeben" autocomplete="new-password">
       </div>
       <div class="mail-test-row">
         <button type="button" class="mail-test-btn" onclick="testMail(this)">Verbindung testen</button>
@@ -398,8 +418,10 @@ function addBaseFolder() {
   var item = document.createElement('div');
   item.className = 'list-item';
   item.innerHTML =
-    '<input type="text" name="base_folder_label" placeholder="Label" style="max-width:160px;">' +
-    '<input type="text" name="base_folder_path" placeholder="/Volumes/NAS/Projekte">' +
+    '<div class="list-item-box">' +
+      '<input type="text" name="base_folder_label" class="list-item-label" placeholder="Label">' +
+      '<input type="text" name="base_folder_path" class="list-item-value" placeholder="/Volumes/NAS/Projekte">' +
+    '</div>' +
     '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseBaseFolder(this)">📁</button>' +
     '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
   document.getElementById('base-folders-list').appendChild(item);

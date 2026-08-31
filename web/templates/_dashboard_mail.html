@@ -83,6 +83,16 @@
                 {% endfor %}
               </select>
             </form>
+            {% if not c.project_id and c.suggested_project %}
+            <form hx-post="/dashboard/mail/assign-project"
+                  hx-target="#mail-section" hx-swap="outerHTML"
+                  style="display:contents;">
+              <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+              <input type="hidden" name="project_id" value="{{ c.suggested_project.id }}">
+              <span style="font-size:11px; color:var(--text-3);">Vorschlag: {{ c.suggested_project.name }}</span>
+              <button type="submit" class="btn" style="padding:2px 8px; font-size:11px;">Übernehmen</button>
+            </form>
+            {% endif %}
           </div>
         </div>
 

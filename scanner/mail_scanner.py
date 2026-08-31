@@ -131,6 +131,47 @@ def match_mailbox_to_project(conn, mailbox_name: str) -> int | None:
     return rows[0]["id"]
 
 
+_NAME_STOPWORDS = {
+    "ag", "gmbh", "und", "der", "die", "das", "von", "im", "am", "in", "an",
+    "strasse", "str", "weg", "platz", "gasse", "haus", "inbox", "postfach",
+}
+
+
+def _name_tokens(s: str) -> set[str]:
+    """Signifikante Wortstücke aus einem Namen -- Zahlen, Stoppwörter und sehr
+    kurze Token werden verworfen, damit z.B. 'Strasse' oder 'AG' keine
+    zufälligen Treffer zwischen unterschiedlichen Projekten erzeugen."""
+    words = re.split(r"[^a-zA-ZäöüÄÖÜéèà]+", s.lower())
+    return {w for w in words if len(w) >= 4 and w not in _NAME_STOPWORDS}
+
+
+def suggest_project_by_name(conn, mailbox_name: str) -> dict | None:
+    """Namens-basierter Vorschlag für ein Postfach ohne Nummer-Treffer (siehe
+    match_mailbox_to_project). Wird NIE automatisch übernommen -- nur als
+    Vorschlag im Dashboard angezeigt, den man per Klick bestätigt. Bei
+    mehrdeutigem Ergebnis (mehrere Projekte mit gleich starker Überschneidung)
+    wird kein Vorschlag gemacht, um kein Postfach falsch zuzuordnen."""
+    folder = mailbox_name.rsplit("/", 1)[-1]
+    mb_tokens = _name_tokens(folder)
+    if not mb_tokens:
+        return None
+    best = None
+    best_score = 0
+    ambiguous = False
+    for row in conn.execute("SELECT id, name FROM projects WHERE active=1").fetchall():
+        overlap = mb_tokens & _name_tokens(row["name"] or "")
+        score = len(overlap)
+        if score == 0:
+            continue
+        if score > best_score:
+            best, best_score, ambiguous = row, score, False
+        elif score == best_score:
+            ambiguous = True
+    if best is None or ambiguous:
+        return None
+    return {"id": best["id"], "name": best["name"]}
+
+
 # ── Mail-Parser ───────────────────────────────────────────────────────────────
 
 def decode_mime_header(value) -> str:

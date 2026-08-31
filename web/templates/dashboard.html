@@ -54,6 +54,25 @@
 </div>
 
 <script>
+  function moveProject(projectId) {
+    fetch(HELPER + '/choose-folder', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.cancelled) return null;
+        if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return null; }
+        var fd = new FormData();
+        fd.append('new_path', d.path);
+        return fetch('/dashboard/projects/' + projectId + '/move', { method: 'POST', body: fd });
+      })
+      .then(function(r) { return r && r.text(); })
+      .then(function(html) {
+        if (html) document.getElementById('project-list').innerHTML = html;
+      })
+      .catch(function() {
+        alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad in den Einstellungen von Hand anpassen.');
+      });
+  }
+
   function toggleBrowser(projectId, projectPath, projectName) {
     var browserDiv = document.getElementById('browser-' + projectId);
     if (!browserDiv) return;

@@ -1,9 +1,8 @@
-{% for group in groups %}
-
-<div class="section-title" style="padding-top:{% if loop.first %}4px{% else %}28px{% endif %};">{{ group.label }}</div>
-
-{% for p in group.projects %}
-<div class="project-entry">
+{# Eine Projektzeile. Rekursiv, damit tiefer verschachtelte Projekte (via
+   "Unterordner ▸" angelegt) unter ihrem Elternordner eingerückt erscheinen --
+   sie tauchen im os.scandir()-Durchlauf des Dashboards sonst nicht auf. #}
+{% macro project_entry(p, depth=0) %}
+<div class="project-entry"{% if depth %} style="margin-left:{{ depth * 26 }}px;"{% endif %}>
 
   <div class="project-row">
 
@@ -25,14 +24,21 @@
     <div class="project-name" style="flex:1; min-width:0;">{{ p.name }}</div>
     {% else %}
     {# Projektinfo (aktiv) — volle Darstellung #}
-    <div style="flex:1; min-width:0;">
-      <div class="project-name">{{ p.name }}</div>
+    <div style="flex:1; min-width:0;" title="{{ p.path }}">
+      <div class="project-name">
+        {% if depth %}<span class="nested-marker" title="Unterordner-Projekt">↳</span> {% endif %}{{ p.name }}
+      </div>
       <div class="project-meta">
+        {% if p.sub_label %}<span class="nested-rel">{{ p.sub_label }}</span> · {% endif %}
         {{ p.doc_count }} Dokumente
         {% if p.last_scanned %} · Zuletzt gescannt: {{ p.last_scanned }}
         {% elif p.last_scan %} · Scan: {{ p.last_scan }}{% endif %}
+        {% if p.orphan_reason == 'mail' %}
+        · <span class="orphan-missing" title="Das zugehörige Postfach wurde deaktiviert oder gelöscht (z.B. über 'Postfach löschen' in der Mail-Integration). Dieses Projekt hat dadurch keine aktive Mailquelle mehr.">Postfach nicht mehr verknüpft</span>
+        {% elif p.exists is defined and not p.exists %}
+        · <span class="orphan-missing" title="Der Ordner ist aktuell nicht erreichbar. Bei Netzlaufwerken kann das auch bedeuten, dass das Laufwerk gerade nicht verbunden ist.">Ordner nicht auffindbar</span>
+        {% endif %}
       </div>
-      <div class="project-path">{{ p.path }}</div>
     </div>
 
     {# Aktionen #}
@@ -65,10 +71,17 @@
         {% endif %}
         </span>
 
+        {% if p.exists is defined and not p.exists %}
+        <button type="button" class="btn" title="Neuen Ordner-Standort wählen -- z.B. wenn der Ordner nur verschoben wurde. Dokumente, Tags und Bewertungen bleiben erhalten."
+                onclick="moveProject({{ p.id }})">
+          📁 Neu verknüpfen
+        </button>
+        {% else %}
         <button class="btn"
                 onclick="toggleBrowser({{ p.id }}, '{{ p.path | replace("'", "\\'") }}', '{{ p.name | replace("'", "\\'") }}')">
           Unterordner ▸
         </button>
+        {% endif %}
 
       {% endif %}
     </div>
@@ -88,9 +101,9 @@
 
   {# Matched Postfächer #}
   {% if p.mailboxes %}
-  <div style="border-top:1px solid var(--border); padding:8px 0 4px;">
+  <div style="padding:0 0 6px;">
     {% for mb in p.mailboxes %}
-    <div style="display:flex; align-items:center; gap:10px; padding:4px 0;">
+    <div style="display:flex; align-items:center; gap:10px; padding:2px 0;">
       <form hx-post="/dashboard/mail/toggle"
             hx-target="#project-list"
             hx-swap="innerHTML"
@@ -116,6 +129,32 @@
   {% endif %}
 
 </div>
+
+{% for child in p.nested %}{{ project_entry(child, depth + 1) }}{% endfor %}
+{% endmacro %}
+
+
+{% if orphans %}
+<div class="orphan-banner">
+  <span>
+    {% if orphans | length == 1 %}
+      1 aktives Projekt ist hier sonst nicht sichtbar (Ordner ausserhalb der
+      Projektordner oder Postfach entfernt).
+    {% else %}
+      {{ orphans | length }} aktive Projekte sind hier sonst nicht sichtbar
+      (Ordner ausserhalb der Projektordner oder Postfach entfernt).
+    {% endif %}
+  </span>
+  <a href="#nicht-zugeordnet">Anzeigen ↓</a>
+</div>
+{% endif %}
+
+{% for group in groups %}
+
+<div class="section-title" style="padding-top:{% if loop.first %}4px{% else %}28px{% endif %};">{{ group.label }}</div>
+
+{% for p in group.projects %}
+{{ project_entry(p) }}
 {% else %}
 <div class="empty-state">
   <p>Kein Ordner in <code>{{ group.path }}</code> gefunden.</p>
@@ -123,3 +162,22 @@
 {% endfor %}
 
 {% endfor %}
+
+
+{# Aktive Projekte, die sonst nirgends im Dashboard sichtbar sind (Ordner ausserhalb
+   aller konfigurierten Projektordner, oder ein Postfach-Projekt ohne aktives
+   Postfach) -- laufen aber im Scan und in der Projekt-Auswahl der Suche mit. #}
+{% if orphans %}
+<div class="section-title orphan-title" id="nicht-zugeordnet" style="padding-top:28px;">
+  ⚠ Nicht zugeordnet ({{ orphans | length }})
+</div>
+<p class="orphan-hint">
+  Diese Projekte liegen unter keinem der konfigurierten Projektordner, oder ihr
+  zugehöriges Postfach wurde entfernt. Sie werden weiterhin gescannt und erscheinen
+  in der Projekt-Auswahl der Suche. Zum Abschalten den Schalter links verwenden —
+  die bereits indexierten Dokumente bleiben dabei erhalten.
+</p>
+{% for p in orphans %}
+{{ project_entry(p) }}
+{% endfor %}
+{% endif %}
