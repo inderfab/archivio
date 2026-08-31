@@ -348,7 +348,9 @@ def _first_level_dirs(root: Path, excluded: set[str]) -> list[Path]:
             d for d in root.iterdir()
             if d.is_dir()
             and not d.name.startswith('.')
-            and not any(excl in unicodedata.normalize('NFC', d.name.lower()) for excl in excluded)
+            # Exakter Ordnername, keine Teilstring-Suche -- sonst schliesst "Log" auch
+            # "Analog" oder "Logitech" aus.
+            and unicodedata.normalize('NFC', d.name.lower()) not in excluded
         ])
     except OSError:
         return []
@@ -454,8 +456,8 @@ def scan_project(project_id: int, root: Path,
             dirnames[:] = [
                 d for d in dirnames
                 if not d.startswith('.')
-                and not any(excl in unicodedata.normalize('NFC', d.lower())
-                            for excl in excluded)
+                # Exakter Ordnername, keine Teilstring-Suche -- siehe _first_level_dirs().
+                and unicodedata.normalize('NFC', d.lower()) not in excluded
                 and Path(d).suffix.lower() not in _FAKE_DIR_SUFFIXES
                 and str(Path(dirpath) / d) not in ignored_paths
             ]

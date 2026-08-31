@@ -13,37 +13,28 @@
   .settings-banner.ok      { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
   .settings-banner.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
-  /* Collapsible sections */
-  details.settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
-  details.settings-section > summary {
+  /* Immer offene Sektionen (kein <details>/Einklappen mehr) */
+  .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: hidden; }
+  .settings-section-header {
     font-size: 12px; font-weight: 600; text-transform: uppercase;
     letter-spacing: .06em; color: var(--text-2);
     padding: 10px 16px; background: var(--bg-2);
     border-bottom: 1px solid var(--border);
-    cursor: pointer; list-style: none; user-select: none;
-    display: flex; align-items: center; gap: 6px;
   }
-  details.settings-section > summary::-webkit-details-marker { display: none; }
-  .sec-arrow { font-size: 10px; transition: transform .18s; display: inline-block; }
-  details.settings-section[open] > summary .sec-arrow { transform: rotate(90deg); }
+  .settings-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 
-  .settings-body { padding: 16px; display: flex; flex-direction: column; gap: 14px; }
-
-  .field { display: flex; flex-direction: column; gap: 4px; }
-  .field label { font-size: 13px; font-weight: 500; color: var(--text); }
-  .field .hint  { font-size: 12px; color: var(--text-3); margin-top: 2px; }
-
-  .field input[type="text"],
-  .field input[type="number"],
-  .field input[type="password"],
+  /* Beschriftung + Eingabefeld in EINER Box, wie im Filter-Panel der Suche
+     (.field/.field-prefix aus base.html) -- hier nur die Präfix-Breite an die
+     längeren Settings-Labels angepasst (dort reichen kurze Wörter wie "Von"). */
+  .settings-body .field-prefix,
+  .mail-account-body .field-prefix { min-width: 168px; }
   .field select {
-    padding: 7px 10px; font-size: 14px; font-family: inherit;
-    border: 1px solid var(--border); border-radius: var(--radius);
-    color: var(--text); background: var(--bg); outline: none;
-    transition: border-color .15s; width: 100%;
+    flex: 1 1 auto; border: 0; outline: none; background: transparent;
+    padding: 7px 10px; min-width: 0; font-size: 13px; font-family: inherit; color: var(--text);
   }
-  .field input:focus, .field select:focus { border-color: var(--accent); }
-  .field-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .field-row-2 { display: flex; gap: 12px; }
+  .field-row-2 .field { flex: 1; }
+  .hint { font-size: 12px; color: var(--text-3); line-height: 1.5; }
 
   /* Mail-Konten */
   .mail-accounts { display: flex; flex-direction: column; gap: 12px; }
@@ -61,7 +52,7 @@
   .mail-account-header input:focus { border-color: var(--border); background: var(--bg); }
   .mail-account-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
 
-  /* Listen */
+  /* Listen (Projektordner, Ausgeschlossene Ordner) */
   .list-items { display: flex; flex-direction: column; gap: 6px; }
   .list-item  { display: flex; gap: 8px; align-items: center; }
   .list-item input {
@@ -107,8 +98,6 @@
   .test-ok  { color: #166534; }
   .test-err { color: #991b1b; }
 
-  /* Save hint */
-  .save-hint { font-size: 12px; color: var(--text-3); padding: 4px 0 8px; }
 </style>
 
 <div class="settings-page">
@@ -128,22 +117,30 @@
     <button type="submit" style="display:none"></button>
 
     {# ── Scanner ── #}
-    <details class="settings-section" open>
-      <summary><span class="sec-arrow">▶</span> Scanner</summary>
+    <div class="settings-section">
+      <div class="settings-section-header">Scanner</div>
       <div class="settings-body">
 
-        <div class="field">
-          <label>Automatischer Scan</label>
-          <input type="text" name="scan_time" style="max-width:120px;"
-            placeholder="z.B. 23:00"
-            value="{{ cfg.get('scheduler', {}).get('scan_time', '') }}">
-          <span class="hint">Täglich um diese Uhrzeit (HH:MM). Leer = deaktiviert.</span>
+        <div>
+          <div class="field">
+            <span class="field-prefix">Automatischer Scan</span>
+            <input type="text" name="scan_time" placeholder="z.B. 22:00"
+              value="{{ cfg.get('scheduler', {}).get('scan_time', '') }}">
+          </div>
+          <span class="hint">
+            Aktive Projekte werden täglich um diese Uhrzeit (HH:MM) aktualisiert. Leer =
+            deaktiviert. Die Uhrzeit so wählen, dass der Computer läuft — bleibt er immer an,
+            eignet sich der Abend (z. B. 22:00); wird er über Nacht ausgeschaltet, eher die
+            Mittagszeit (z. B. 12:15).
+          </span>
         </div>
 
-        <div class="field">
-          <label>Base-Folders</label>
+        <div>
+          <label style="font-size:13px; font-weight:500; color:var(--text); display:block; margin-bottom:6px;">
+            Projektordner
+          </label>
           {% if fda_missing %}
-          <div class="hint" style="margin-bottom:8px; padding:8px 10px; background:#fffbeb; border-left:3px solid #e6a817; border-radius:4px; font-size:12px; color:var(--text-2);">
+          <div class="hint" style="margin-bottom:8px; padding:8px 10px; background:#fffbeb; border-left:3px solid #e6a817; border-radius:4px; color:var(--text-2);">
             <strong>macOS-Zugriff:</strong> Damit Archivio auf Dokumente, Desktop, Downloads oder NAS-Mounts zugreifen kann, benötigt die App <strong>Festplattenvollzugriff</strong>.<br>
             <em>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff → Archivio Server hinzufügen.</em>
           </div>
@@ -165,13 +162,22 @@
           <button type="button" class="add-btn" onclick="addBaseFolder()">+ Ordner hinzufügen</button>
         </div>
 
-        <div class="field">
-          <label>Ausgeschlossene Ordner</label>
+        <div>
+          <label style="font-size:13px; font-weight:500; color:var(--text); display:block; margin-bottom:6px;">
+            Ausgeschlossene Ordner
+          </label>
+          <span class="hint" style="display:block; margin-bottom:6px;">
+            Diese Ordner werden standardmässig in allen Projekten ignoriert, z. B. „privat".
+            Es zählt der exakte Ordnername (z. B. schliesst „Log" nicht „Analog" oder
+            „Logitech" mit aus).
+          </span>
           <div class="list-items" id="excluded-folders-list">
             {% for f in cfg.get('scanner', {}).get('excluded_folders', []) %}
             <div class="list-item">
               <input type="text" name="excluded_folder"
                 placeholder="Ordnername" value="{{ f }}">
+              <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
+                onclick="chooseExcludedFolder(this)">📁</button>
               <button type="button" class="remove-btn"
                 onclick="this.closest('.list-item').remove()">×</button>
             </div>
@@ -181,16 +187,15 @@
         </div>
 
         <div style="padding-top:4px;">
-          <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
-          <span class="save-hint" style="margin-left:8px;">oder Enter drücken</span>
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
 
       </div>
-    </details>
+    </div>
 
     {# ── Mail ── #}
-    <details class="settings-section" open>
-      <summary><span class="sec-arrow">▶</span> Mail (IMAP)</summary>
+    <div class="settings-section">
+      <div class="settings-section-header">Mail (IMAP)</div>
       <div class="settings-body">
 
         <div class="mail-accounts" id="mail-accounts-list">
@@ -203,27 +208,29 @@
                 onclick="this.closest('.mail-account').remove()">×</button>
             </div>
             <div class="mail-account-body">
-              <div class="field-row">
+              <div class="field-row-2">
                 <div class="field">
-                  <label>Server</label>
+                  <span class="field-prefix">Server</span>
                   <input type="text" name="mail_host" value="{{ acc.get('host', '') }}">
                 </div>
-                <div class="field">
-                  <label>Port</label>
+                <div class="field" style="flex:0 0 120px;">
+                  <span class="field-prefix" style="min-width:0;">Port</span>
                   <input type="number" name="mail_port" min="1" max="65535"
                     value="{{ acc.get('port', 993) }}">
                 </div>
               </div>
               <div class="field">
-                <label>Benutzername</label>
+                <span class="field-prefix">Benutzername</span>
                 <input type="text" name="mail_username"
                   value="{{ acc.get('username', '') }}" autocomplete="off">
               </div>
-              <div class="field">
-                <label>Passwort</label>
-                <input type="password" name="mail_password"
-                  placeholder="{{ '••••••' if acc.get('password') else 'Passwort eingeben' }}"
-                  autocomplete="new-password">
+              <div>
+                <div class="field">
+                  <span class="field-prefix">Passwort</span>
+                  <input type="password" name="mail_password"
+                    placeholder="{{ '••••••' if acc.get('password') else 'Passwort eingeben' }}"
+                    autocomplete="new-password">
+                </div>
                 <span class="hint">Leer lassen um bestehendes Passwort zu behalten</span>
               </div>
               <div class="mail-test-row">
@@ -241,77 +248,72 @@
         </button>
 
         <div style="padding-top:4px;">
-          <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
 
       </div>
-    </details>
+    </div>
 
     {# ── Serverkonfiguration ── #}
-    <details class="settings-section" open>
-      <summary><span class="sec-arrow">▶</span> Serverkonfiguration</summary>
+    <div class="settings-section">
+      <div class="settings-section-header">Serverkonfiguration</div>
       <div class="settings-body">
-        <div class="field-row" style="max-width: 360px;">
+        <div class="field-row-2">
           <div class="field">
-            <label>Host</label>
+            <span class="field-prefix">Host</span>
             <input type="text" name="server_host"
               value="{{ cfg.get('server', {}).get('host', '127.0.0.1') }}">
           </div>
-          <div class="field">
-            <label>Port</label>
+          <div class="field" style="flex:0 0 120px;">
+            <span class="field-prefix" style="min-width:0;">Port</span>
             <input type="number" name="server_port" min="1" max="65535"
               value="{{ cfg.get('server', {}).get('port', 8000) }}">
           </div>
         </div>
 
-        <div class="field" style="max-width: 360px;">
-          <label>Scanner-Worker</label>
-          <select name="num_workers">
-            {% set nw = cfg.get('scanner', {}).get('num_workers', 1)|int %}
-            <option value="1" {% if nw == 1 %}selected{% endif %}>1 Worker (Standard)</option>
-            <option value="2" {% if nw == 2 %}selected{% endif %}>2 Worker</option>
-            <option value="3" {% if nw == 3 %}selected{% endif %}>3 Worker</option>
-            <option value="4" {% if nw == 4 %}selected{% endif %}>4 Worker</option>
-          </select>
+        <div>
+          <div class="field">
+            <span class="field-prefix">Scanner-Worker</span>
+            <select name="num_workers">
+              {% set nw = cfg.get('scanner', {}).get('num_workers', 1)|int %}
+              <option value="1" {% if nw == 1 %}selected{% endif %}>1 Worker (Standard)</option>
+              <option value="2" {% if nw == 2 %}selected{% endif %}>2 Worker</option>
+              <option value="3" {% if nw == 3 %}selected{% endif %}>3 Worker</option>
+              <option value="4" {% if nw == 4 %}selected{% endif %}>4 Worker</option>
+            </select>
+          </div>
           <span class="hint">
-            Mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch.<br>
-            Empfehlung: 1 Worker (bis 16 GB RAM) · 2 Worker (16–32 GB) · 3–4 Worker (ab 64 GB).
+            Mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch.
+            Empfehlung: 1 Worker, nur bei sehr starken Geräten mehr.
           </span>
         </div>
 
         <div style="padding-top:4px;">
-          <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
       </div>
-    </details>
+    </div>
 
-    <details class="settings-section" open>
-      <summary><span class="sec-arrow">▶</span> Rubrica</summary>
+    <div class="settings-section">
+      <div class="settings-section-header">Rubrica</div>
       <div class="settings-body">
-        <label style="display:flex; align-items:flex-start; gap:8px; cursor:pointer; max-width:480px;">
-          <input type="checkbox" name="rubrica_enabled" value="1" style="margin-top:3px;"
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px;">
+          <input type="checkbox" name="rubrica_enabled" value="1"
             {% if cfg.get('rubrica', {}).get('enabled', False) %}checked{% endif %}>
-          <span>
-            Mails in Datenbank für Rubrica speichern
-            <span class="hint" style="display:block; margin-top:2px;">
-              Spiegelt beim Mail-Scan den vollen Mailtext inkl. Signatur (die Suche in Archivio
-              nutzt weiterhin die bereinigte Version) in eine separate Datei
-              (<code>rubrica.db</code>), aus der die Rubrica-App Kontaktvorschläge ableitet.
-            </span>
-          </span>
+          Mails für das Adressverwaltungstool Rubrica speichern
         </label>
 
         <div style="padding-top:14px;">
-          <button type="submit" class="btn btn-primary" style="padding:8px 20px;font-size:14px;">Speichern</button>
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
         </div>
       </div>
-    </details>
+    </div>
 
   </form>
 
   {# ── Diagnose (ausserhalb Form) ── #}
-  <details class="settings-section" open>
-    <summary><span class="sec-arrow">▶</span> Diagnose</summary>
+  <div class="settings-section">
+    <div class="settings-section-header">Diagnose</div>
     <div class="settings-body">
       <p style="font-size:13px; color:var(--text-2); margin:0 0 4px; line-height:1.5;">
         Prüft Pfade, Dateizugriffe, Ollama und Systemkonfiguration des laufenden Servers.
@@ -331,7 +333,7 @@
       </div>
       <div id="diag-results"></div>
     </div>
-  </details>
+  </div>
 
 </div>
 
@@ -345,23 +347,25 @@ function addMailAccount() {
       <button type="button" class="remove-btn" onclick="this.closest('.mail-account').remove()">×</button>
     </div>
     <div class="mail-account-body">
-      <div class="field-row">
+      <div class="field-row-2">
         <div class="field">
-          <label>Server</label>
+          <span class="field-prefix">Server</span>
           <input type="text" name="mail_host">
         </div>
-        <div class="field">
-          <label>Port</label>
+        <div class="field" style="flex:0 0 120px;">
+          <span class="field-prefix" style="min-width:0;">Port</span>
           <input type="number" name="mail_port" value="993" min="1" max="65535">
         </div>
       </div>
       <div class="field">
-        <label>Benutzername</label>
+        <span class="field-prefix">Benutzername</span>
         <input type="text" name="mail_username" autocomplete="off">
       </div>
-      <div class="field">
-        <label>Passwort</label>
-        <input type="password" name="mail_password" placeholder="Passwort eingeben" autocomplete="new-password">
+      <div>
+        <div class="field">
+          <span class="field-prefix">Passwort</span>
+          <input type="password" name="mail_password" placeholder="Passwort eingeben" autocomplete="new-password">
+        </div>
       </div>
       <div class="mail-test-row">
         <button type="button" class="mail-test-btn" onclick="testMail(this)">Verbindung testen</button>
@@ -421,9 +425,28 @@ function addExcludedFolder() {
   item.className = 'list-item';
   item.innerHTML =
     '<input type="text" name="excluded_folder" placeholder="Ordnername">' +
+    '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseExcludedFolder(this)">📁</button>' +
     '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
   document.getElementById('excluded-folders-list').appendChild(item);
   item.querySelector('input').focus();
+}
+
+function chooseExcludedFolder(btn) {
+  // Nur der Ordnername zählt beim Ausschliessen (exakter Name, siehe Hint-Text) --
+  // deshalb hier nur den letzten Pfadteil übernehmen, nicht den vollen Pfad wie bei
+  // chooseBaseFolder().
+  var input = btn.closest('.list-item').querySelector('input[name="excluded_folder"]');
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      var parts = d.path.replace(/\/+$/, '').split('/');
+      input.value = parts[parts.length - 1];
+    })
+    .catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten, oder den Ordnernamen von Hand eintragen.');
+    });
 }
 
 function startMetaBackfill(link) {
