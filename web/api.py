@@ -7,6 +7,7 @@ import os
 import re
 import subprocess
 import threading
+import uuid
 import zipfile
 from datetime import datetime
 from pathlib import Path
@@ -20,6 +21,108 @@ from db import connection
 from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _cancel_flags, _now
 
 router = APIRouter(prefix="/api")
+
+
+# ── MCP-Whitelist ────────────────────────────────────────────────────────────────
+# Default-Deny: MCP darf nur auf Projekte zugreifen, die explizit im Dashboard
+# freigegeben wurden (projects.mcp_enabled). Siehe web/dashboard.py für den Toggle.
+
+def _mcp_enabled_project_ids(conn) -> set[int]:
+    return {r[0] for r in conn.execute(
+        "SELECT id FROM projects WHERE active=1 AND mcp_enabled=1"
+    ).fetchall()}
+
+
+def _project_mcp_enabled(conn, project_id: int) -> bool:
+    row = conn.execute(
+        "SELECT mcp_enabled FROM projects WHERE id=? AND active=1", (project_id,)
+    ).fetchone()
+    return bool(row and row["mcp_enabled"])
+
+
+def _mcp_enabled_mailboxes(conn) -> set[str]:
+    return {r[0] for r in conn.execute(
+        "SELECT mailbox_name FROM mail_scan_config WHERE mcp_enabled=1"
+    ).fetchall()}
+
+
+def _mcp_allowed_doc_ids(conn, doc_ids: list) -> set[int]:
+    """Welche der übergebenen Dokument-IDs über MCP sichtbar sind. Mit Projekt: nur
+    wenn dessen Projekt freigegeben ist. Ohne Projekt (project_id NULL): nur wenn
+    ihr Herkunfts-Postfach direkt freigegeben wurde (mail_scan_config.mcp_enabled,
+    Migration 017 -- der ☁-Schalter bei aktiven, nicht zugeordneten Postfächern in
+    _dashboard_mail.html). Ist ein Postfach mit einem Projekt verknüpft, hat
+    project_id einen Wert und ausschliesslich die Projekt-Freigabe zählt.
+
+    Hinweis: documents.project_id ist aktuell NOT NULL, und _run_mail_scan()
+    überspringt Postfächer ohne Projekt komplett (web/dashboard.py) -- ein
+    NULL-project_id-Dokument kann über die reguläre Anwendung also (noch) gar nicht
+    entstehen, dieser Zweig ist damit heute unreachable. Bewusst trotzdem korrekt
+    gebaut, statt nur die UI zu bauen: sobald diese Einschränkung einmal fällt, muss
+    diese Whitelist-Funktion nicht nochmals angefasst werden."""
+    if not doc_ids:
+        return set()
+    placeholders = ",".join("?" * len(doc_ids))
+    rows = conn.execute(
+        f"""SELECT d.id AS doc_id, d.project_id, m.mailbox_name
+            FROM documents d
+            LEFT JOIN mails m ON m.document_id = d.id
+            WHERE d.id IN ({placeholders})""",
+        doc_ids,
+    ).fetchall()
+    enabled_projects  = _mcp_enabled_project_ids(conn)
+    enabled_mailboxes = _mcp_enabled_mailboxes(conn)
+    allowed = set()
+    for r in rows:
+        if r["project_id"] is not None:
+            if r["project_id"] in enabled_projects:
+                allowed.add(r["doc_id"])
+        elif r["mailbox_name"] and r["mailbox_name"] in enabled_mailboxes:
+            allowed.add(r["doc_id"])
+    return allowed
+
+
+def _norm_notice_text(conn, norm_ref: str) -> str:
+    """Baut die Rückmeldung, wenn eine MCP-Suche wie eine Normnummer aussieht, aber
+    die normale (freigabebeschränkte) Suche nichts liefert. Nennt den Fundort
+    (Metadaten, siehe scanner.norms.find_norm_locations), wenn die Norm lokal
+    bekannt ist -- egal ob ihr Projekt für MCP freigegeben ist -- niemals aber
+    deren Inhalt. Pro Fundort eine FERTIGE Markdown-Link-Zeile (localhost:44380/link,
+    siehe helper/archivio_mcp.py::_archivio_link_markdown -- derselbe feste Port,
+    unabhängig vom Archivio-Server), die Claude unverändert übernehmen soll. In der
+    Praxis hat Claude einen blossen Link teils in einen Codeblock gesetzt (dort nicht
+    klickbar) oder sich einen eigenen file://-Link gebaut -- ein bereits fertiges
+    Markdown-Snippet lässt dafür keinen Interpretationsspielraum mehr."""
+    from urllib.parse import quote
+
+    from scanner.norms import find_norm_locations
+
+    locations = find_norm_locations(conn, norm_ref)
+    base = (
+        f"„{norm_ref}“ ist als Norm eingestuft. Der Inhalt wird aus urheber- und "
+        f"lizenzrechtlichen Gründen nie über MCP ausgegeben, auch wenn sie lokal "
+        f"archiviert ist."
+    )
+    if not locations:
+        return base
+    _STATUS_LABELS = {"aktuell": "Aktuell", "veraltet": "Veraltet ⚠️", "ungeprüft": "Ungeprüft"}
+    loc_lines = "\n".join(
+        f"- {l['filename']}" + (f" [{l['project']}]" if l.get("project") else "")
+        + (f"\n  Pfad: {l['path']}" if l.get("path") else "")
+        + (f"\n  Gültig ab: {l['valid_from']}" if l.get("valid_from") else "")
+        + f"\n  Aktualität: {_STATUS_LABELS.get(l.get('check_status') or 'ungeprüft', 'Ungeprüft')}"
+        + (f"\n  [📂 Im Finder öffnen](http://localhost:44380/link?path={quote(l['path'], safe='')})"
+           if l.get("path") else "")
+        for l in locations[:5]
+    )
+    return (
+        f"{base}\n\nGefunden unter:\n{loc_lines}\n\n"
+        "Die Markdown-Link-Zeilen UNVERÄNDERT (Zeichen für Zeichen) in die Antwort "
+        "übernehmen, NICHT in einen Codeblock setzen und NICHT selbst einen Link aus "
+        "dem Pfad bauen (z.B. file://) -- nur das fertige Snippet ist in Claude "
+        "Desktop zuverlässig klickbar."
+    )
+
 
 _VERSION_FILE = Path(__file__).parent.parent / "VERSION"
 _HELPER_VERSION_FILE = Path(__file__).parent.parent / "HELPER_VERSION"
@@ -60,6 +163,7 @@ async def mcp_search(
     project_id: str = "",
     search_in: str = "docs,filenames,folders",
     limit: int = 20,
+    session_id: str = "",
 ):
     """Read-only JSON-Suche für den MCP-Server (Archivio Helper) — reine Textantwort statt HTML.
     Nutzt dieselbe Such-Logik wie /search (main.py), nur ohne die Zusatzfilter (Datum, Absender, …).
@@ -77,6 +181,26 @@ async def mcp_search(
 
     q = q.strip()
     scope = set(search_in.split(",")) if search_in else {"docs", "filenames", "folders"}
+
+    # Whitelist: ein explizit angefragtes, nicht freigegebenes Projekt wird gar nicht
+    # erst durchsucht -- klarer, protokollierter Refusal statt eines still-leeren
+    # Ergebnisses weiter unten (das kommt für den unscoped Fall trotzdem noch dazu).
+    if project_id and not project_id.startswith("mailbox:"):
+        try:
+            _pid = int(project_id)
+        except ValueError:
+            _pid = None
+        if _pid is not None:
+            _wl_conn = connection.get_connection()
+            try:
+                if not _project_mcp_enabled(_wl_conn, _pid):
+                    from scanner.mcp_log import log_access
+                    log_access(_wl_conn, "search", q, project_id, [],
+                               [{"path": f"Projekt {_pid}", "reason": "Nicht für Claude freigegeben"}],
+                               session_id=session_id)
+                    return JSONResponse({"results": [], "folders": []})
+            finally:
+                _wl_conn.close()
 
     def _do_search():
         conn = connection.get_connection()
@@ -112,16 +236,75 @@ async def mcp_search(
         for r in results[:limit]
     ]
 
+    from scanner.block_list import assert_no_blocked_text
+    from scanner.block_list import redact_hits as block_redact_hits
+    from scanner.mcp_log import log_access
     from scanner.norms import assert_no_norm_text, redact_hits
 
     _norms_conn = connection.get_connection()
     try:
+        # Whitelist: bei einem konkreten (numerischen) project_id-Filter wurde die
+        # Freigabe oben bereits geprüft, UND die SQL-Suche ist schon auf dieses eine
+        # Projekt eingeschränkt -- inklusive Dokumenten, die per document_paths
+        # physisch darin liegen, auch wenn ihr documents.project_id (Erstindizierung,
+        # sticky) noch ein anderes Projekt ist (siehe test_search_project_filter.py).
+        # Ein zusätzlicher Filter über die sticky project_id würde solche legitimen
+        # Kopien fälschlich wieder ausschliessen. Nur ohne (oder mit "mailbox:"-)
+        # project_id -- wo die Suche über ALLE Projekte läuft -- muss hier zusätzlich
+        # gefiltert werden; Dokumente mit project_id NULL (z.B. noch nicht zugeordnete
+        # Mail) zählen nur, wenn ihr Postfach direkt freigegeben ist (siehe
+        # _mcp_allowed_doc_ids -- Migration 017_mail_mcp_enabled).
+        try:
+            _pid_scoped = int(project_id) if project_id and not project_id.startswith("mailbox:") else None
+        except ValueError:
+            _pid_scoped = None
+        if _pid_scoped is None:
+            allowed_ids = _mcp_allowed_doc_ids(_norms_conn, [f["id"] for f in cleaned if f.get("id")])
+            cleaned     = [f for f in cleaned if f.get("id") in allowed_ids]
+            enabled     = _mcp_enabled_project_ids(_norms_conn)
+            folders     = [f for f in folders if f.get("project_id") in enabled]
+
         cleaned = redact_hits(_norms_conn, cleaned)
+        assert_no_norm_text(cleaned)
+        cleaned = block_redact_hits(_norms_conn, cleaned)
+        assert_no_blocked_text(cleaned)
+        sent = [
+            {"id": f.get("id"), "path": f.get("filepath"), "filename": f.get("filename"),
+             "project": f.get("project_name"), "extension": f.get("extension")}
+            for f in cleaned if not f.get("is_norm") and not f.get("is_blocked")
+        ]
+        blocked = [
+            {"path": f.get("filepath"), "filename": f.get("filename"),
+             "reason": "Norm erkannt" if f.get("is_norm") else f.get("block_reason")}
+            for f in cleaned if f.get("is_norm") or f.get("is_blocked")
+        ]
+        chars_sent = sum(
+            len(f.get("excerpt") or "") for f in cleaned
+            if not f.get("is_norm") and not f.get("is_blocked")
+        )
+
+        # Norm-Hinweis IMMER prüfen, nicht nur wenn die Suche sonst leer ausgeht --
+        # eine Anfrage wie "SIA 416" findet oft zusätzlich beiläufige ARBEITS-
+        # dokumente, die die Norm nur ERWÄHNEN (Berechnungen, Pläne), ohne dass
+        # darunter die eigentliche, offiziell abgelegte Norm ist. Ohne diesen
+        # Hinweis auch bei nicht-leeren Treffern würde der Fundort der echten Norm
+        # (siehe find_norm_locations, umgeht bewusst die Projekt-Freigabe für reine
+        # Metadaten) in diesem häufigen Fall nie erwähnt.
+        notice = None
+        from scanner.norms import looks_like_norm_query
+        norm_hit = looks_like_norm_query(_norms_conn, q)
+        if norm_hit:
+            notice = _norm_notice_text(_norms_conn, norm_hit)
+            blocked = blocked + [{"path": None, "filename": None, "reason": notice}]
+
+        log_access(_norms_conn, "search", q, project_id, sent, blocked, chars_sent, session_id=session_id)
     finally:
         _norms_conn.close()
-    assert_no_norm_text(cleaned)
 
-    return JSONResponse({"results": cleaned, "folders": folders})
+    payload = {"results": cleaned, "folders": folders}
+    if notice:
+        payload["notice"] = notice
+    return JSONResponse(payload)
 
 
 @router.get("/mcp/semantic-search")
@@ -129,6 +312,7 @@ async def mcp_semantic_search(
     q: str = "",
     project_id: str = "",
     limit: int = 12,
+    session_id: str = "",
 ):
     """Hybrid keyword+vector Suche (wie /search/ai), liefert Chunk-Inhalte statt HTML —
     Claude formuliert die Antwort selbst aus den Quellen, kein lokaler LLM-Aufruf nötig.
@@ -141,6 +325,26 @@ async def mcp_semantic_search(
     if not q:
         return JSONResponse({"sources": [], "error": None, "ollama_missing": False})
 
+    if project_id and not project_id.startswith("mailbox:"):
+        try:
+            _pid = int(project_id)
+        except ValueError:
+            _pid = None
+        if _pid is not None:
+            _wl_conn = connection.get_connection()
+            try:
+                if not _project_mcp_enabled(_wl_conn, _pid):
+                    from scanner.mcp_log import log_access
+                    log_access(_wl_conn, "semantic_search", q, project_id, [],
+                               [{"path": f"Projekt {_pid}", "reason": "Nicht für Claude freigegeben"}],
+                               session_id=session_id)
+                    return JSONResponse({
+                        "sources": [], "ollama_missing": False,
+                        "error": "Dieses Projekt ist nicht für Claude freigegeben.",
+                    })
+            finally:
+                _wl_conn.close()
+
     loop = asyncio.get_event_loop()
     sources, error, ollama_missing = await loop.run_in_executor(
         None, _ai_vector_search, q, project_id
@@ -149,6 +353,7 @@ async def mcp_semantic_search(
     cleaned = [
         {
             "document_id":  s.get("document_id"),
+            "project_id":   s.get("project_id"),
             "filename":     s.get("filename"),
             "project_name": s.get("project_name"),
             "filepath":     s.get("filepath"),
@@ -160,20 +365,60 @@ async def mcp_semantic_search(
         for s in (sources or [])[:limit]
     ]
 
+    from scanner.block_list import assert_no_blocked_text
+    from scanner.block_list import redact_hits as block_redact_hits
+    from scanner.mcp_log import log_access
     from scanner.norms import assert_no_norm_text, redact_hits
 
     _norms_conn = connection.get_connection()
     try:
+        # Whitelist (unscoped Fall) -- siehe mcp_search für die Begründung.
+        enabled = _mcp_enabled_project_ids(_norms_conn)
+        cleaned = [f for f in cleaned if f.get("project_id") in enabled]
+
         cleaned = redact_hits(_norms_conn, cleaned)
+        assert_no_norm_text(cleaned)
+        cleaned = block_redact_hits(_norms_conn, cleaned)
+        assert_no_blocked_text(cleaned)
+        sent = [
+            {"id": f.get("document_id"), "path": f.get("filepath"), "filename": f.get("filename"),
+             "project": f.get("project_name")}
+            for f in cleaned if not f.get("is_norm") and not f.get("is_blocked")
+        ]
+        blocked = [
+            {"path": f.get("filepath"), "filename": f.get("filename"),
+             "reason": "Norm erkannt" if f.get("is_norm") else f.get("block_reason")}
+            for f in cleaned if f.get("is_norm") or f.get("is_blocked")
+        ]
+        chars_sent = sum(
+            len(f.get("content") or "") for f in cleaned
+            if not f.get("is_norm") and not f.get("is_blocked")
+        )
+
+        # Siehe mcp_search für die Begründung, warum das IMMER geprüft wird, nicht nur
+        # wenn die Suche sonst leer ausgeht -- eigenes "notice"-Feld statt "error"
+        # wiederzuverwenden, damit ein echter Ollama-/Suchfehler nicht mit dem
+        # Norm-Hinweis vermischt wird.
+        notice = None
+        from scanner.norms import looks_like_norm_query
+        norm_hit = looks_like_norm_query(_norms_conn, q)
+        if norm_hit:
+            notice = _norm_notice_text(_norms_conn, norm_hit)
+            blocked = blocked + [{"path": None, "filename": None, "reason": notice}]
+
+        log_access(_norms_conn, "semantic_search", q, project_id, sent, blocked, chars_sent,
+                   session_id=session_id)
     finally:
         _norms_conn.close()
-    assert_no_norm_text(cleaned)
 
-    return JSONResponse({"sources": cleaned, "error": error, "ollama_missing": ollama_missing})
+    payload = {"sources": cleaned, "error": error, "ollama_missing": ollama_missing}
+    if notice:
+        payload["notice"] = notice
+    return JSONResponse(payload)
 
 
 @router.get("/mcp/document")
-async def mcp_document(document_id: int):
+async def mcp_document(document_id: int, session_id: str = ""):
     """Volltext + Metadaten eines Dokuments — damit der MCP-Server (read_document) den
     Inhalt in die Claude-Unterhaltung laden kann (z.B. Mail-Text zum Umschreiben)."""
     conn = connection.get_connection()
@@ -199,12 +444,41 @@ async def mcp_document(document_id: int):
             "content":           (content_row["content"] if content_row else "") or "",
         }
 
+        from scanner.block_list import guard_read as block_guard_read
+        from scanner.block_list import is_blocked as block_is_blocked
+        from scanner.mcp_log import log_access
         from scanner.norms import guard_read
+
+        if document_id not in _mcp_allowed_doc_ids(conn, [document_id]):
+            log_access(conn, "document", str(document_id), doc.get("project_id"), [],
+                       [{"path": filepath, "filename": doc["filename"], "reason": "Nicht für Claude freigegeben"}],
+                       session_id=session_id)
+            return JSONResponse({
+                "id": document_id, "filename": doc["filename"], "filepath": filepath,
+                "content": (
+                    f"🔒 **{doc['filename']}** (ID {document_id}) — Projekt nicht für Claude freigegeben.\n"
+                    f"Der Inhalt wird nicht über die MCP-Schnittstelle ausgegeben, solange das "
+                    f"zugehörige Projekt im Archivio-Dashboard nicht freigegeben ist."
+                ),
+            })
 
         notice = guard_read(conn, document_id, doc["filename"], filepath)
         if notice is not None:
             result["is_norm"] = True
             result["content"] = notice
+            log_access(conn, "document", str(document_id), doc.get("project_id"), [],
+                       [{"path": filepath, "filename": doc["filename"], "reason": "Norm erkannt"}],
+                       session_id=session_id)
+            return JSONResponse(result)
+
+        block_notice = block_guard_read(conn, document_id, doc["filename"], filepath)
+        if block_notice is not None:
+            result["is_blocked"] = True
+            result["content"] = block_notice
+            _, reason = block_is_blocked(conn, document_id, filepath)
+            log_access(conn, "document", str(document_id), doc.get("project_id"), [],
+                       [{"path": filepath, "filename": doc["filename"], "reason": reason}],
+                       session_id=session_id)
             return JSONResponse(result)
 
         if doc["source_type"] == "email":
@@ -214,6 +488,12 @@ async def mcp_document(document_id: int):
             ).fetchone()
             if m:
                 result["mail"] = dict(m)
+        log_access(
+            conn, "document", str(document_id), doc.get("project_id"),
+            [{"id": document_id, "path": filepath, "filename": doc["filename"],
+              "extension": doc["extension"]}],
+            [], chars_sent=len(result.get("content") or ""), session_id=session_id,
+        )
         return JSONResponse(result)
     finally:
         conn.close()
@@ -221,12 +501,20 @@ async def mcp_document(document_id: int):
 
 @router.get("/mcp/base-folders")
 async def mcp_base_folders():
-    """Gibt die konfigurierten NAS-Wurzelpfade zurück — der MCP-Server (list_folder)
-    prüft damit lokal, dass ein angefragter Pfad innerhalb eines erlaubten Bereichs
-    liegt, bevor er ihn auflistet. Reine Config-Auskunft, kein Filesystem-Zugriff hier."""
-    base_folders = settings.get("scanner.base_folders", [])
-    folders = [f.get("path") for f in base_folders if f.get("path")]
-    return JSONResponse({"folders": folders})
+    """Gibt die Ordnerpfade der für Claude freigegebenen Projekte zurück — der
+    MCP-Server (list_folder/open_file/reveal_file) prüft damit lokal, dass ein
+    angefragter Pfad innerhalb eines erlaubten Bereichs liegt, bevor er ihn
+    ausliest bzw. öffnet. Bewusst NICHT mehr die konfigurierten NAS-Basisordner
+    (die decken alle Projekte auf einmal ab, unabhängig von der MCP-Freigabe) --
+    siehe projects.mcp_enabled / Dashboard-Toggle."""
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute(
+            "SELECT path FROM projects WHERE active=1 AND mcp_enabled=1 AND path NOT LIKE 'mailbox:%'"
+        ).fetchall()
+    finally:
+        conn.close()
+    return JSONResponse({"folders": [r["path"] for r in rows]})
 
 
 @router.post("/scan/all")
@@ -240,6 +528,11 @@ async def scan_all():
         "SELECT id, name, path FROM projects WHERE active=1 ORDER BY last_scanned_at ASC"
     ).fetchall()
     conn.close()
+
+    # Eine Kennung fuer den ganzen Lauf -- damit erscheinen die einzelnen
+    # Projekt-Scans im Systemstatus als eine gruppierte Zeile statt als viele
+    # unzusammenhaengende Eintraege (siehe web/main.py::_group_scan_log_entries()).
+    batch_id = uuid.uuid4().hex[:8]
 
     started = 0
     for p in projects:
@@ -265,7 +558,8 @@ async def scan_all():
         _cancel_flags[p["id"]] = {"cancel": False}
         # scan_mail=False: verknüpfte Postfächer deckt der globale Mail-Scan unten ab
         threading.Thread(
-            target=_run_scan, args=(p["id"], p["path"]), kwargs={"scan_mail": False}, daemon=True
+            target=_run_scan, args=(p["id"], p["path"]),
+            kwargs={"scan_mail": False, "batch_id": batch_id}, daemon=True
         ).start()
         started += 1
 

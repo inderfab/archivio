@@ -268,6 +268,7 @@
       <div class="doc-section" id="setup">
         <h2>Installation</h2>
         <p>Archivio besteht aus zwei Teilen: dem <strong>Server</strong>, der auf einem fixen Mac (z.&nbsp;B. iMac) läuft, und dem optionalen <strong>Helper</strong> auf jedem Mitarbeiter-Mac.</p>
+        <p style="font-size:13px;color:#888;">Mit der Installation gelten der <a href="haftungsausschluss.html">Haftungsausschluss</a> und das <a href="merkblatt.html">Merkblatt zum Umgang mit euren Daten</a>.</p>
 
         <h3>Schritt 1 — Archivio Server installieren</h3>
         <ol class="step-list">
@@ -487,8 +488,8 @@
           <strong>Voraussetzung:</strong> Der <strong>Archivio Helper</strong> muss auf demselben Mac installiert sein und mindestens einmal gestartet worden sein (siehe <a href="#mitarbeiter">Mitarbeiter-Macs einrichten ↑</a>). Ohne Helper funktioniert MCP nicht — auch nicht, wenn Server und Claude Desktop zufällig auf demselben Rechner laufen.
         </div>
         <ol class="step-list">
-          <li><span>Archivio Helper installieren und starten (siehe oben) — er trägt sich damit <strong>automatisch</strong> bei Claude Desktop ein. Keine manuelle Konfiguration, kein Connector-Store nötig.</span></li>
-          <li><span>Im Helper-Menü prüfen, dass die <strong>Server-URL</strong> korrekt gesetzt ist (dieselbe URL wie für die Weboberfläche).</span></li>
+          <li><span>In der Archivio-Weboberfläche den Reiter <strong>„MCP"</strong> öffnen, „Claude Desktop" wählen und auf <strong>„MCP-Schnittstelle installieren"</strong> klicken. Das trägt Archivio in die Konfiguration von Claude Desktop auf diesem Mac ein — bewusst erst auf Klick, nicht automatisch beim blossen Starten von Server oder Helper.</span></li>
+          <li><span>Danach im Dashboard pro Projekt festlegen, welche Projekte für Claude sichtbar sein sollen (☁-Schalter neben dem Projekt) — standardmässig ist kein Projekt freigegeben.</span></li>
           <li><span><strong>Claude Desktop neu starten</strong>, damit die Verbindung aktiv wird.</span></li>
         </ol>
         <p>Danach ist Archivio in Claude als Werkzeug verfügbar — einfach danach fragen, z.&nbsp;B.: <em>„Suche in Archivio nach dem Projekt Keller und zeig mir die aktuelle Visualisierung für Attika Event"</em>.</p>
@@ -501,6 +502,12 @@
         </ul>
         <div class="callout">
           <strong>Hinweis:</strong> Das gilt pro Arbeitsstation — jeder Mitarbeiter-Mac mit Claude Desktop braucht seinen eigenen laufenden Helper, um Zugriff zu bekommen.
+        </div>
+        <div class="callout">
+          <strong>Welches Claude-Konto?</strong> Für die Anbindung ein Team- oder Enterprise-Konto beziehungsweise die API verwenden, kein privates Pro-Abo. Bei den kommerziellen Angeboten werden Ein- und Ausgaben laut Anthropic standardmässig nicht fürs Modelltraining verwendet — bei Consumer-Plänen hängt das von einer Kontoeinstellung ab. Details siehe <a href="merkblatt.html">Merkblatt: Was mit euren Daten passiert</a>.
+        </div>
+        <div class="callout">
+          <strong>Normen:</strong> SIA-, VSS- und andere erkannte Normen werden nie über MCP übermittelt (Reiter „MCP" → Sperrliste zeigt zusätzlich manuell sperrbare Dateien/Ordner/Projekte). Die Lizenzbedingungen der jeweiligen Normen gelten davon unabhängig weiter — die lokale Durchsuchbarkeit ändert nichts an eurer eigenen Lizenzpflicht gegenüber dem Herausgeber.
         </div>
       </div>
 
@@ -567,7 +574,11 @@
 
   <footer>
     <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
-    <span>© 2026 Archivio</span>
+    <div style="display:flex;gap:24px;align-items:center;">
+      <a href="merkblatt.html">Merkblatt</a>
+      <a href="haftungsausschluss.html">Haftungsausschluss</a>
+      <span>© 2026 Archivio</span>
+    </div>
   </footer>
 
 </body>

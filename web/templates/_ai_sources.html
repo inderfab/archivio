@@ -41,16 +41,16 @@
   <div class="result-actions">
     {% if s.extension == '.eml' %}
     <button class="btn-sm" data-id="{{ s.document_id }}"
-      onclick="openMail(this.dataset.id)">
+      onclick="trackSearchClick({{ search_log_id or 'null' }}); openMail(this.dataset.id)">
       In Apple Mail öffnen ↗
     </button>
     {% elif s.filepath %}
     <button class="btn-sm" data-path="{{ s.filepath }}"
-      onclick="helperOpen(this.dataset.path)">
+      onclick="trackSearchClick({{ search_log_id or 'null' }}); helperOpen(this.dataset.path)">
       Öffnen
     </button>
     <button class="btn-sm" data-path="{{ s.filepath }}"
-      onclick="helperReveal(this.dataset.path)">
+      onclick="trackSearchClick({{ search_log_id or 'null' }}); helperReveal(this.dataset.path)">
       Im Finder zeigen
     </button>
     {% endif %}

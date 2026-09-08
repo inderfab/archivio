@@ -19,6 +19,17 @@
       </button>
     </form>
 
+    {% if p.active and p.in_db %}
+    <form hx-post="/dashboard/projects/{{ p.id }}/mcp-toggle"
+          hx-target="#project-list"
+          hx-swap="innerHTML"
+          style="display:contents;">
+      <button type="submit"
+              class="mcp-toggle {{ 'on' if p.mcp_enabled else '' }}"
+              title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if p.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }}">☁</button>
+    </form>
+    {% endif %}
+
     {% if not p.active %}
     {# Kompakt: nur Name (nicht aktiv/nicht gescannt) #}
     <div class="project-name" style="flex:1; min-width:0;">{{ p.name }}</div>
@@ -134,6 +145,34 @@
 {% endmacro %}
 
 
+{% macro projects_help() %}
+<button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+<div class="section-help-panel">
+  <p><strong>Projekt aktivieren/deaktivieren:</strong> Schalter links neben dem Projekt. Deaktivieren fragt, ob die bereits indexierten Dokumente behalten oder aus der Datenbank entfernt werden sollen.</p>
+  <p><strong>Unterordner als eigenes Projekt:</strong> „Unterordner ▸" öffnen, gewünschten Ordner anklicken, im Detailpanel „Diesen Ordner als eigenes Projekt" wählen — läuft danach separat, mit eigenem Scan und eigener MCP-Freigabe.</p>
+  <p><strong>Ordner ignorieren:</strong> Im selben Ordner-Browser einen Ordner anklicken und im Detailpanel „Ignorieren" wählen. Betrifft nur diesen Scan-Durchlauf, keine Datenbankänderung.</p>
+  <p><strong>Für KI-Anwendungen freigeben:</strong> ☁-Symbol neben einem aktiven Projekt. Standardmässig ist kein Projekt freigegeben — erst nach Klick kann eine angebundene KI-Anwendung über die MCP-Schnittstelle darauf zugreifen. Verwaltung und Protokoll dazu im Reiter „MCP".</p>
+  <p><strong>Nicht auffindbarer Ordner:</strong> Wurde ein Projektordner verschoben statt gelöscht, erscheint „📁 Neu verknüpfen" — verknüpft das Projekt mit dem neuen Pfad, ohne Tags/Bewertungen zu verlieren.</p>
+</div>
+{% endmacro %}
+
+
+{% set ns = namespace(any_active=false, any_mcp=false) %}
+{% for group in groups %}{% for p in group.projects %}
+  {% if p.active %}{% set ns.any_active = true %}{% endif %}
+  {% if p.mcp_enabled %}{% set ns.any_mcp = true %}{% endif %}
+{% endfor %}{% endfor %}
+{% for p in orphans %}
+  {% if p.active %}{% set ns.any_active = true %}{% endif %}
+  {% if p.mcp_enabled %}{% set ns.any_mcp = true %}{% endif %}
+{% endfor %}
+{% if ns.any_active and not ns.any_mcp %}
+<div class="orphan-banner" style="background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8;">
+  <span>☁ Kein Projekt ist für KI-Anwendungen freigegeben — die MCP-Suche liefert aktuell keine Treffer. Freigabe über das ☁-Symbol bei jedem Projekt.</span>
+  <a href="/mcp-log" style="color:#1d4ed8;">MCP-Zugriffe ↓</a>
+</div>
+{% endif %}
+
 {% if orphans %}
 <div class="orphan-banner">
   <span>
@@ -151,7 +190,10 @@
 
 {% for group in groups %}
 
-<div class="section-title" style="padding-top:{% if loop.first %}4px{% else %}28px{% endif %};">{{ group.label }}</div>
+<div class="section-title" style="padding-top:{% if loop.first %}4px{% else %}28px{% endif %};{% if loop.first %} display:flex; align-items:center; justify-content:space-between; position:relative;{% endif %}">
+  <span>{{ group.label }}</span>
+  {% if loop.first %}{{ projects_help() }}{% endif %}
+</div>
 
 {% for p in group.projects %}
 {{ project_entry(p) }}
@@ -168,8 +210,9 @@
    aller konfigurierten Projektordner, oder ein Postfach-Projekt ohne aktives
    Postfach) -- laufen aber im Scan und in der Projekt-Auswahl der Suche mit. #}
 {% if orphans %}
-<div class="section-title orphan-title" id="nicht-zugeordnet" style="padding-top:28px;">
-  ⚠ Nicht zugeordnet ({{ orphans | length }})
+<div class="section-title orphan-title" id="nicht-zugeordnet" style="padding-top:28px;{% if not groups %} display:flex; align-items:center; justify-content:space-between; position:relative;{% endif %}">
+  <span>⚠ Nicht zugeordnet ({{ orphans | length }})</span>
+  {% if not groups %}{{ projects_help() }}{% endif %}
 </div>
 <p class="orphan-hint">
   Diese Projekte liegen unter keinem der konfigurierten Projektordner, oder ihr

@@ -68,6 +68,7 @@ def test_mcp_search_shows_path_inside_filtered_project(tmp_db):
 
     other  = queries.insert_project(tmp_db, "000 Archivprojekte", "/scan/other")
     keller = queries.insert_project(tmp_db, "200 Keller Winterthur", "/scan/keller")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (keller,))
     _make_duplicated_doc(tmp_db, other, keller, "vorlage3.pdf", "Fensterdetail als Vorlage")
     tmp_db.commit()
 

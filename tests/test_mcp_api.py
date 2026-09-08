@@ -26,6 +26,7 @@ def test_mcp_search_returns_clean_json(tmp_db):
     from web.main import app
 
     p = queries.insert_project(tmp_db, "P", "/scan")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     _make_doc(tmp_db, p, "plan.txt", "Grundriss Erdgeschoss mit Wohnflaeche 120qm")
     tmp_db.commit()
 
@@ -58,6 +59,7 @@ def test_mcp_document_returns_full_content(tmp_db):
     from web.main import app
 
     p = queries.insert_project(tmp_db, "P", "/scan")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     doc_id = _make_doc(tmp_db, p, "brief.txt", "Sehr geehrte Damen und Herren, anbei der Entwurf.")
     tmp_db.commit()
 
@@ -76,6 +78,7 @@ def test_mcp_document_includes_mail_metadata(tmp_db):
     from web.main import app
 
     p = queries.insert_project(tmp_db, "P", "/scan")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     did = tmp_db.execute(
         "INSERT INTO documents (project_id, hash, filename, source_type, extraction_status) "
         "VALUES (?, 'mh1', 'Angebot', 'email', 'ok')", (p,),
@@ -119,6 +122,7 @@ def test_mcp_search_finds_folder_names_by_default(tmp_db, tmp_path):
     doc_path.write_text("Inhalt ohne thematischen Bezug zur Anfrage", encoding="utf-8")
 
     p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     doc_id = queries.upsert_document(tmp_db, {
         "project_id":  p, "hash": "h-plan2", "filename": "plan.txt",
         "extension":   ".txt", "filesize": 10, "modified_at": "2026-01-01T00:00:00Z",
@@ -150,6 +154,7 @@ def test_mcp_search_scope_folders_only_excludes_documents(tmp_db, tmp_path):
     doc_path.write_text("Inhalt zum Begriff Keller", encoding="utf-8")
 
     p = queries.insert_project(tmp_db, "P", str(tmp_path))
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     doc_id = queries.upsert_document(tmp_db, {
         "project_id":  p, "hash": "h-keller", "filename": "Keller Neubau_Haustechnik.pdf",
         "extension":   ".pdf", "filesize": 10, "modified_at": "2026-01-01T00:00:00Z",
@@ -170,22 +175,30 @@ def test_mcp_search_scope_folders_only_excludes_documents(tmp_db, tmp_path):
     assert data["folders"], "Ordnername 'Keller Winterthur' haette gefunden werden muessen"
 
 
-def test_mcp_base_folders_returns_configured_paths(tmp_db):
+def test_mcp_base_folders_returns_only_mcp_enabled_projects(tmp_db):
+    """base-folders spiegelt seit der MCP-Whitelist (projects.mcp_enabled) nur noch
+    Pfade freigegebener Projekte -- nicht mehr die konfigurierten NAS-Basisordner,
+    die alle Projekte auf einmal abdecken würden."""
     from fastapi.testclient import TestClient
     from web.main import app
-    from config import settings
 
-    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": "/tmp/projekte"}]
+    p1 = queries.insert_project(tmp_db, "Freigegeben", "/tmp/projekte/a")
+    p2 = queries.insert_project(tmp_db, "Gesperrt", "/tmp/projekte/b")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p1,))
+    tmp_db.commit()
 
     c = TestClient(app)
     r = c.get("/api/mcp/base-folders")
     assert r.status_code == 200
-    assert r.json() == {"folders": ["/tmp/projekte"]}
+    assert r.json() == {"folders": ["/tmp/projekte/a"]}
 
 
-def test_mcp_base_folders_empty_when_unconfigured(tmp_db):
+def test_mcp_base_folders_empty_when_no_project_enabled(tmp_db):
     from fastapi.testclient import TestClient
     from web.main import app
+
+    queries.insert_project(tmp_db, "P", "/tmp/projekte")
+    tmp_db.commit()
 
     c = TestClient(app)
     r = c.get("/api/mcp/base-folders")

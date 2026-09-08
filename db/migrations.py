@@ -26,6 +26,16 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "010_photo_ratings", _m010)
     _apply(conn, "011_photo_tags", _m011)
     _apply(conn, "012_norms", _m012)
+    _apply(conn, "013_mcp_log", _m013)
+    _apply(conn, "014_mcp_whitelist", _m014)
+    _apply(conn, "015_block_rules", _m015)
+    _apply(conn, "016_scan_log", _m016)
+    _apply(conn, "017_mail_mcp_enabled", _m017)
+    _apply(conn, "018_mcp_log_session", _m018)
+    _apply(conn, "019_scan_log_batch", _m019)
+    _apply(conn, "020_norm_freshness", _m020)
+    _apply(conn, "021_search_log", _m021)
+    _apply(conn, "022_search_log_token", _m022)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -341,4 +351,208 @@ def _m012(conn: sqlite3.Connection):
         );
         CREATE INDEX IF NOT EXISTS idx_norm_folders_status ON norm_folders(status);
     """)
+    conn.commit()
+
+
+def _m013(conn: sqlite3.Connection):
+    """Protokoll aller Datenübermittlungen über die MCP-Schnittstelle (search,
+    semantic_search, document) -- Grundlage für die Seite /mcp-log ("Claude-Zugriffe").
+    Siehe scanner/mcp_log.py. Wird selbst nie über MCP abgefragt.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS mcp_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            tool         TEXT NOT NULL,
+            query        TEXT,
+            project_id   INTEGER,
+            files_json   TEXT NOT NULL DEFAULT '[]',
+            chars_sent   INTEGER NOT NULL DEFAULT 0,
+            blocked_json TEXT NOT NULL DEFAULT '[]',
+            status       TEXT NOT NULL DEFAULT 'ok'
+        );
+        CREATE INDEX IF NOT EXISTS idx_mcp_log_ts ON mcp_log(ts);
+    """)
+    conn.commit()
+
+
+def _m014(conn: sqlite3.Connection):
+    """MCP-Zugriff auf ein Freigabemodell umgestellt: standardmässig hat MCP auf KEIN
+    Projekt Zugriff, Projekte werden explizit im Dashboard freigegeben (siehe
+    web/dashboard.py, _dashboard_projects.html). DEFAULT 0 setzt bestehende
+    Installationen beim Update automatisch auf "nichts freigegeben" -- keine
+    separate Reset-Logik nötig, das ist hier bereits das gewünschte Verhalten.
+    """
+    try:
+        conn.execute("ALTER TABLE projects ADD COLUMN mcp_enabled INTEGER NOT NULL DEFAULT 0")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.commit()
+
+
+def _m015(conn: sqlite3.Connection):
+    """Manuelle Sperrliste für MCP -- ergänzt die automatische Norm-Erkennung
+    (scanner/norms.py) um von Hand gesetzte Regeln: einzelne Dateien (per Hash,
+    überlebt Verschiebungen), Namens-Muster (Glob), Ordner, ganze Projekte.
+    Siehe scanner/block_list.py.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS block_rules (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            type       TEXT NOT NULL CHECK(type IN ('file','pattern','folder','project')),
+            value      TEXT NOT NULL,
+            label      TEXT,
+            enabled    INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now'))
+        );
+        CREATE INDEX IF NOT EXISTS idx_block_rules_enabled ON block_rules(enabled);
+    """)
+    conn.commit()
+
+
+def _m016(conn: sqlite3.Connection):
+    """Protokoll jedes Projekt-Scans: Dauer, Datei-Zähler, Fehler mit Pfad, Spitzenwerte
+    bei Speicher-/CPU-Nutzung -- Grundlage für die Seite /system-status. Siehe
+    scanner/scan_log.py und web/dashboard.py::_run_scan().
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS scan_log (
+            id             INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id     INTEGER,
+            project_name   TEXT,
+            started_at     TEXT NOT NULL,
+            finished_at    TEXT,
+            duration_s     REAL,
+            status         TEXT NOT NULL,
+            total          INTEGER NOT NULL DEFAULT 0,
+            processed      INTEGER NOT NULL DEFAULT 0,
+            new_count      INTEGER NOT NULL DEFAULT 0,
+            skipped        INTEGER NOT NULL DEFAULT 0,
+            error_count    INTEGER NOT NULL DEFAULT 0,
+            errors_json    TEXT NOT NULL DEFAULT '[]',
+            peak_memory_mb REAL,
+            peak_cpu_pct   REAL
+        );
+        CREATE INDEX IF NOT EXISTS idx_scan_log_started ON scan_log(started_at);
+    """)
+    conn.commit()
+
+
+def _m017(conn: sqlite3.Connection):
+    """MCP-Freigabe für Postfächer, die (noch) keinem Projekt zugeordnet sind --
+    deren Mails haben documents.project_id NULL und würden sonst NIE über MCP
+    erreichbar sein (projects.mcp_enabled greift dort nicht, es gibt kein Projekt).
+    Ist ein Postfach mit einem Projekt verknüpft, übernimmt es dessen mcp_enabled
+    und dieses Flag wird ignoriert -- siehe web/api.py::_mcp_allowed_doc_ids().
+    """
+    try:
+        conn.execute("ALTER TABLE mail_scan_config ADD COLUMN mcp_enabled INTEGER NOT NULL DEFAULT 0")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.commit()
+
+
+def _m018(conn: sqlite3.Connection):
+    """Session-Kennung pro MCP-Log-Zeile -- helper/archivio_mcp.py generiert einmal
+    pro Subprozess-Start (i.d.R. einmal pro Claude-Desktop-Verbindung, solange der
+    Connector aktiv bleibt) eine kurze zufällige ID und schickt sie bei jedem
+    Tool-Aufruf mit. Ohne das erzeugt eine einzelne Nutzerfrage, bei der Claude
+    mehrfach sucht/nachlädt, ebenso viele einzelne, unzusammenhängend wirkende
+    Protokollzeilen -- siehe web/main.py::_group_mcp_log_entries() fürs Gruppieren
+    in der Anzeige. Zeilen ohne session_id (vor diesem Update oder von einem
+    direkten HTTP-Aufruf ohne den Parameter) bleiben einzeln, das ist beabsichtigt.
+    """
+    try:
+        conn.execute("ALTER TABLE mcp_log ADD COLUMN session_id TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_mcp_log_session ON mcp_log(session_id)")
+    conn.commit()
+
+
+def _m019(conn: sqlite3.Connection):
+    """Batch-Kennung pro Scan-Protokoll-Zeile -- web/api.py::scan_all() erzeugt einmal
+    pro "Alle scannen"-Lauf (Klick oder naechtlicher Scheduler) eine kurze zufaellige
+    ID und reicht sie an jeden Projekt-Scan durch. Ohne das erscheint ein einzelner
+    Sammel-Scan ueber z.B. 30 Projekte als 30 unzusammenhaengende Einzelzeilen im
+    Systemstatus -- siehe web/main.py::_group_scan_log_entries() fuers Gruppieren in
+    der Anzeige. Zeilen ohne batch_id (Einzel-Scan eines Projekts) bleiben einzeln,
+    das ist beabsichtigt."""
+    try:
+        conn.execute("ALTER TABLE scan_log ADD COLUMN batch_id TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_scan_log_batch ON scan_log(batch_id)")
+    conn.commit()
+
+
+def _m020(conn: sqlite3.Connection):
+    """Gültigkeitsdatum + Aktualitäts-Status pro erkannter Norm (scanner/norms.py::
+    extract_valid_from(), scanner/norm_freshness.py). norm_check_status ist
+    bewusst NIE automatisch/periodisch gesetzt -- nur per Button auf /norms
+    (Einzeln oder "Alle prüfen"), da der Abgleich externe Shop-Websites (SIA/VSS)
+    kontaktiert, was ausserhalb des sonst rein lokalen Prinzips von Archivio liegt
+    und explizit auf Zuruf laufen soll, nicht im Hintergrund."""
+    try:
+        conn.execute("ALTER TABLE documents ADD COLUMN norm_valid_from TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    try:
+        conn.execute("ALTER TABLE documents ADD COLUMN norm_check_status TEXT NOT NULL DEFAULT 'ungeprüft'")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    try:
+        conn.execute("ALTER TABLE documents ADD COLUMN norm_checked_at TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.commit()
+
+
+def _m021(conn: sqlite3.Connection):
+    """Protokoll jeder Websuche (normale Suche und KI-Suche) -- Anfrage, Trefferzahl,
+    Dauer, und ob danach tatsächlich ein Treffer geöffnet wurde (clicks). Bewusst
+    OHNE Bezug zu Person oder Gerät -- anders als mcp_log (dessen Zweck gerade die
+    Nachvollziehbarkeit ist), dient dieses Protokoll nur der Suchqualität selbst
+    (z.B. häufige Anfragen ohne Treffer oder ohne Klick). Grundlage für den
+    Abschnitt "Suche-Protokoll" auf /system-status. Siehe scanner/search_log.py.
+    """
+    conn.executescript("""
+        CREATE TABLE IF NOT EXISTS search_log (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts           TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ','now')),
+            kind         TEXT NOT NULL,
+            query        TEXT,
+            project_id   INTEGER,
+            filters      TEXT,
+            result_count INTEGER NOT NULL DEFAULT 0,
+            duration_ms  INTEGER NOT NULL DEFAULT 0,
+            clicks       INTEGER NOT NULL DEFAULT 0
+        );
+        CREATE INDEX IF NOT EXISTS idx_search_log_ts ON search_log(ts);
+    """)
+    conn.commit()
+
+
+def _m022(conn: sqlite3.Connection):
+    """Kennung pro Tippvorgang (ein zufälliger Wert pro Seitenaufruf, siehe
+    index.html #search_token) -- die Live-Suche feuert bei jedem Tastenanschlag
+    (300ms Debounce), was ohne das hier für ein einziges Wort mehrere Zeilen im
+    Suche-Protokoll erzeugt ("ne", "net", "netzwerk"). scanner/search_log.py
+    aktualisiert bei gleichem token + noch keinem Klick + innerhalb weniger
+    Sekunden dieselbe Zeile statt eine neue anzulegen -- ein Klick beendet das
+    Zusammenfassen (die Zeile gilt dann als abgeschlossen), ein längeres
+    Zeitfenster zwischen zwei Anfragen ebenfalls (neue eigenständige Suche)."""
+    try:
+        conn.execute("ALTER TABLE search_log ADD COLUMN token TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_search_log_token ON search_log(token)")
     conn.commit()

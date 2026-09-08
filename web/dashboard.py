@@ -296,6 +296,26 @@ async def toggle_project(
         })
 
 
+@router.post("/projects/{project_id}/mcp-toggle", response_class=HTMLResponse)
+async def toggle_project_mcp(request: Request, project_id: int):
+    """Schaltet die Claude/MCP-Freigabe eines Projekts um (unabhängig vom Aktiv/
+    Scan-Schalter). Default ist aus (siehe Migration 014_mcp_whitelist) -- MCP
+    darf standardmässig auf kein Projekt zugreifen, siehe web/api.py."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE projects SET mcp_enabled = NOT mcp_enabled WHERE id=?", (project_id,)
+        )
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
+    })
+
+
 @router.post("/projects/{project_id}/deactivate", response_class=HTMLResponse)
 async def deactivate_project(request: Request, project_id: int):
     """Nur deaktivieren, Daten behalten."""
@@ -629,7 +649,8 @@ async def mail_dashboard(request: Request):
     conn    = connection.get_connection()
     configs = conn.execute("""
         SELECT msc.id, msc.mailbox_name, msc.active, msc.last_scanned_at, msc.mail_count,
-               p.name AS project_name, p.id AS project_id
+               msc.mcp_enabled, p.name AS project_name, p.id AS project_id,
+               p.mcp_enabled AS project_mcp_enabled
         FROM mail_scan_config msc
         LEFT JOIN projects p ON p.id = msc.project_id
         ORDER BY msc.mailbox_name
@@ -732,6 +753,25 @@ async def mail_toggle(
     with conn:
         conn.execute(
             "UPDATE mail_scan_config SET active=1 WHERE mailbox_name=?", (mailbox_name,)
+        )
+    return await _mail_section_response(request, conn, context)
+
+
+@router.post("/mail/mcp-toggle", response_class=HTMLResponse)
+async def mail_mcp_toggle(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    """Claude/MCP-Freigabe für ein Postfach OHNE Projekt umschalten (siehe Migration
+    017_mail_mcp_enabled). Nur relevant für aktive, nicht zugeordnete Postfächer --
+    ist ein Projekt verknüpft, entscheidet dessen eigenes mcp_enabled, dieses Flag
+    wird dann ignoriert (kein UI-Schalter dafür, siehe _dashboard_mail.html)."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE mail_scan_config SET mcp_enabled = NOT mcp_enabled "
+            "WHERE mailbox_name=? AND project_id IS NULL", (mailbox_name,)
         )
     return await _mail_section_response(request, conn, context)
 
@@ -1344,6 +1384,106 @@ async def settings_page(
     })
 
 
+# ── Sperrliste (manuelle MCP-Regeln, ergänzt die Norm-Erkennung) ────────────────
+
+_SUGGESTED_BLOCK_PATTERNS = [
+    ("Personal", "*Personal*"),
+    ("Löhne", "*Lohn*"),
+    ("Verträge", "*Vertrag*"),
+    ("Honorar", "*Honorar*"),
+    ("Recht", "*Recht*"),
+    ("Privat", "*Privat*"),
+    ("Bewerbungen", "*Bewerbung*"),
+]
+
+
+def _block_rules_context(conn) -> dict:
+    from scanner.block_list import matching_count
+
+    rows = conn.execute("SELECT * FROM block_rules ORDER BY created_at DESC").fetchall()
+    rules = []
+    for r in rows:
+        d = dict(r)
+        d["count"] = matching_count(conn, d["type"], d["value"])
+        rules.append(d)
+    active_patterns = {r["value"] for r in rows if r["type"] == "pattern" and r["enabled"]}
+    suggestions = [
+        {"label": label, "pattern": pattern}
+        for label, pattern in _SUGGESTED_BLOCK_PATTERNS
+        if pattern not in active_patterns
+    ]
+    projects = conn.execute(
+        "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
+    ).fetchall()
+    return {
+        "block_rules":       rules,
+        "block_suggestions": suggestions,
+        "block_projects":    [dict(p) for p in projects],
+    }
+
+
+def _block_rules_response(request: Request, conn):
+    return templates.TemplateResponse("_settings_block_rules.html", {
+        "request": request, **_block_rules_context(conn),
+    })
+
+
+@router.post("/settings/block-rules/add", response_class=HTMLResponse)
+async def block_rule_add(
+    request:   Request,
+    rule_type: str = Form(..., alias="type"),
+    value:     str = Form(...),
+    label:     str = Form(""),
+):
+    from scanner.block_list import reload_block_rules
+
+    value = value.strip()
+    conn = connection.get_connection()
+    if value and rule_type in ("file", "pattern", "folder", "project"):
+        with conn:
+            conn.execute(
+                "INSERT INTO block_rules (type, value, label) VALUES (?, ?, ?)",
+                (rule_type, value, label.strip() or None),
+            )
+    reload_block_rules(conn)
+    resp = _block_rules_response(request, conn)
+    conn.close()
+    return resp
+
+
+@router.post("/settings/block-rules/suggest-activate", response_class=HTMLResponse)
+async def block_rule_suggest_activate(
+    request: Request,
+    label:   str = Form(...),
+    pattern: str = Form(...),
+):
+    from scanner.block_list import reload_block_rules
+
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "INSERT INTO block_rules (type, value, label) VALUES ('pattern', ?, ?)",
+            (pattern, label),
+        )
+    reload_block_rules(conn)
+    resp = _block_rules_response(request, conn)
+    conn.close()
+    return resp
+
+
+@router.post("/settings/block-rules/{rule_id}/delete", response_class=HTMLResponse)
+async def block_rule_delete(request: Request, rule_id: int):
+    from scanner.block_list import reload_block_rules
+
+    conn = connection.get_connection()
+    with conn:
+        conn.execute("DELETE FROM block_rules WHERE id=?", (rule_id,))
+    reload_block_rules(conn)
+    resp = _block_rules_response(request, conn)
+    conn.close()
+    return resp
+
+
 @router.get("/helper", response_class=HTMLResponse)
 async def helper_page(request: Request):
     cfg = settings.load_all()
@@ -1657,6 +1797,7 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "in_db":            True,
         "id":               db["id"],
         "active":           bool(db["active"]),
+        "mcp_enabled":      bool(db["mcp_enabled"]) if "mcp_enabled" in db.keys() else False,
         "doc_count":        count,
         "last_scan":        _fmt_iso_date(last_scan),
         "last_scanned":     _fmt_iso_datetime(_last_iso),
@@ -1689,6 +1830,7 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         "in_db":       False,
                         "id":          None,
                         "active":      False,
+                        "mcp_enabled": False,
                         "doc_count":   0,
                         "last_scan":   None,
                         "scan_status": None,
@@ -1901,7 +2043,7 @@ def _scan_project_mailboxes(project_id: int) -> None:
             pass
 
 
-def _run_scan(project_id: int, path: str, scan_mail: bool = True):
+def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str | None = None):
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
 
@@ -1919,11 +2061,20 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True):
     if not _scan_lock.acquire(blocking=False):
         progress["phase"] = "queued"
         _scan_lock.acquire()  # blockiert bis vorheriger Scan fertig
+    # Erst ab hier läuft der Scan wirklich -- Startzeit erst jetzt setzen, nicht
+    # schon beim Einreihen in die Warteschlange. Sonst zeigt das Scan-Protokoll bei
+    # "Alle scannen" für spät an die Reihe kommende Projekte eine stark aufgeblähte
+    # Dauer, weil ab dem Batch-Start statt ab dem eigenen Start gezählt würde.
+    progress["started_at"] = _now()
     if cancel_flag.get("cancel"):
         progress.update({"status": "cancelled", "finished_at": _now()})
         _scan_lock.release()
         return
 
+    from scanner.scan_log import ResourceSampler, log_scan
+
+    sampler = ResourceSampler()
+    sampler.start()
     try:
         scan_project(project_id, Path(path), progress=progress, cancel_flag=cancel_flag)
         if progress.get("phase") == "error":
@@ -1967,6 +2118,21 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True):
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
     finally:
+        sampler.stop()
+        try:
+            _conn = connection.get_connection()
+            log_scan(
+                _conn, project_id, progress.get("project_name"), progress,
+                started_at=progress.get("started_at") or _now(),
+                finished_at=progress.get("finished_at") or _now(),
+                status=progress.get("status", "error"),
+                peak_memory_mb=sampler.peak_mb, peak_cpu_pct=sampler.peak_cpu,
+                batch_id=batch_id,
+            )
+            _conn.close()
+        except Exception as exc:
+            log.warning("Scan-Protokoll für Projekt %s konnte nicht geschrieben werden: %s",
+                        project_id, exc)
         _scan_lock.release()
 
 

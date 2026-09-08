@@ -1,9 +1,6 @@
+{% from "_norms_row.html" import norm_row %}
 {% for d in docs %}
-<div class="norm-list-row">
-  <span class="norm-list-type">{{ d.type }}</span>
-  <span class="norm-list-filename" title="{{ d.filename }}">{{ d.filename }}</span>
-  <span class="norm-list-path" title="{{ d.path }}">{{ d.path }}</span>
-</div>
+{{ norm_row(d) }}
 {% endfor %}
 {% if has_more %}
 <div class="norms-sentinel" hx-get="/norms/list?offset={{ next_offset }}"

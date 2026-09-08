@@ -138,9 +138,19 @@ cp archivio.icns           "$APP/Contents/Resources/"
 HELPER_VERSION=$(cat helper/VERSION 2>/dev/null || cat VERSION)
 printf '%s' "$HELPER_VERSION" > "$APP/Contents/Resources/HELPER_VERSION"
 
-# Helper-ZIP ins Bundle (für /dashboard/download/helper)
+# Helper-PKG ins Bundle (für /dashboard/download/helper) -- NUR .pkg, kein .zip mehr:
+# das .pkg ersetzt beim Installieren automatisch die laufende Helper-App in
+# /Applications (inkl. Beenden/Neustarten, siehe helper/build.sh); ohne .pkg müsste
+# man den Helper manuell beenden, die .app von Hand nach /Applications kopieren und
+# neu starten. web/dashboard.py::download_helper() bevorzugt ohnehin .pkg vor .zip,
+# ohne dieses hier faende es auf einer echten Installation aber nie eines und
+# lieferte immer den Zip-Fallback aus.
 mkdir -p "$APP/Contents/Resources/dist"
-cp "dist/archivio-helper-${HELPER_VERSION}.zip" "$APP/Contents/Resources/dist/"
+if [ -f "dist/archivio-helper-${HELPER_VERSION}.pkg" ]; then
+  cp "dist/archivio-helper-${HELPER_VERSION}.pkg" "$APP/Contents/Resources/dist/"
+else
+  echo "⚠️  dist/archivio-helper-${HELPER_VERSION}.pkg nicht gefunden -- Helper-Download bietet nichts an"
+fi
 
 # Python-Umgebungen ins Bundle kopieren und bereinigen
 # Liegt bewusst unter Resources/, NICHT Frameworks/: codesign behandelt jedes Verzeichnis
@@ -353,7 +363,7 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   DATA_DIR="/Users/$CURRENT_USER/Library/Application Support/Archivio"
   sudo -u "$CURRENT_USER" mkdir -p "$DATA_DIR/dist"
   sudo -u "$CURRENT_USER" cp \
-    /Applications/Archivio\ Server.app/Contents/Resources/dist/archivio-helper-*.zip \
+    /Applications/Archivio\ Server.app/Contents/Resources/dist/archivio-helper-*.pkg \
     "$DATA_DIR/dist/" 2>/dev/null || true
 fi
 

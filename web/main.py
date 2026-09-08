@@ -52,10 +52,38 @@ from web.gallery import router as gallery_router
 def _scheduler_loop():
     log = logging.getLogger("scheduler")
     triggered_today: str | None = None
+    mcp_log_cleaned_today: str | None = None
+    search_log_cleaned_today: str | None = None
     log.info("Scheduler-Loop gestartet")
     while True:
         try:
             from config import settings
+
+            today = datetime.now().strftime("%Y-%m-%d")
+            if mcp_log_cleaned_today != today:
+                mcp_log_cleaned_today = today
+                from scanner.mcp_log import cleanup_old
+                retention = int(settings.get("mcp_log.retention_days", 365) or 0)
+                _conn = connection.get_connection()
+                try:
+                    deleted = cleanup_old(_conn, retention)
+                    if deleted:
+                        log.info("MCP-Log: %d Zeile(n) älter als %d Tage gelöscht", deleted, retention)
+                finally:
+                    _conn.close()
+
+            if search_log_cleaned_today != today:
+                search_log_cleaned_today = today
+                from scanner.search_log import cleanup_old as cleanup_old_search
+                retention = int(settings.get("search_log.retention_days", 180) or 0)
+                _conn = connection.get_connection()
+                try:
+                    deleted = cleanup_old_search(_conn, retention)
+                    if deleted:
+                        log.info("Suche-Log: %d Zeile(n) älter als %d Tage gelöscht", deleted, retention)
+                finally:
+                    _conn.close()
+
             scan_time = (settings.get("scheduler.scan_time") or "").strip()
             if scan_time:
                 now = datetime.now()
@@ -241,9 +269,11 @@ async def search_ai(
 
     import asyncio
     loop = asyncio.get_event_loop()
+    t0 = time.perf_counter()
     sources, error, ollama_missing = await loop.run_in_executor(
         None, _ai_vector_search, q, project_id, type
     )
+    duration_ms = int((time.perf_counter() - t0) * 1000)
 
     if error and sources is None:
         return templates.TemplateResponse("_ai_answer.html", {
@@ -251,13 +281,27 @@ async def search_ai(
             "error": error, "ollama_missing": ollama_missing,
         })
 
+    from scanner.search_log import log_search
+    log_conn = connection.get_connection()
+    try:
+        search_log_id = log_search(
+            log_conn, "ki-suche", q.strip(),
+            project_id=int(project_id) if project_id.isdigit() else None,
+            filters=(f"Typ: {type}" if type else ""),
+            result_count=len(sources or []),
+            duration_ms=duration_ms,
+        )
+    finally:
+        log_conn.close()
+
     return templates.TemplateResponse("_ai_sources.html", {
-        "request":    request,
-        "question":   q,
-        "project_id": project_id,
-        "type":       type,
-        "sources":    sources or [],
-        "error":      error,
+        "request":       request,
+        "question":      q,
+        "project_id":    project_id,
+        "type":          type,
+        "sources":       sources or [],
+        "error":         error,
+        "search_log_id": search_log_id,
     })
 
 
@@ -378,6 +422,7 @@ async def search(
     tag_id:          str = Query(default=""),
     scope:           str = Query(default=""),
     norms:           str = Query(default=""),  # veraltet, siehe unten
+    search_token:    str = Query(default=""),
 ):
     # "scope" (all|plans|norms) ersetzt die frueheren getrennten Parameter "plans" (als
     # search_in-Wert) und "norms" (only/exclude) durch ein einziges, sich gegenseitig
@@ -398,6 +443,7 @@ async def search(
 
     results, error, total = [], None, 0
     folder_results = []
+    search_log_id = None
     has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id, scope, search_in])
     if q.strip() or has_filters:
         # run_in_executor: _run_scoped_search ist eine blockierende SQLite-Anfrage, die bei
@@ -426,8 +472,24 @@ async def search(
                 conn.close()
 
         loop = asyncio.get_event_loop()
+        t0 = time.perf_counter()
         results, error, folder_results = await loop.run_in_executor(None, _do_search)
+        duration_ms = int((time.perf_counter() - t0) * 1000)
         total = len(results)
+
+        from scanner.search_log import log_search
+        log_conn = connection.get_connection()
+        try:
+            search_log_id = log_search(
+                log_conn, "suche", q.strip(),
+                project_id=int(project_id) if project_id.isdigit() else None,
+                filters=_search_filters_summary(type, scope, duplicates_only, date_from, date_to, search_in),
+                result_count=total + len(folder_results),
+                duration_ms=duration_ms,
+                token=search_token or None,
+            )
+        finally:
+            log_conn.close()
     return templates.TemplateResponse("search_results.html", {
         "request":        request,
         "results":        results,
@@ -435,12 +497,36 @@ async def search(
         "total":          total,
         "error":          error,
         "folder_results": folder_results,
+        "search_log_id":  search_log_id,
     })
 
 
 
+@app.post("/search-log/{search_log_id}/click")
+async def search_log_click(search_log_id: int):
+    """Fire-and-forget-Zähler: ein Suchergebnis wurde geöffnet/im Finder gezeigt.
+    Wird per JS (trackSearchClick(), base.html) beim Klick auf 'Öffnen'/'Im Finder
+    zeigen'/'In Apple Mail öffnen' ausgelöst -- siehe scanner/search_log.py."""
+    from scanner.search_log import log_click
+
+    conn = connection.get_connection()
+    try:
+        log_click(conn, search_log_id)
+    finally:
+        conn.close()
+    return JSONResponse({"ok": True})
+
+
 @app.get("/norms", response_class=HTMLResponse)
 async def norms_page(request: Request):
+    # Eine abgeschlossene "Aktualität aller Normen prüfen"-Meldung ("✓ Geprüft: X/X")
+    # soll nur so lange sichtbar bleiben, wie man auf der Seite bleibt -- ein frischer
+    # Aufruf dieser Route (Seitenwechsel/Neuladen) räumt sie weg. Läuft der Abgleich
+    # noch ("running"), bleibt der Status unangetastet, damit der Fortschritt beim
+    # Neuladen weiterhin sichtbar ist.
+    if _norm_check_all["status"] in ("done", "offline"):
+        _norm_check_all.update({"status": "idle", "done": 0, "total": 0, "list_refreshed": False})
+
     conn = connection.get_connection()
     proposed = conn.execute(
         "SELECT path, n_docs, n_norms, detected_at FROM norm_folders "
@@ -506,6 +592,24 @@ async def norms_add_folder(request: Request, path: str = Form(...)):
     return await norms_page(request)
 
 
+@app.post("/norms/unmark/{doc_id}", response_class=HTMLResponse)
+async def norms_unmark(doc_id: int):
+    """Entfernt eine EINZELNE fälschlich erkannte Norm-Markierung -- anders als eine
+    generelle Lockerung der Klassifikation (die neue False Positives andernorts
+    riskieren würde) korrigiert das gezielt genau dieses eine Dokument, dauerhaft
+    (norm_manual=1 verhindert, dass ein künftiger Scan es erneut markiert, siehe
+    scanner/walker.py::_classify_norm). Gibt bewusst leeren Inhalt zurück -- die
+    Zeile verschwindet aus der Liste, statt (fälschlich) weiter als Norm angezeigt
+    zu werden."""
+    conn = connection.get_connection()
+    with conn:
+        conn.execute(
+            "UPDATE documents SET is_norm = 0, norm_manual = 1 WHERE id = ?", (doc_id,)
+        )
+    conn.close()
+    return HTMLResponse("")
+
+
 @app.post("/norms/reclassify", response_class=HTMLResponse)
 async def norms_reclassify(request: Request):
     """Klassifiziert den kompletten Bestand anhand des bereits gespeicherten Volltexts
@@ -513,8 +617,11 @@ async def norms_reclassify(request: Request):
     nicht ins Terminal muss. Notwendig nach jedem Rescan eines Ordners, der schon VOR
     der Norm-Erkennung indexiert war: ein normaler Scan überspringt unveränderte
     Dateien komplett und klassifiziert sie deshalb nie (scanner/walker.py, Schnellpfad
-    in _process_file)."""
-    from scanner.norms import get_classifier
+    in _process_file). Holt bei dieser Gelegenheit auch das Gültigkeitsdatum
+    (norm_valid_from) für Normen nach, die schon vor dieser Funktion erkannt
+    wurden und deshalb noch keins haben -- ein normaler Scan überspringt
+    unveränderte Dateien ja ebenso und würde es sonst nie nachtragen."""
+    from scanner.norms import extract_valid_from, get_classifier
 
     conn = connection.get_connection()
     try:
@@ -522,7 +629,7 @@ async def norms_reclassify(request: Request):
         if classifier.enabled:
             rows = conn.execute("""
                 SELECT d.id AS id, d.is_norm AS is_norm, dp.path AS path,
-                       COALESCE(c.content, '') AS content
+                       COALESCE(c.content, '') AS content, d.norm_valid_from AS norm_valid_from
                 FROM documents d
                 JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
                 LEFT JOIN document_content c ON c.document_id = d.id
@@ -536,6 +643,13 @@ async def norms_reclassify(request: Request):
                         "UPDATE documents SET is_norm = ?, norm_reason = ? WHERE id = ?",
                         (new_is_norm, verdict.reason, row["id"]),
                     )
+                if new_is_norm and not row["norm_valid_from"]:
+                    valid_from = extract_valid_from(row["content"])
+                    if valid_from:
+                        conn.execute(
+                            "UPDATE documents SET norm_valid_from = ? WHERE id = ?",
+                            (valid_from, row["id"]),
+                        )
             conn.commit()
     finally:
         conn.close()
@@ -545,14 +659,34 @@ async def norms_reclassify(request: Request):
 _NORMS_PAGE_SIZE = 50
 
 
+_CHECK_STATUS_LABELS = {"aktuell": "Aktuell", "veraltet": "Veraltet", "ungeprüft": "Ungeprüft"}
+
+
+def _norm_doc_dict(r) -> dict:
+    from scanner.norms import guess_norm_number, guess_norm_type
+
+    return {
+        "id":            r["id"],
+        "filename":      r["filename"],
+        "path":          r["path"],
+        "type":          guess_norm_type(r["filename"], r["content"]),
+        "number":        guess_norm_number(r["filename"], r["content"]),
+        "valid_from":    r["norm_valid_from"],
+        "check_status":  r["norm_check_status"] or "ungeprüft",
+        "check_label":   _CHECK_STATUS_LABELS.get(r["norm_check_status"] or "ungeprüft", "Ungeprüft"),
+        "checked_at":    r["norm_checked_at"],
+    }
+
+
 @app.get("/norms/list", response_class=HTMLResponse)
 async def norms_list(request: Request, offset: int = Query(default=0)):
-    from scanner.norms import guess_norm_type
-
     conn = connection.get_connection()
     rows = conn.execute("""
         SELECT d.id AS id, d.filename AS filename, dp.path AS path,
-               COALESCE(c.content, '') AS content
+               COALESCE(c.content, '') AS content,
+               d.norm_valid_from AS norm_valid_from,
+               d.norm_check_status AS norm_check_status,
+               d.norm_checked_at AS norm_checked_at
         FROM documents d
         JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         LEFT JOIN document_content c ON c.document_id = d.id
@@ -561,18 +695,225 @@ async def norms_list(request: Request, offset: int = Query(default=0)):
         LIMIT ? OFFSET ?
     """, (_NORMS_PAGE_SIZE, offset)).fetchall()
     conn.close()
-    docs = [{
-        "id":       r["id"],
-        "filename": r["filename"],
-        "path":     r["path"],
-        "type":     guess_norm_type(r["filename"], r["content"]),
-    } for r in rows]
+    docs = [_norm_doc_dict(r) for r in rows]
     return templates.TemplateResponse("_norms_list.html", {
         "request":     request,
         "docs":        docs,
         "has_more":    len(rows) == _NORMS_PAGE_SIZE,
         "next_offset": offset + _NORMS_PAGE_SIZE,
         "is_empty":    offset == 0 and not rows,
+    })
+
+
+def _ensure_norm_valid_from(conn, row, allow_reextract: bool = True) -> tuple[str | None, str]:
+    """Liefert (norm_valid_from, content) -- extrahiert und speichert das Datum
+    aber vorher, wenn es noch fehlt, sonst bräuchte der Online-Abgleich zwingend
+    den separaten "Alle Dokumente nochmals auf Normen prüfen"-Lauf VORHER (leicht
+    zu vergessen, und ohne Jahr bricht check_sia() sofort mit "ungeprüft" ab, ohne
+    überhaupt einen Request zu versuchen -- sah dann aus wie ein hängender/
+    fehlerhafter Abgleich, obwohl nur das Datum fehlte).
+
+    Findet sich im bereits gespeicherten Volltext nichts UND allow_reextract ist
+    True, wird EINMALIG frisch von der Datei neu extrahiert (derselbe
+    Extraktions-/OCR-Pfad wie ein normaler Scan, siehe
+    scanner.walker._extract_and_store -- komplett lokal, kein Netzwerk) -- der
+    gespeicherte Text kann veraltet sein (Datei seit dem letzten Scan
+    ausgetauscht, z.B. eine neue Norm-Ausgabe) oder von schwacher OCR-Qualität,
+    ohne dass sich das über den Datei-Hash unterscheiden liesse, solange der Scan
+    schlicht noch nicht erneut gelaufen ist. content wird zurückgegeben, damit der
+    Aufrufer Typ/Nummer ebenfalls mit dem frischen Text statt dem alten bestimmt.
+
+    allow_reextract=False beim Sammel-Lauf (_run_check_all): eine Neuextraktion
+    kann pro Datei mehrere Sekunden dauern (OCR) -- bei 300+ Normen würde das den
+    ohnehin schon langen Lauf unnötig weiter verlangsamen, wenn es nur um den
+    einzelnen manuellen Button-Klick auf EINE Norm gehen sollte."""
+    if row["norm_valid_from"]:
+        return row["norm_valid_from"], row["content"]
+    from scanner.norms import extract_valid_from
+
+    valid_from = extract_valid_from(row["content"])
+    if valid_from:
+        with conn:
+            conn.execute(
+                "UPDATE documents SET norm_valid_from = ? WHERE id = ?",
+                (valid_from, row["id"]),
+            )
+        return valid_from, row["content"]
+
+    if allow_reextract and row["path"] and Path(row["path"]).exists():
+        from scanner.walker import _extract_and_store
+        try:
+            _extract_and_store(conn, row["id"], Path(row["path"]))
+        except Exception as exc:
+            logging.getLogger(__name__).warning(
+                "Frische Neuextraktion für Norm-Check fehlgeschlagen (Dokument %s): %s", row["id"], exc
+            )
+            return None, row["content"]
+        updated = conn.execute(
+            "SELECT norm_valid_from, COALESCE((SELECT content FROM document_content "
+            "WHERE document_id = documents.id), '') AS content FROM documents WHERE id = ?",
+            (row["id"],),
+        ).fetchone()
+        if updated:
+            return updated["norm_valid_from"], updated["content"]
+    return None, row["content"]
+
+
+@app.post("/norms/check/{doc_id}", response_class=HTMLResponse)
+async def norms_check_one(request: Request, doc_id: int):
+    """Stösst den Online-Abgleich für EINE Norm an (Button in der Zeile) -- siehe
+    scanner/norm_freshness.py. Läuft synchron (ein einzelner Request an SIA-Shop
+    oder VSS-Shop dauert typischerweise unter einer Sekunde bis wenige Sekunden)."""
+    from datetime import datetime, timezone
+
+    from scanner.norm_freshness import check_norm
+    from scanner.norms import guess_norm_number, guess_norm_type
+
+    conn = connection.get_connection()
+    row = conn.execute("""
+        SELECT d.id AS id, d.filename AS filename, dp.path AS path,
+               COALESCE(c.content, '') AS content, d.norm_valid_from AS norm_valid_from
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content c ON c.document_id = d.id
+        WHERE d.id = ? AND d.is_norm = 1
+    """, (doc_id,)).fetchone()
+    if not row:
+        conn.close()
+        return HTMLResponse("Norm nicht gefunden", status_code=404)
+
+    valid_from, content = _ensure_norm_valid_from(conn, row)
+    number = guess_norm_number(row["filename"], content)
+    source = guess_norm_type(row["filename"], content)
+    status, _detail = check_norm(number, valid_from, source)
+    checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+    with conn:
+        conn.execute(
+            "UPDATE documents SET norm_check_status = ?, norm_checked_at = ? WHERE id = ?",
+            (status, checked_at, doc_id),
+        )
+    updated = conn.execute("""
+        SELECT d.id AS id, d.filename AS filename, dp.path AS path,
+               COALESCE(c.content, '') AS content,
+               d.norm_valid_from AS norm_valid_from,
+               d.norm_check_status AS norm_check_status,
+               d.norm_checked_at AS norm_checked_at
+        FROM documents d
+        JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN document_content c ON c.document_id = d.id
+        WHERE d.id = ?
+    """, (doc_id,)).fetchone()
+    conn.close()
+    return templates.TemplateResponse("_norms_row.html", {
+        "request": request, "d": _norm_doc_dict(updated),
+    })
+
+
+_norm_check_all = {"status": "idle", "done": 0, "total": 0, "list_refreshed": False}
+
+# Nach dieser Frist wird eine bereits bestätigte Norm ('aktuell'/'veraltet') bei
+# einem neuen Sammel-Lauf trotzdem nochmals geprüft -- sonst würde eine
+# zwischenzeitlich abgelöste Norm für immer als "Aktuell" stehen bleiben, nur
+# weil sie einmal bestätigt wurde. Innerhalb der Frist bleibt sie übersprungen
+# (siehe _run_check_all-Docstring: das ist, was einen Wiederanlauf nach einem
+# Abbruch schnell macht, statt wieder bei Norm 1 zu beginnen).
+_RECHECK_AFTER_DAYS = 30
+
+
+def _run_check_all():
+    """Läuft über Normen mit Status 'ungeprüft' (Default, siehe Migration 020 --
+    umfasst sowohl nie geprüfte als auch zuvor ergebnislos geprüfte Normen) SOWIE
+    über bereits bestätigte Normen, deren letzte Prüfung länger als
+    _RECHECK_AFTER_DAYS zurückliegt. Ein Abbruch/Absturz mitten im ca.
+    30-minütigen Gesamtlauf bedeutet dadurch NICHT, dass ein Neustart wieder bei
+    Norm 1 beginnt -- frisch bestätigte Normen werden übersprungen, ein erneuter
+    Lauf kurz danach prüft nur noch den Rest. Nach _RECHECK_AFTER_DAYS werden
+    auch bestätigte Normen wieder einbezogen, damit eine zwischenzeitlich
+    abgelöste Norm nicht für immer als "Aktuell" stehen bleibt."""
+    from datetime import datetime, timedelta, timezone
+
+    from scanner.norm_freshness import OFFLINE_DETAIL, check_norm
+    from scanner.norms import guess_norm_number, guess_norm_type
+
+    stale_before = (datetime.now(timezone.utc) - timedelta(days=_RECHECK_AFTER_DAYS)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute("""
+            SELECT d.id AS id, d.filename AS filename, dp.path AS path,
+                   COALESCE(c.content, '') AS content, d.norm_valid_from AS norm_valid_from
+            FROM documents d
+            JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            LEFT JOIN document_content c ON c.document_id = d.id
+            WHERE d.is_norm = 1 AND (
+                d.norm_check_status = 'ungeprüft'
+                OR d.norm_checked_at IS NULL
+                OR d.norm_checked_at < ?
+            )
+        """, (stale_before,)).fetchall()
+        _norm_check_all["total"] = len(rows)
+        _norm_check_all["done"] = 0
+        consecutive_offline = 0
+        for row in rows:
+            if _norm_check_all["status"] != "running":
+                break  # abgebrochen
+            valid_from, _content = _ensure_norm_valid_from(conn, row, allow_reextract=False)
+            number = guess_norm_number(row["filename"], row["content"])
+            source = guess_norm_type(row["filename"], row["content"])
+            status, detail = check_norm(number, valid_from, source)
+            checked_at = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            with conn:
+                conn.execute(
+                    "UPDATE documents SET norm_check_status = ?, norm_checked_at = ? WHERE id = ?",
+                    (status, checked_at, row["id"]),
+                )
+            _norm_check_all["done"] += 1
+            # Archivio läuft bewusst auch komplett offline (Projektprinzip) -- ohne
+            # diesen Abbruch würde der Lauf sich bei fehlendem Internetzugang durch
+            # ALLE verbleibenden Normen quälen, obwohl jede einzelne genauso
+            # scheitern würde. Erst nach 2 FOLGE-Ausfällen abbrechen, nicht schon
+            # beim ersten -- ein einzelner Ausfall kann auch nur diese eine Norm
+            # betreffen (z.B. ein kurzzeitig überlasteter Shop).
+            if detail == OFFLINE_DETAIL:
+                consecutive_offline += 1
+                if consecutive_offline >= 2:
+                    _norm_check_all["status"] = "offline"
+                    break
+            else:
+                consecutive_offline = 0
+            time.sleep(0.3)  # Höflichkeitspause zwischen Requests an fremde Shops
+    finally:
+        conn.close()
+        if _norm_check_all["status"] == "running":
+            _norm_check_all["status"] = "done"
+
+
+@app.post("/norms/check-all")
+async def norms_check_all_start():
+    if _norm_check_all["status"] == "running":
+        return JSONResponse({"ok": False, "error": "läuft bereits"})
+    _norm_check_all.update({"status": "running", "done": 0, "total": 0, "list_refreshed": False})
+    threading.Thread(target=_run_check_all, daemon=True).start()
+    return JSONResponse({"ok": True})
+
+
+@app.post("/norms/check-all/cancel")
+async def norms_check_all_cancel():
+    if _norm_check_all["status"] == "running":
+        _norm_check_all["status"] = "cancelled"
+    return JSONResponse({"ok": True})
+
+
+@app.get("/norms/check-all/progress", response_class=HTMLResponse)
+async def norms_check_all_progress(request: Request):
+    # Die Normenliste soll sich EINMAL automatisch aktualisieren, sobald ein Lauf
+    # fertig ist -- nicht bei jedem weiteren Poll (alle 2s), solange der Banner
+    # "fertig" noch sichtbar ist. list_refreshed merkt sich das.
+    auto_refresh = _norm_check_all["status"] in ("done", "offline") and not _norm_check_all["list_refreshed"]
+    if auto_refresh:
+        _norm_check_all["list_refreshed"] = True
+    return templates.TemplateResponse("_norms_check_progress.html", {
+        "request": request, "state": dict(_norm_check_all), "auto_refresh": auto_refresh,
     })
 
 
@@ -597,6 +938,294 @@ async def norms_search_candidates(request: Request, q: str = Query(default="")):
     return templates.TemplateResponse("_norms_candidates.html", {
         "request": request,
         "docs":    [dict(r) for r in rows],
+    })
+
+
+# ── MCP-Protokoll ("Claude-Zugriffe") ───────────────────────────────────────────
+
+def _mcp_log_query(project_id: str, status: str, date_from: str, date_to: str):
+    """Baut WHERE-Klausel + Parameter für /mcp-log und den CSV-Export gemeinsam,
+    damit Filter und Export nie auseinanderlaufen können."""
+    where, params = [], []
+    if project_id:
+        where.append("project_id = ?")
+        params.append(int(project_id))
+    if status:
+        where.append("status = ?")
+        params.append(status)
+    if date_from:
+        where.append("ts >= ?")
+        params.append(f"{date_from}T00:00:00Z")
+    if date_to:
+        where.append("ts <= ?")
+        params.append(f"{date_to}T23:59:59Z")
+    clause = ("WHERE " + " AND ".join(where)) if where else ""
+    return clause, params
+
+
+def _group_mcp_log_entries(entries: list[dict]) -> list[dict]:
+    """Fasst aufeinanderfolgende Zeilen (entries bereits nach ts DESC sortiert) mit
+    derselben session_id zu einer Gruppe zusammen -- eine einzelne Nutzerfrage löst
+    bei Claude oft mehrere Such-/Nachlade-Aufrufe aus (siehe helper/archivio_mcp.py
+    _SESSION_ID, einmal pro Subprozess/Verbindung erzeugt), die sonst wie viele
+    unabhängige Zugriffe wirken. Zeilen ohne session_id (vor Migration 018, oder
+    ein manueller HTTP-Aufruf ohne den Parameter) bleiben bewusst einzeln -- kein
+    Zusammenfassen über eine fehlende ID hinweg, sonst könnten fremde Zugriffe
+    fälschlich in eine gemeinsame Gruppe rutschen."""
+    groups: list[dict] = []
+    current: dict | None = None
+    for e in entries:
+        sid = e.get("session_id")
+        if sid and current is not None and current["session_id"] == sid:
+            current["entries"].append(e)
+        else:
+            current = {"session_id": sid, "entries": [e]}
+            groups.append(current)
+    for g in groups:
+        es = g["entries"]
+        g["count"]         = len(es)
+        g["files_count"]   = sum(len(e["files"]) for e in es)
+        g["blocked_count"] = sum(len(e["blocked"]) for e in es)
+        g["ts_start"]      = es[-1]["ts"]  # es ist DESC sortiert -> letztes Element = frühester Zeitpunkt
+        g["ts_end"]        = es[0]["ts"]
+        g["projects"]      = sorted({e["project_name"] for e in es if e.get("project_name")})
+        statuses = {e["status"] for e in es}
+        g["status"] = "error" if "error" in statuses else ("blocked" if "blocked" in statuses else "ok")
+    return groups
+
+
+def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
+    """Fasst alle Zeilen mit derselben batch_id (siehe web/api.py::scan_all(),
+    Migration 019) zu einer Gruppe zusammen -- ein "Alle scannen"-Lauf (Klick oder
+    nächtlicher Scheduler) erzeugt sonst pro Projekt eine eigene, unzusammenhängende
+    Zeile im Systemstatus. Anders als bei _group_mcp_log_entries() wird hier NICHT
+    nur bei direkt aufeinanderfolgenden Zeilen zusammengefasst, sondern über die
+    gesamte Liste hinweg -- batch_id kommt ausschliesslich von einem echten,
+    gemeinsamen scan_all()-Aufruf, ein Vermischen fremder Zeilen ist dadurch
+    ausgeschlossen. Zeilen ohne batch_id (Einzel-Scan eines Projekts) bleiben
+    einzeln."""
+    groups: list[dict] = []
+    by_batch: dict[str, dict] = {}
+    for s in scans:
+        bid = s.get("batch_id")
+        if not bid:
+            groups.append({"batch_id": None, "entries": [s]})
+            continue
+        if bid in by_batch:
+            by_batch[bid]["entries"].append(s)
+        else:
+            g = {"batch_id": bid, "entries": [s]}
+            by_batch[bid] = g
+            groups.append(g)
+    for g in groups:
+        es = g["entries"]
+        g["count"]          = len(es)
+        g["total_files"]    = sum(e["total"] or 0 for e in es)
+        g["total_errors"]   = sum(e["error_count"] or 0 for e in es)
+        g["ts_start"]       = min(e["started_at"] for e in es)
+        g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)
+        g["peak_memory_mb"] = max((e["peak_memory_mb"] or 0) for e in es)
+        g["peak_cpu_pct"]   = max((e["peak_cpu_pct"] or 0) for e in es)
+        statuses = {e["status"] for e in es}
+        g["status"] = "error" if "error" in statuses else ("cancelled" if "cancelled" in statuses else "done")
+    return groups
+
+
+@app.get("/mcp-log", response_class=HTMLResponse)
+async def mcp_log_page(
+    request:    Request,
+    project_id: str = Query(default=""),
+    status:     str = Query(default=""),
+    date_from:  str = Query(default=""),
+    date_to:    str = Query(default=""),
+):
+    import json as _json
+    from datetime import timedelta
+
+    conn = connection.get_connection()
+    clause, params = _mcp_log_query(project_id, status, date_from, date_to)
+    rows = conn.execute(
+        f"SELECT * FROM mcp_log {clause} ORDER BY ts DESC LIMIT 500", params
+    ).fetchall()
+    projects   = conn.execute("SELECT id, name FROM projects ORDER BY name").fetchall()
+    proj_names = {p["id"]: p["name"] for p in projects}
+
+    entries = []
+    for r in rows:
+        d = dict(r)
+        d["files"]        = _json.loads(d["files_json"] or "[]")
+        d["blocked"]      = _json.loads(d["blocked_json"] or "[]")
+        d["project_name"] = proj_names.get(d["project_id"])
+        entries.append(d)
+
+    since  = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent = conn.execute(
+        "SELECT files_json FROM mcp_log WHERE ts >= ?", (since,)
+    ).fetchall()
+
+    from web.dashboard import _block_rules_context
+    block_ctx = _block_rules_context(conn)
+    conn.close()
+
+    groups = _group_mcp_log_entries(entries)
+
+    return templates.TemplateResponse("mcp_log.html", {
+        "request":           request,
+        "entries":           entries,
+        "groups":            groups,
+        "projects":          [dict(p) for p in projects],
+        "filter_project_id": project_id,
+        "filter_status":     status,
+        "filter_from":       date_from,
+        "filter_to":         date_to,
+        "total_30d":         len(recent),
+        "files_30d":         sum(len(_json.loads(r["files_json"] or "[]")) for r in recent),
+        **block_ctx,
+    })
+
+
+@app.get("/mcp-log/export.csv")
+async def mcp_log_export(
+    project_id: str = Query(default=""),
+    status:     str = Query(default=""),
+    date_from:  str = Query(default=""),
+    date_to:    str = Query(default=""),
+):
+    import csv
+    import io
+    import json as _json
+
+    conn = connection.get_connection()
+    clause, params = _mcp_log_query(project_id, status, date_from, date_to)
+    rows = conn.execute(
+        f"SELECT * FROM mcp_log {clause} ORDER BY ts DESC LIMIT 5000", params
+    ).fetchall()
+    projects   = conn.execute("SELECT id, name FROM projects").fetchall()
+    proj_names = {p["id"]: p["name"] for p in projects}
+    conn.close()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Zeitstempel", "Tool", "Anfrage", "Projekt", "Status",
+                      "Übermittelte Dateien", "Zeichen", "Blockiert (Grund)"])
+    for r in rows:
+        files   = _json.loads(r["files_json"] or "[]")
+        blocked = _json.loads(r["blocked_json"] or "[]")
+        writer.writerow([
+            r["ts"], r["tool"], r["query"] or "",
+            proj_names.get(r["project_id"], ""), r["status"],
+            "; ".join(f.get("filename") or f.get("path") or "" for f in files),
+            r["chars_sent"],
+            "; ".join(
+                f"{b.get('filename') or b.get('path')} ({b.get('reason')})"
+                if (b.get("filename") or b.get("path")) else (b.get("reason") or "")
+                for b in blocked
+            ),
+        ])
+    return HTMLResponse(
+        buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=claude-zugriffe.csv"},
+    )
+
+
+@app.get("/search-log/export.csv")
+async def search_log_export():
+    """CSV-Export des kompletten Suche-Protokolls (siehe scanner/search_log.py) --
+    dient als Rohdaten-Grundlage, um die Suche später anhand echter Anfragen zu
+    verbessern (z.B. häufige Anfragen ohne Treffer oder ohne Klick), ausserhalb
+    von Archivio selbst auszuwerten (Excel/Numbers). Ohne Filter-Parameter --
+    anders als /mcp-log hat die Systemstatus-Seite keine Filterleiste dafür,
+    ein kompletter Export reicht für diesen Zweck."""
+    import csv
+    import io
+
+    conn = connection.get_connection()
+    rows = conn.execute("SELECT * FROM search_log ORDER BY ts DESC LIMIT 20000").fetchall()
+    proj_names = {p["id"]: p["name"] for p in conn.execute("SELECT id, name FROM projects")}
+    conn.close()
+
+    buf = io.StringIO()
+    writer = csv.writer(buf)
+    writer.writerow(["Zeitstempel", "Art", "Anfrage", "Projekt", "Filter",
+                      "Treffer", "Dauer (ms)", "Klicks"])
+    for r in rows:
+        writer.writerow([
+            r["ts"], "KI-Suche" if r["kind"] == "ki-suche" else "Suche",
+            r["query"] or "", proj_names.get(r["project_id"], ""),
+            r["filters"] or "", r["result_count"], r["duration_ms"], r["clicks"],
+        ])
+    return HTMLResponse(
+        buf.getvalue(),
+        media_type="text/csv",
+        headers={"Content-Disposition": "attachment; filename=suche-protokoll.csv"},
+    )
+
+
+@app.get("/system-status", response_class=HTMLResponse)
+async def system_status_page(request: Request):
+    import json as _json
+    from datetime import timedelta
+
+    import psutil
+
+    conn = connection.get_connection()
+    rows = conn.execute(
+        "SELECT * FROM scan_log ORDER BY started_at DESC LIMIT 200"
+    ).fetchall()
+    scans = []
+    for r in rows:
+        d = dict(r)
+        d["errors"] = _json.loads(d["errors_json"] or "[]")
+        scans.append(d)
+    groups = _group_scan_log_entries(scans)
+
+    since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    recent = conn.execute(
+        "SELECT status, error_count, duration_s FROM scan_log WHERE started_at >= ?", (since,)
+    ).fetchall()
+
+    search_rows = conn.execute(
+        "SELECT * FROM search_log ORDER BY ts DESC LIMIT 300"
+    ).fetchall()
+    proj_names = {p["id"]: p["name"] for p in conn.execute("SELECT id, name FROM projects")}
+    search_entries = []
+    for r in search_rows:
+        d = dict(r)
+        d["project_name"] = proj_names.get(d["project_id"])
+        search_entries.append(d)
+    search_recent = conn.execute(
+        "SELECT result_count, duration_ms FROM search_log WHERE ts >= ?", (since,)
+    ).fetchall()
+    conn.close()
+
+    total_30d   = len(recent)
+    errors_30d  = sum(r["error_count"] for r in recent)
+    avg_duration = (
+        sum(r["duration_s"] or 0 for r in recent) / total_30d if total_30d else 0
+    )
+    search_total_30d = len(search_recent)
+    search_avg_ms = (
+        sum(r["duration_ms"] or 0 for r in search_recent) / search_total_30d if search_total_30d else 0
+    )
+    search_empty_30d = sum(1 for r in search_recent if r["result_count"] == 0)
+    # Nur ein einzelner, guenstiger Aufruf pro Seitenaufruf -- kein Sampling waehrend
+    # des Scans selbst, bremst also nichts (siehe scanner/scan_log.py::ResourceSampler,
+    # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
+    total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
+
+    return templates.TemplateResponse("system_status.html", {
+        "request":          request,
+        "scans":            scans,
+        "groups":           groups,
+        "total_ram_mb":     total_ram_mb,
+        "total_30d":        total_30d,
+        "errors_30d":       errors_30d,
+        "avg_duration":     avg_duration,
+        "search_entries":   search_entries,
+        "search_total_30d": search_total_30d,
+        "search_avg_ms":    search_avg_ms,
+        "search_empty_30d": search_empty_30d,
     })
 
 
@@ -850,6 +1479,28 @@ _TYPE_CATEGORIES: dict[str, list[str]] = {
     # in denselben Filter, damit Vorlagen beim Filtern nach "Word (DOCX)" mit auftauchen.
     ".docx":         [".docx", ".dotx"],
 }
+
+
+def _search_filters_summary(
+    ext: str, scope: str, duplicates_only: str, date_from: str, date_to: str, search_in: str,
+) -> str:
+    """Kompakte, menschenlesbare Zusammenfassung der gesetzten Filter für eine
+    Protokollzeile im Suche-Protokoll (scanner/search_log.py) -- Projekt wird dort
+    separat per project_id/project_name aufgelöst, taucht deshalb hier nicht auf."""
+    parts = []
+    if ext:
+        parts.append(f"Typ: {ext}")
+    if scope == "plans":
+        parts.append("Nur Pläne")
+    elif scope == "norms":
+        parts.append("Nur Normen")
+    if duplicates_only:
+        parts.append("Nur Duplikate")
+    if date_from or date_to:
+        parts.append(f"Zeitraum {date_from or '…'}–{date_to or '…'}")
+    if search_in and search_in != "docs,folders,filenames":
+        parts.append(f"Bereich: {search_in}")
+    return " · ".join(parts)
 
 
 def _build_filters(
@@ -1159,7 +1810,7 @@ def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
         # Grobfilter in SQL: nur Pfade die ALLE Suchwörter irgendwo enthalten —
         # notwendige Bedingung dafür, dass ein Ordnername alle Wörter enthält.
         sql = """
-            SELECT DISTINCT dp.path, p.name AS project_name
+            SELECT DISTINCT dp.path, p.name AS project_name, p.id AS project_id
             FROM document_paths dp
             JOIN documents d ON d.id = dp.document_id
             JOIN projects p ON p.id = d.project_id
@@ -1201,6 +1852,7 @@ def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
                         "path":         folder_str,
                         "name":         folder.name,
                         "project_name": row["project_name"],
+                        "project_id":   row["project_id"],
                     })
                     if len(results) >= 10:
                         return results

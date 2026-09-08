@@ -8,6 +8,7 @@ wenn der Nutzer im Helper-Menü "Server ändern" eine andere URL einstellt).
 from __future__ import annotations
 
 import json
+import uuid
 from pathlib import Path
 from urllib.parse import quote
 
@@ -15,7 +16,18 @@ import requests
 from mcp.server.fastmcp import FastMCP
 from mcp.types import ToolAnnotations
 
-CONFIG_PATH = Path(__file__).parent / "config.json"
+# Gleicher Ort wie archivio_helper.py::CONFIG_PATH -- nutzer-schreibbar, NICHT das
+# App-Bundle (schreibgeschützt, siehe dortiger Kommentar). Nur relevant als Fallback,
+# falls der Helper gerade nicht erreichbar ist (Schritt 1 in _server_url() unten).
+CONFIG_PATH = Path.home() / ".archivio" / "helper_config.json"
+_BUNDLED_CONFIG_PATH = Path(__file__).parent / "config.json"
+
+# Einmal pro Subprozess-Start erzeugt -- Claude Desktop hält diesen Subprozess
+# für die Dauer der Verbindung am Leben, i.d.R. also eine ganze Unterhaltung lang.
+# Wird bei jedem Tool-Aufruf an den Server mitgeschickt, damit /mcp-log mehrere
+# Aufrufe derselben Verbindung zusammenfassen kann (eine Frage löst bei Claude oft
+# mehrere Such-/Nachlade-Aufrufe aus, die sonst wie unabhängige Zugriffe wirken).
+_SESSION_ID = uuid.uuid4().hex[:8]
 
 # Alle Archivio-Tools sind read-only (keine Aenderung an Dokumenten/DB) und arbeiten
 # ausschliesslich auf dem lokalen NAS/Server, nicht "open world". Als Tool-Annotation
@@ -51,14 +63,56 @@ def _server_url() -> str:
                 return url
     except Exception:
         pass
-    try:
-        cfg = json.loads(CONFIG_PATH.read_text())
-        url = (cfg.get("server_url") or "").rstrip("/")
-        if url:
-            return url
-    except Exception:
-        pass
+    for path in (CONFIG_PATH, _BUNDLED_CONFIG_PATH):
+        try:
+            cfg = json.loads(path.read_text())
+            url = (cfg.get("server_url") or "").rstrip("/")
+            if url:
+                return url
+        except Exception:
+            continue
     return "http://localhost:8000"
+
+
+def _archivio_link(path: str) -> str:
+    """Baut einen 'Archivio-Link' -- dieselbe URL, die die Finder-Schnellaktion
+    "Archivio-Link kopieren" erzeugt (siehe helper/ArchivioLink.workflow). Zeigt auf
+    den LOKALEN Helper-Server (localhost, nicht den Archivio-Server), läuft also
+    exakt auf der Station, auf der Claude Desktop selbst läuft. Ein Klick öffnet die
+    Datei direkt im Finder/der zugehörigen App -- ohne Rückfrage an Claude und ohne
+    die Projektordner-Prüfung von open_file()/reveal_file(), die bei dieser Nutzung
+    (der Nutzer klickt selbst, kein Tool-Aufruf) nur eine unnötige Fehlerquelle wäre."""
+    return f"http://localhost:{HELPER_PORT}/link?path={quote(path, safe='')}"
+
+
+def _archivio_link_markdown(path: str) -> str:
+    """Fertig formatierter Markdown-Link -- wird UNVERÄNDERT in die Werkzeug-Antwort
+    eingebettet, damit Claude ihn nur noch übernehmen statt selbst formatieren muss.
+    Grund: in der Praxis hat Claude den blossen Link teils in einen Codeblock gesetzt
+    (dort nicht klickbar) oder sich einen eigenen file://-Link gebaut (unzuverlässig,
+    z.B. bei Leerzeichen/Sonderzeichen im Pfad) statt diesen zu verwenden -- ein
+    bereits vollständiges Markdown-Link-Snippet lässt dafür keinen Interpretations-
+    spielraum mehr."""
+    return f"[📂 Im Finder öffnen]({_archivio_link(path)})"
+
+
+_STATUS_LABELS = {"aktuell": "Aktuell", "veraltet": "Veraltet ⚠️", "ungeprüft": "Ungeprüft"}
+
+
+def _norm_meta_line(r: dict) -> str:
+    """Gültigkeitsdatum + Aktualitäts-Status einer als Norm erkannten Datei --
+    reine Metadaten (siehe scanner/norms.py Modul-Docstring), unabhängig von der
+    Inhaltssperre. Leerer String, wenn nichts davon bekannt ist (z.B. kein
+    Gültigkeitsdatum extrahierbar gewesen, oder noch nie online geprüft)."""
+    if not r.get("is_norm"):
+        return ""
+    parts = []
+    if r.get("norm_valid_from"):
+        parts.append(f"\n  Gültig ab: {r['norm_valid_from']}")
+    status = r.get("norm_check_status")
+    if status and status != "ungeprüft":
+        parts.append(f"\n  Aktualität: {_STATUS_LABELS.get(status, status)}")
+    return "".join(parts)
 
 
 def _helper_action(action: str, path: str) -> str:
@@ -131,13 +185,19 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     "folders" (Ordnernamen) — standardmässig alle drei aktiv.
 
     Jeder Treffer hat eine [ID nnn]: mit read_document(nnn) den Volltext laden,
-    mit open_file(pfad) die Datei extern öffnen.
+    mit open_file(pfad) die Datei extern öffnen. Für den Nutzer zum Selbst-Anklicken
+    steht ausserdem eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)"
+    dabei -- diese Zeile UNVERÄNDERT (Zeichen für Zeichen) in die Antwort
+    übernehmen, NICHT in einen Codeblock setzen und NICHT selbst einen Link aus
+    dem Pfad bauen (z.B. file://) -- nur das fertige Snippet ist in Claude Desktop
+    zuverlässig klickbar.
     """
     base = _server_url()
     try:
         resp = requests.get(
             f"{base}/api/mcp/search",
-            params={"q": query, "project_id": project, "search_in": scope, "limit": 20},
+            params={"q": query, "project_id": project, "search_in": scope, "limit": 20,
+                    "session_id": _SESSION_ID},
             timeout=40,  # Mehrwort-Queries mit vielen FTS-OR-Zweigen koennen auf grossen
                          # Indizes mehrere Sekunden dauern -- 15s war knapp bemessen.
         )
@@ -148,7 +208,16 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     data    = resp.json()
     results = data.get("results", [])
     folders = data.get("folders", [])
+    # notice: Anfrage sieht nach einer Normnummer aus (z.B. "SIA 400"/"SIA 416") --
+    # unabhängig davon, ob die Suche sonst leer ausgeht. Praxisfall: "SIA 416" findet
+    # oft nur beiläufige Arbeitsdokumente, die die Norm bloss ERWÄHNEN (Berechnungen,
+    # Pläne), nicht die echte, offiziell abgelegte Norm -- der Fundort-Hinweis muss
+    # deshalb AUCH bei vorhandenen Treffern angehängt werden, nicht nur beim
+    # kompletten Leerlauf.
+    notice = data.get("notice")
     if not results and not folders:
+        if notice:
+            return notice
         return f"Keine Treffer für «{query}»."
 
     lines = []
@@ -158,6 +227,8 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
         entry   = f"- [ID {r.get('id')}] {r['filename']} [{proj}]"
         if r.get("filepath"):
             entry += f"\n  Pfad: {r['filepath']}"
+            entry += _norm_meta_line(r)
+            entry += f"\n  {_archivio_link_markdown(r['filepath'])}"
         elif r.get("mail_sender"):
             von = f"\n  Mail von: {r['mail_sender']}"
             if r.get("mail_date"):
@@ -167,9 +238,15 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
             entry += f"\n  Auszug: {excerpt}"
         lines.append(entry)
     for f in folders:
-        lines.append(f"- \U0001F4C1 {f['name']} [{f.get('project_name') or '—'}]\n  Pfad: {f['path']}")
+        lines.append(
+            f"- \U0001F4C1 {f['name']} [{f.get('project_name') or '—'}]\n  Pfad: {f['path']}"
+            f"\n  {_archivio_link_markdown(f['path'])}"
+        )
 
-    return "\n".join(lines)
+    output = "\n".join(lines)
+    if notice:
+        output += f"\n\n---\n{notice}"
+    return output
 
 
 @mcp.tool(annotations=_READ_ONLY)
@@ -182,12 +259,16 @@ def semantic_search(query: str, project: str = "") -> str:
 
     query: Frage oder Suchbegriff.
     project: optionale Projekt-ID zum Einschränken.
+
+    Jeder Treffer hat eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)" --
+    diese UNVERÄNDERT übernehmen, nicht in einen Codeblock setzen und nicht selbst
+    einen Link aus dem Pfad bauen.
     """
     base = _server_url()
     try:
         resp = requests.get(
             f"{base}/api/mcp/semantic-search",
-            params={"q": query, "project_id": project, "limit": 12},
+            params={"q": query, "project_id": project, "limit": 12, "session_id": _SESSION_ID},
             timeout=60,
         )
         resp.raise_for_status()
@@ -198,8 +279,11 @@ def semantic_search(query: str, project: str = "") -> str:
     if data.get("ollama_missing"):
         return "Semantische Suche nicht verfügbar — Ollama läuft nicht auf dem Archivio-Server."
     sources = data.get("sources", [])
+    # notice: siehe search() -- der Norm-Fundort-Hinweis muss auch bei vorhandenen
+    # Treffern angehängt werden, nicht nur wenn die Suche sonst leer ausgeht.
+    notice = data.get("notice")
     if not sources:
-        return data.get("error") or f"Keine relevanten Inhalte für «{query}» gefunden."
+        return data.get("error") or notice or f"Keine relevanten Inhalte für «{query}» gefunden."
 
     # match_type erklärt, WIE der Treffer gefunden wurde — wichtig, damit der Score
     # nicht als exakte, über alle Treffer hinweg vergleichbare Zahl missverstanden wird
@@ -217,12 +301,18 @@ def semantic_search(query: str, project: str = "") -> str:
         page  = f", Seite {s['page_number']}" if s.get("page_number") else ""
         label = _MATCH_LABELS.get(s.get("match_type"), "")
         score_str = f"Score {s.get('score', 0):.2f}" + (f", {label}" if label else "")
+        filepath = s.get("filepath")
+        link_line = f"\n  {_archivio_link_markdown(filepath)}" if filepath else ""
+        meta_line = _norm_meta_line(s)
         lines.append(
             f"- [ID {s.get('document_id')}] {s['filename']} [{proj}{page}] ({score_str})\n"
-            f"  Pfad: {s.get('filepath') or '—'}\n"
+            f"  Pfad: {filepath or '—'}{meta_line}{link_line}\n"
             f"  Inhalt: {(s.get('content') or '').strip()[:500]}"
         )
-    return "\n".join(lines)
+    output = "\n".join(lines)
+    if notice:
+        output += f"\n\n---\n{notice}"
+    return output
 
 
 _READ_DOCUMENT_BLOCK_SIZE = 8000
@@ -244,11 +334,16 @@ def read_document(document_id: int, offset: int = 0) -> str:
 
     document_id: die Zahl aus der [ID nnn] eines Suchergebnisses.
     offset: Zeichen-Position, ab der gelesen werden soll (0 = Anfang, Standard).
+
+    Enthält eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)" -- diese
+    UNVERÄNDERT übernehmen, nicht in einen Codeblock setzen und nicht selbst einen
+    Link aus dem Pfad bauen.
     """
     base = _server_url()
     try:
         resp = requests.get(
-            f"{base}/api/mcp/document", params={"document_id": document_id}, timeout=30
+            f"{base}/api/mcp/document",
+            params={"document_id": document_id, "session_id": _SESSION_ID}, timeout=30,
         )
     except Exception as e:
         return f"Fehler beim Zugriff auf Archivio ({base}): {e}"
@@ -261,6 +356,7 @@ def read_document(document_id: int, offset: int = 0) -> str:
     header  = [f"Datei: {d.get('filename')}"]
     if d.get("filepath"):
         header.append(f"Pfad: {d['filepath']}")
+        header.append(_archivio_link_markdown(d['filepath']))
     mail = d.get("mail")
     if mail:
         header.append(f"Von: {mail.get('sender', '')}")

@@ -386,6 +386,11 @@
     <input type="hidden" name="sort" id="gallery_sort_input" value="datum_neu">
   </div>
 
+  {# Zufallswert pro Seitenaufruf, siehe scanner/search_log.py -- lässt den Server
+     mehrere Tastenanschlag-Anfragen desselben Tippvorgangs zu einer Zeile im
+     Suche-Protokoll zusammenfassen statt für jedes Teilwort eine eigene anzulegen. #}
+  <input type="hidden" name="search_token" id="search_token" value="">
+
 </div>{# /search-form #}
 
 <div id="spinner" class="spinner htmx-indicator">Suche…</div>
@@ -451,6 +456,10 @@
 </div>
 
 <script>
+// Einmal pro Seitenaufruf -- siehe scanner/search_log.py::log_search() fürs
+// Zusammenfassen mehrerer Tastenanschlag-Anfragen desselben Tippvorgangs.
+document.getElementById('search_token').value = Math.random().toString(36).slice(2);
+
 var _SEARCH_IN_SCOPES = ['', 'docs', 'folders', 'filenames'];
 
 function setSearchInScope(value) {

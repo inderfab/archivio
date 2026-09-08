@@ -624,6 +624,15 @@
     .project-toggle.on { background: #374151; }
     .project-toggle.on::after { left: 17px; }
 
+    .mcp-toggle {
+      width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+      border: 1px solid var(--border); background: var(--bg);
+      color: var(--text-3); font-size: 12px; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .15s, color .15s, border-color .15s;
+    }
+    .mcp-toggle.on { background: #374151; border-color: #374151; color: #fff; }
+
     .project-name  { font-weight: 600; font-size: 14px; color: var(--accent); }
     .project-meta  { font-size: 12px; color: var(--text-2); margin-top: 2px; }
     .project-path  { font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 12px; color: var(--text-3); }
@@ -955,6 +964,28 @@
     .loupe-stars .star-tile-btn { border: 0; background: transparent; padding: 0; cursor: pointer; margin: 0 2px; line-height: 0; }
     .loupe-stars .star-tile-btn:hover .star { color: #fbbf24; }
     .loupe-auto { display: flex; align-items: center; gap: 6px; color: var(--text-3); cursor: pointer; }
+
+    /* "?"-Button, öffnet ein Flyover mit Hilfetext für die ganze Sektion -- geteilt
+       zwischen Einstellungen und Dashboard (statt einzelner Tooltips pro Feld). */
+    .section-help-btn {
+      width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
+      border: 1px solid var(--border); background: var(--bg); color: var(--text-2);
+      font-size: 12px; font-weight: 700; font-family: inherit; text-transform: none;
+      letter-spacing: normal; cursor: pointer;
+      display: flex; align-items: center; justify-content: center;
+    }
+    .section-help-btn:hover { background: var(--bg); border-color: #9ca3af; color: var(--text); }
+    .section-help-panel {
+      display: none; position: absolute; top: 100%; right: 16px; margin-top: 8px; z-index: 40;
+      width: 320px; max-width: 80vw;
+      background: #111827; color: #fff; font-size: 12px; font-weight: 400;
+      text-transform: none; letter-spacing: normal; line-height: 1.6;
+      padding: 12px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+    }
+    .section-help-panel.open { display: block; }
+    .section-help-panel p { margin: 0 0 8px; }
+    .section-help-panel p:last-child { margin-bottom: 0; }
+    .section-help-panel strong { color: #fff; }
   </style>
 </head>
 <body>
@@ -971,6 +1002,8 @@
         <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
         <a href="/dashboard/helper" class="{{ 'active' if request.url.path == '/dashboard/helper' else '' }}">Helper</a>
         <a href="/norms" class="{{ 'active' if request.url.path == '/norms' else '' }}">Normen</a>
+        <a href="/mcp-log" class="{{ 'active' if request.url.path == '/mcp-log' else '' }}">MCP</a>
+        <a href="/system-status" class="{{ 'active' if request.url.path == '/system-status' else '' }}">Systemstatus</a>
         <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
         <span class="version-badge" id="nav-version"></span>
         <span id="nav-scan-status"
@@ -997,6 +1030,38 @@
 </footer>
 
 <script>
+// ── Scroll-Position stabil halten bei htmx-Swaps ──────────────────────────────
+// Ohne das springt die Seite nach jedem Klick (z.B. ☁-Schalter im Dashboard) an
+// eine andere Stelle -- ein grosser Bereich (z.B. #project-list) wird komplett neu
+// gerendert und ändert dabei seine Höhe (Banner erscheint/verschwindet je nach
+// neuem Status), wodurch der Browser die Scroll-Position sonst verschiebt.
+(function() {
+  var savedScrollY = null;
+  document.body.addEventListener('htmx:beforeSwap', function() {
+    savedScrollY = window.scrollY;
+  });
+  document.body.addEventListener('htmx:afterSettle', function() {
+    if (savedScrollY !== null) {
+      window.scrollTo(0, savedScrollY);
+      savedScrollY = null;
+    }
+  });
+})();
+
+// ── "?"-Hilfe-Flyover (Einstellungen, Dashboard) ──────────────────────────────
+function toggleSectionHelp(btn) {
+  var panel = btn.nextElementSibling;
+  var isOpen = panel.classList.contains('open');
+  document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  if (!isOpen) panel.classList.add('open');
+}
+
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.section-help-btn') && !e.target.closest('.section-help-panel')) {
+    document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  }
+});
+
 // ── Archivio Helper (localhost:44380) ─────────────────────────────────────────
 // Öffnet Dateien lokal auf dem eigenen Mac — kein URL-Scheme, kein Dialog.
 var HELPER = 'http://localhost:44380';
@@ -1009,6 +1074,15 @@ function _helperErrorMessage(status, path) {
       + 'und erneut versuchen.';
   }
   return 'Archivio Helper konnte die Datei nicht öffnen (Fehler ' + status + ').';
+}
+
+// Fire-and-forget: zählt im Suche-Protokoll (Systemstatus) mit, dass aus einer
+// Suche tatsächlich ein Treffer geöffnet wurde -- kein Bezug zu Person/Gerät,
+// siehe scanner/search_log.py. Ein Fehlschlag hier darf das eigentliche Öffnen
+// der Datei nie verhindern, deshalb .catch() ohne jede Rückmeldung.
+function trackSearchClick(searchLogId) {
+  if (!searchLogId) return;
+  fetch('/search-log/' + searchLogId + '/click', { method: 'POST' }).catch(function() {});
 }
 
 function helperOpen(path) {

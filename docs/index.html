@@ -76,6 +76,24 @@
       color: #111;
       margin-top: 2px;
     }
+    .hero-features-title {
+      font-size: 13px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #666;
+      text-align: left;
+      max-width: 520px;
+      margin: 0 auto 12px;
+    }
+    .hero-optional-link {
+      max-width: 520px;
+      margin: -4px auto 40px;
+      text-align: left;
+      font-size: 13px;
+    }
+    .hero-optional-link a { color: #666; }
+    .hero-optional-link a:hover { color: #111; }
 
     /* ── Buttons ── */
     .hero-buttons {
@@ -199,14 +217,21 @@
       <p class="hero-sub-title">Die Wissensplattform für Architekturbüros</p>
       <p class="hero-slogan">Jedes Dokument. Jede Mail. Jeder Plan.<br>Sofort gefunden.</p>
 
+      <p class="hero-features-title">Läuft vollständig lokal — nichts verlässt Ihr Büro</p>
       <ul class="hero-features">
         <li><span class="hero-check">✓</span>Dokumente automatisch vom NAS synchronisiert – kein manuelles Hochladen</li>
-        <li><span class="hero-check">✓</span>Mails, Dokumente, Pläne und Normen – alles in einer Suche</li>
-        <li><span class="hero-check">✓</span>KI-Suche mit lokalem Sprachmodell – keine Cloud, keine Abos</li>
-        <li><span class="hero-check">✓</span>Vollständig lokal auf dem Mac – Ihre Daten bleiben im Büro</li>
-        <li><span class="hero-check">✓</span>Foto-Galerie mit Sterne-Bewertung – Projektbilder sichten und filtern</li>
-        <li><span class="hero-check">✓</span>Mit der MCP-Schnittstelle direkt in Ihrer KI-Anwendung nutzbar</li>
+        <li><span class="hero-check">✓</span>Mails, Dokumente, Pläne und Normen in einer einzigen Suche</li>
+        <li><span class="hero-check">✓</span>KI-Suche mit lokalem Sprachmodell</li>
+        <li><span class="hero-check">✓</span>Foto-Galerie mit Bewertung und Filtern</li>
+        <li><span class="hero-check">✓</span>Direktlinks statt Dateikopien</li>
+        <li><span class="hero-check">✓</span>Kein Konto, keine Cloud, keine Telemetrie. Erreichbar nur im internen Netzwerk</li>
       </ul>
+
+      <p class="hero-features-title" style="margin-top:28px;">Optionale Anbindung an KI-Anbieter</p>
+      <ul class="hero-features">
+        <li><span class="hero-check">✓</span>Optionale MCP-Schnittstelle an KI-Anwendungen wie Claude</li>
+      </ul>
+      <p class="hero-optional-link"><a href="merkblatt.html">→ Merkblatt: Was mit Ihren Daten passiert</a></p>
 
       <div class="hero-buttons">
         <button class="btn-download" id="btn-dl" onclick="downloadLatest()">
@@ -233,6 +258,8 @@
     <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
     <div style="display:flex;gap:24px;align-items:center;">
       <a href="docs.html">Anleitung</a>
+      <a href="merkblatt.html">Merkblatt</a>
+      <a href="haftungsausschluss.html">Haftungsausschluss</a>
       <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback" style="display:inline-flex;align-items:center;gap:6px;background:#111;color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;">Feedback senden</a>
       <span>© 2026 Archivio</span>
     </div>

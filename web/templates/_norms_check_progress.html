@@ -1,0 +1,27 @@
+{% if state.status == 'running' %}
+<div class="norm-check-progress-banner">
+  <span>⏳ Aktualität wird geprüft: {{ state.done }}/{{ state.total }}</span>
+  <button type="button" class="btn btn-sm" hx-post="/norms/check-all/cancel"
+          hx-target="#norm-check-progress" hx-swap="innerHTML">Abbrechen</button>
+</div>
+{% elif state.status == 'offline' %}
+<div class="norm-check-progress-banner offline">
+  <span>⚠ Kein Internetzugang — Abgleich abgebrochen ({{ state.done }}/{{ state.total }} geprüft, bevor die Verbindung fehlschlug)</span>
+  <button type="button" class="btn btn-sm" hx-get="/norms/list" hx-target="#norms-list-box" hx-swap="innerHTML">
+    Liste aktualisieren
+  </button>
+</div>
+{% if auto_refresh %}
+<div hx-get="/norms/list" hx-trigger="load" hx-target="#norms-list-box" hx-swap="innerHTML" style="display:none;"></div>
+{% endif %}
+{% elif state.status == 'done' and state.total %}
+<div class="norm-check-progress-banner done">
+  <span>✓ Geprüft: {{ state.done }}/{{ state.total }}</span>
+  <button type="button" class="btn btn-sm" hx-get="/norms/list" hx-target="#norms-list-box" hx-swap="innerHTML">
+    Liste aktualisieren
+  </button>
+</div>
+{% if auto_refresh %}
+<div hx-get="/norms/list" hx-trigger="load" hx-target="#norms-list-box" hx-swap="innerHTML" style="display:none;"></div>
+{% endif %}
+{% endif %}

@@ -27,30 +27,19 @@ import logging
 import os
 import re
 import sqlite3
-import unicodedata
 from dataclasses import dataclass
 from pathlib import Path
 
 import yaml
+
+from scanner.pathutil import is_under as _is_under
+from scanner.pathutil import norm_path as _norm_path
 
 log = logging.getLogger(__name__)
 
 NORM_NOTICE = "🔒 Norm — Inhalt gesperrt (Urheber-/Lizenzrecht)"
 
 _CONFIG_PATH = Path(__file__).parent.parent / "config" / "norms.yaml"
-
-
-def _norm_path(p: str) -> str:
-    """macOS/SMB liefert NFD-zerlegte Umlaute, DB/YAML enthalten NFC.
-    Ohne Normalisierung matcht 'Behörden' nicht gegen 'Behörden'."""
-    return unicodedata.normalize("NFC", os.path.normpath(p))
-
-
-def _is_under(path: str, root: str) -> bool:
-    """Präfix-Match auf Pfadkomponenten, nicht auf Strings.
-    Verhindert, dass '/x/Normen2' gegen '/x/Normen' matcht."""
-    path, root = _norm_path(path), _norm_path(root)
-    return path == root or path.startswith(root + os.sep)
 
 
 @dataclass(frozen=True)
@@ -160,6 +149,145 @@ def reload_classifier(conn: sqlite3.Connection) -> NormClassifier:
     return _classifier
 
 
+def looks_like_norm_query(conn: sqlite3.Connection, query: str) -> str | None:
+    """Prüft, ob eine MCP-Suchanfrage selbst wie eine Normnummer aussieht (SIA 400,
+    EN 1090, ...) -- unabhängig davon, ob überhaupt ein Treffer gefunden wird. Ohne
+    das bekommt Claude bei einer Norm, die gar nicht (mehr) im Index liegt oder
+    ausserhalb der freigegebenen Projekte, schlicht "keine Treffer" und muss sich
+    die Urheberrechtslage selbst zusammenreimen -- mit dem Risiko, das falsch oder
+    unpräzise zu tun. Gibt die erkannte Normnummer zurück (fürs Protokoll/die
+    Nutzermeldung), sonst None."""
+    if not query:
+        return None
+    try:
+        classifier = get_classifier(conn)
+    except Exception:
+        return None
+    if not classifier.enabled:
+        return None
+    for pattern in classifier.num_res:
+        m = pattern.search(query)
+        if m:
+            return m.group(0)
+    return None
+
+
+_GERMAN_MONTHS = {
+    "januar": "01", "februar": "02", "märz": "03", "maerz": "03", "april": "04",
+    "mai": "05", "juni": "06", "juli": "07", "august": "08", "september": "09",
+    "oktober": "10", "november": "11", "dezember": "12",
+}
+
+_VALID_FROM_PATTERNS = [
+    # "Gültig ab: 2018-04-01" -- moderne SIA-Normen, exaktes Datum. Häufigstes und
+    # präzisestes Muster, deshalb zuerst versucht.
+    (re.compile(r"G[üu]ltig ab\D{0,5}(\d{4})-(\d{2})-(\d{2})", re.IGNORECASE), "ymd"),
+    # "Es tritt am 1. Juli 2000 in Kraft" -- steht bei Merkblättern/älteren Normen
+    # oft erst im Schlussabschnitt "Genehmigung und Inkrafttreten" am ENDE des
+    # Dokuments, nicht auf der Titelseite (siehe extract_valid_from -- wird deshalb
+    # auch gegen das Textende geprüft). Genauso exakt wie "Gültig ab", daher
+    # gleiche Priorität.
+    (re.compile(
+        r"tritt\s+am\s+(\d{1,2})\.\s*(" + "|".join(_GERMAN_MONTHS) + r")\s+(\d{4})\s+in\s+Kraft",
+        re.IGNORECASE,
+    ), "dmonthy"),
+    # "SIA 400:2000" / "SIA 251:2008" -- Jahr direkt in der Bezeichnung, bei älteren
+    # Normen ohne "Gültig ab"-Vermerk der zuverlässigste verbleibende Anhaltspunkt.
+    (re.compile(r"\bSIA\s*[\d./]+\s*:\s*(\d{4})\b"), "y"),
+    # "Copyright © 2000 by SIA" -- OCR liest das oft fehlerhaft ein ("Copvright"
+    # statt "Copyright", "@" statt "©", siehe z.B. SIA 2017 im OCR-Ordner) --
+    # Muster entsprechend tolerant. Letzter Fallback, etwas ungenauer (Copyright-
+    # Jahr kann vom eigentlichen Ausgabejahr abweichen), aber besser als gar kein
+    # Datum.
+    (re.compile(r"Cop[yv]right\s*[©@]?\s*(\d{4})\s*by\s*SIA", re.IGNORECASE), "y"),
+]
+
+
+def extract_valid_from(text: str | None) -> str | None:
+    """Sucht im (bereits extrahierten) Dokumenttext nach dem Gültigkeitsdatum einer
+    Norm -- Prioritätenkette von genau (Tagesdatum) zu ungenau (nur Jahr), siehe
+    _VALID_FROM_PATTERNS. Durchsucht Anfang UND Ende des Dokuments (je die ersten/
+    letzten paar tausend Zeichen), nicht nur die Titelseite -- bei Merkblättern
+    steht "Genehmigung und Inkrafttreten" oft erst im Schlussabschnitt, nicht
+    vorne. Der ganze Fliesstext dazwischen wird bewusst NICHT durchsucht, damit
+    ein zufälliges Datum mitten im Dokument nicht fälschlich als Gültigkeitsdatum
+    genommen wird. Gibt IMMER ein volles ISO-Datum zurück (Jahr-only-Treffer
+    werden auf den 1. Januar gelegt) oder None, wenn kein Muster passt -- das ist
+    der erwartete, häufige Fall bei älteren/untypisch formatierten Normen (siehe
+    Docstring-Kommentar in _classify_norm). Fenstergrösse 6000 Zeichen (nicht nur
+    4000) -- bei umfangreicheren Normen mit mehrsprachigem oder längerem Vorspann
+    vor der eigentlichen Titelseite (z.B. SIA-Ordnungen, die dem Titel oft eine
+    französische/italienische Fassung voranstellen) reichten 4000 Zeichen nicht
+    immer bis zum "Gültig ab"-Vermerk."""
+    if not text:
+        return None
+    WINDOW = 6000
+    zones = [text[:WINDOW]]
+    if len(text) > WINDOW:
+        zones.append(text[-WINDOW:])
+    for pattern, kind in _VALID_FROM_PATTERNS:
+        for zone in zones:
+            m = pattern.search(zone)
+            if not m:
+                continue
+            groups = m.groups()
+            if kind == "ymd":
+                year, month, day = groups
+            elif kind == "dmonthy":
+                day, month_name, year = groups
+                month = _GERMAN_MONTHS[month_name.lower()]
+                day = day.zfill(2)
+            else:  # "y"
+                year, month, day = groups[0], "01", "01"
+            try:
+                from datetime import date
+                date(int(year), int(month), int(day))  # wirft bei unsinnigem Datum
+            except ValueError:
+                continue
+            return f"{year}-{month}-{day}"
+    return None
+
+
+def find_norm_locations(conn: sqlite3.Connection, norm_ref: str) -> list[dict]:
+    """Findet lokal vorhandene Normen anhand ihrer Nummer -- BEWUSST unabhängig von
+    der MCP-Projekt-Freigabe (projects.mcp_enabled). Pfad/Dateiname sind Fakten,
+    keine geschützte Werkform (siehe Modul-Docstring oben), und dürfen deshalb auch
+    für ein nicht freigegebenes Projekt genannt werden -- nur der Norminhalt selbst
+    bleibt in jedem Fall gesperrt (dafür sorgen weiterhin redact_hits()/guard_read(),
+    diese Funktion liefert nie Inhalt, nur Metadaten). Ohne das würde eine Norm in
+    einem nicht freigegebenen Projekt beim Suchen einfach so wirken, als gäbe es sie
+    gar nicht -- statt "liegt hier, aber Inhalt gesperrt".
+
+    Matcht nur auf der ZAHL, an einer Ziffern-Grenze (kein Teil einer längeren
+    Zahl), und nur im DATEINAMEN -- nicht mehr auf Buchstaben+Zahl zusammen
+    irgendwo im ganzen Pfad. Reale Normdateien heissen oft schlicht "400.pdf" ohne
+    "SIA" im Namen (der Herausgeber steht nur im übergeordneten Ordnernamen, der
+    von echtem Fliesstext wie "...Normen_SIA/S I A NORMEN/..." durchsetzt ist) --
+    ein Abgleich auf den gesamten Pfad verlangte "sia" und "400" direkt
+    nebeneinander und fand dadurch selbst die offiziell abgelegten Normen nicht."""
+    m = re.match(r"\s*[a-zA-Z]*[\s_./-]*0*(\d+)", norm_ref or "")
+    if not m:
+        return []
+    digits = m.group(1)
+    num_re = re.compile(r"(?<!\d)0*" + re.escape(digits) + r"(?!\d)")
+    rows = conn.execute("""
+        SELECT d.filename, p.name AS project_name, dp.path,
+               d.norm_valid_from AS valid_from, d.norm_check_status AS check_status
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN projects p ON p.id = d.project_id
+        WHERE d.is_norm = 1
+    """).fetchall()
+    matches = []
+    for r in rows:
+        if num_re.search((r["filename"] or "").lower()):
+            matches.append({
+                "path": r["path"], "filename": r["filename"], "project": r["project_name"],
+                "valid_from": r["valid_from"], "check_status": r["check_status"],
+            })
+    return matches
+
+
 # ── MCP-Gate ────────────────────────────────────────────────────────────────────
 
 def is_norm_doc(conn: sqlite3.Connection, doc_id: int | None, path: str | None) -> bool:
@@ -198,6 +326,17 @@ def redact_hits(conn: sqlite3.Connection, hits: list[dict]) -> list[dict]:
                 h["content"] = NORM_NOTICE
             h.pop("text", None)
             h.pop("page_text", None)
+            # Gültigkeitsdatum/Status sind reine Metadaten (keine geschützte
+            # Werkform, siehe Modul-Docstring) -- dürfen deshalb auch bei
+            # gesperrtem Inhalt mitgegeben werden.
+            if doc_id is not None:
+                row = conn.execute(
+                    "SELECT norm_valid_from, norm_check_status FROM documents WHERE id = ?",
+                    (doc_id,),
+                ).fetchone()
+                if row:
+                    h["norm_valid_from"] = row["norm_valid_from"]
+                    h["norm_check_status"] = row["norm_check_status"]
     return hits
 
 
@@ -209,12 +348,24 @@ def guard_read(conn: sqlite3.Connection, doc_id: int, filename: str, path: str |
     Sperre über andere Tools erneut zu umgehen."""
     if not is_norm_doc(conn, doc_id, path):
         return None
+    meta_lines = ""
+    row = conn.execute(
+        "SELECT norm_valid_from, norm_check_status FROM documents WHERE id = ?", (doc_id,)
+    ).fetchone()
+    if row and row["norm_valid_from"]:
+        meta_lines += f"Gültig ab: {row['norm_valid_from']}\n"
+    if row and row["norm_check_status"] and row["norm_check_status"] != "ungeprüft":
+        label = {"aktuell": "Aktuell", "veraltet": "Veraltet ⚠️"}.get(
+            row["norm_check_status"], row["norm_check_status"]
+        )
+        meta_lines += f"Aktualität: {label}\n"
     return (
         f"🔒 **{filename}** (ID {doc_id}) — als Norm klassifiziert.\n"
         f"Der Inhalt wird aus urheber- und lizenzrechtlichen Gründen nicht über die "
         f"MCP-Schnittstelle ausgegeben. Normtexte dürfen nicht an externe KI-Dienste "
         f"übermittelt werden.\n\n"
         f"Pfad: `{path}`\n"
+        f"{meta_lines}"
         f"Lokal öffnen: `open_file({doc_id})` · "
         f"Im Finder zeigen: `reveal_file({doc_id})` · "
         f"Volltextsuche direkt in Archivio (offline, dort uneingeschränkt)"
@@ -227,13 +378,38 @@ _TYPE_RE = re.compile(r"(?i)\b(VSS|SIA|SN|EN|DIN|ISO|IEC)\b")
 def guess_norm_type(filename: str, text: str | None) -> str:
     """Rein kosmetischer Anzeige-Wert für die Normen-Liste (/norms) -- KEIN Teil der
     Klassifikation. Dateiname zuerst (schnell, oft aussagekräftig), sonst die ersten
-    2000 Zeichen des Volltexts (deckt Faelle wie 'SIA 180.082.pdf' ab, deren
-    Herausgeber-Nummer nur im Dokument selbst steht, nicht im Dateinamen)."""
-    for source in (filename or "", (text or "")[:2000]):
+    6000 Zeichen des Volltexts (deckt Fälle wie 'SIA 180.082.pdf' ab, deren
+    Herausgeber-Nummer nur im Dokument selbst steht, nicht im Dateinamen). Mindestens
+    so gross wie content_scan_chars der Klassifikation (config/norms.yaml, Default
+    4000) -- sonst kann ein Dokument als Norm erkannt werden (Herausgebername wie
+    "Schweizerischer Ingenieur- und Architektenverein" enthält kein isoliertes
+    "SIA"-Kürzel), dessen kurzes Kürzel aber ausserhalb eines kleineren Fensters
+    liegt (z.B. bei mehrsprachigem Vorspann vor der eigentlichen Titelseite) und
+    dann fälschlich als generisches "Norm" statt "SIA" angezeigt wird."""
+    for source in (filename or "", (text or "")[:6000]):
         m = _TYPE_RE.search(source)
         if m:
             return m.group(1).upper()
     return "Norm"
+
+
+_NUMBER_RE = re.compile(r"(\d{2,6}(?:[.\-/]\d{1,4}){0,2})")
+
+
+def guess_norm_number(filename: str, text: str | None) -> str | None:
+    """Extrahiert die reine Normnummer (z.B. "400", "180.081", "640050") aus
+    Dateiname oder Text -- fürs Zusammensetzen der Shop-URL beim manuellen
+    Aktualitäts-Abgleich (siehe scanner/norm_freshness.py). Rein heuristisch wie
+    guess_norm_type(), keine Garantie auf Treffer bei unüblichen Dateinamen --
+    das ist unkritisch, der Abgleich fällt in dem Fall auf "ungeprüft" zurück."""
+    stem = Path(filename or "").stem
+    m = _NUMBER_RE.search(stem)
+    if m:
+        return m.group(1)
+    m = _NUMBER_RE.search((text or "")[:2000])
+    if m:
+        return m.group(1)
+    return None
 
 
 def assert_no_norm_text(payload: list[dict]) -> None:

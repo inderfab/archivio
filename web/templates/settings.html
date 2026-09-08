@@ -26,27 +26,7 @@
   }
   .settings-body { padding: 20px; display: flex; flex-direction: column; gap: 14px; }
 
-  /* "?"-Button im Sektions-Header -- öffnet ein Flyover mit Hilfetext für die
-     GANZE Sektion (statt einzelner Tooltips pro Feld). */
-  .section-help-btn {
-    width: 22px; height: 22px; border-radius: 50%; flex-shrink: 0;
-    border: 1px solid var(--border); background: var(--bg); color: var(--text-2);
-    font-size: 12px; font-weight: 700; font-family: inherit; text-transform: none;
-    letter-spacing: normal; cursor: pointer;
-    display: flex; align-items: center; justify-content: center;
-  }
-  .section-help-btn:hover { background: var(--bg); border-color: #9ca3af; color: var(--text); }
-  .section-help-panel {
-    display: none; position: absolute; top: 100%; right: 16px; margin-top: 8px; z-index: 40;
-    width: 320px; max-width: 80vw;
-    background: #111827; color: #fff; font-size: 12px; font-weight: 400;
-    text-transform: none; letter-spacing: normal; line-height: 1.6;
-    padding: 12px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
-  }
-  .section-help-panel.open { display: block; }
-  .section-help-panel p { margin: 0 0 8px; }
-  .section-help-panel p:last-child { margin-bottom: 0; }
-  .section-help-panel strong { color: #fff; }
+  /* "?"-Button + Flyover: gemeinsames CSS aus base.html (auch vom Dashboard genutzt). */
 
   /* Beschriftung + Eingabefeld in EINER Box, wie im Filter-Panel der Suche
      (.field/.field-prefix aus base.html) -- hier nur die Präfix-Breite an die
@@ -156,7 +136,7 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p><strong>Automatischer Scan:</strong> Aktive Projekte werden täglich um die eingestellte Uhrzeit (HH:MM) aktualisiert. Leer = deaktiviert. Die Uhrzeit so wählen, dass der Computer läuft — bleibt er immer an, eignet sich der Abend (z. B. 22:00); wird er über Nacht ausgeschaltet, eher die Mittagszeit (z. B. 12:15).</p>
-          <p><strong>Ausgeschlossene Ordner:</strong> werden standardmässig in allen Projekten ignoriert, z. B. „privat". Es zählt der exakte Ordnername (schliesst z. B. „Log" nicht „Analog" oder „Logitech" mit aus).</p>
+          <p><strong>Ausgeschlossene Ordner:</strong> werden in allen Projekten ignoriert. Ohne Stern zählt der exakte Ordnername (z. B. „Log" schliesst „Analog" oder „Logitech" nicht mit aus). Mit Stern als Muster: „*privat*" trifft jeden Ordner, der „privat" irgendwo im Namen enthält (z. B. „Privatnotizen" oder „Alt_privat"); „privat*" nur Namen, die damit beginnen.</p>
           <p><strong>Scanner-Worker:</strong> mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch. Standard ist 1 Worker — nur umstellen, wenn wirklich nötig.</p>
         </div>
       </div>
@@ -207,7 +187,7 @@
             {% for f in cfg.get('scanner', {}).get('excluded_folders', []) %}
             <div class="list-item">
               <input type="text" name="excluded_folder"
-                placeholder="Ordnername" value="{{ f }}">
+                placeholder="Ordnername oder Muster wie *privat*" value="{{ f }}">
               <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
                 onclick="chooseExcludedFolder(this)">📁</button>
               <button type="button" class="remove-btn"
@@ -347,18 +327,7 @@
 </div>
 
 <script>
-function toggleSectionHelp(btn) {
-  var panel = btn.nextElementSibling;
-  var isOpen = panel.classList.contains('open');
-  document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
-  if (!isOpen) panel.classList.add('open');
-}
-
-document.addEventListener('click', function(e) {
-  if (!e.target.closest('.settings-section-header')) {
-    document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
-  }
-});
+// toggleSectionHelp() lebt jetzt in base.html (auch vom Dashboard genutzt).
 
 function addMailAccount() {
   var tpl = document.createElement('div');
@@ -446,7 +415,7 @@ function addExcludedFolder() {
   var item = document.createElement('div');
   item.className = 'list-item';
   item.innerHTML =
-    '<input type="text" name="excluded_folder" placeholder="Ordnername">' +
+    '<input type="text" name="excluded_folder" placeholder="Ordnername oder Muster wie *privat*">' +
     '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseExcludedFolder(this)">📁</button>' +
     '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
   document.getElementById('excluded-folders-list').appendChild(item);

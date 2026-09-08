@@ -32,7 +32,7 @@
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
         <button class="btn-sm" data-path="{{ f.path }}"
-          onclick="helperReveal(this.dataset.path)">
+          onclick="trackSearchClick({{ search_log_id or 'null' }}); helperReveal(this.dataset.path)">
           Im Finder zeigen
         </button>
       </div>
@@ -84,7 +84,7 @@
     <div class="result-actions">
       {% if is_mail %}
         <button class="btn-sm" data-id="{{ r.id }}"
-          onclick="openMail(this.dataset.id)">
+          onclick="trackSearchClick({{ search_log_id or 'null' }}); openMail(this.dataset.id)">
           In Apple Mail öffnen ↗
         </button>
         <button class="btn-sm" data-text="{{ r.filename }}"
@@ -93,11 +93,11 @@
         </button>
       {% else %}
         <button class="btn-sm" data-path="{{ r.filepath }}"
-          onclick="helperOpen(this.dataset.path)">
+          onclick="trackSearchClick({{ search_log_id or 'null' }}); helperOpen(this.dataset.path)">
           Öffnen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"
-          onclick="helperReveal(this.dataset.path)">
+          onclick="trackSearchClick({{ search_log_id or 'null' }}); helperReveal(this.dataset.path)">
           Im Finder zeigen
         </button>
         <button class="btn-sm" data-path="{{ r.filepath }}"

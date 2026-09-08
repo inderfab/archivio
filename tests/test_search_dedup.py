@@ -69,6 +69,7 @@ def test_mcp_search_dedupes_despite_two_primary_paths(tmp_db):
     from web.main import app
 
     p = queries.insert_project(tmp_db, "P", "/scan")
+    tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (p,))
     _make_doc_with_two_primary_paths(tmp_db, p, "Keller_Neubau_Haustechnik_DA_1-500.pdf",
                                       "Haustechnik Details Keller Neubau")
     tmp_db.commit()

@@ -1,0 +1,291 @@
+{% extends "base.html" %}
+{% block title %}Archivio – MCP{% endblock %}
+
+{% block content %}
+<style>
+  .mcplog-page { padding: 32px 0 64px; max-width: 900px; }
+  .mcplog-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
+  .mcplog-page .intro { color: var(--text-2); font-size: 14px; margin-bottom: 20px; }
+
+  .mcplog-section { margin-bottom: 32px; }
+  .mcplog-section h2 {
+    font-size: 13px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text); padding-bottom: 8px; border-bottom: 2px solid var(--accent);
+    margin-bottom: 14px;
+  }
+  .mcplog-install-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .mcplog-install-row select {
+    font-size: 13px; padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--bg); color: var(--text);
+  }
+  .mcplog-install-status { font-size: 12px; color: var(--text-2); margin-top: 8px; }
+  .mcplog-install-status.ok { color: #166534; }
+  .mcplog-install-status.err { color: #991b1b; }
+
+  .mcplog-stats { display: flex; gap: 28px; margin-bottom: 20px; }
+  .mcplog-stat-value { font-size: 20px; font-weight: 700; }
+  .mcplog-stat-label { font-size: 12px; color: var(--text-2); }
+
+  .mcplog-filters { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; margin-bottom: 18px; }
+  .mcplog-filters select, .mcplog-filters input {
+    padding: 6px 10px; font-size: 12px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg);
+  }
+
+  .mcplog-empty { color: var(--text-3); font-size: 13px; font-style: italic; }
+
+  .mcplog-entry { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 8px; overflow: hidden; }
+  .mcplog-entry > summary {
+    display: flex; align-items: center; gap: 10px; padding: 9px 12px;
+    cursor: pointer; list-style: none; user-select: none; font-size: 13px;
+  }
+  .mcplog-entry > summary::-webkit-details-marker { display: none; }
+  .mcplog-ts { color: var(--text-3); font-size: 11px; font-family: ui-monospace, monospace; white-space: nowrap; }
+  .mcplog-tool {
+    flex: 0 0 auto; font-weight: 700; font-size: 10px; text-transform: uppercase;
+    letter-spacing: .04em; background: var(--bg-2); border-radius: 4px; padding: 2px 6px;
+  }
+  .mcplog-query { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .mcplog-badge { font-size: 11px; font-weight: 600; padding: 2px 8px; border-radius: 10px; white-space: nowrap; }
+  .mcplog-badge.ok { background: #dcfce7; color: #166534; }
+  .mcplog-badge.blocked { background: #fef3c7; color: #92400e; }
+  .mcplog-badge.error { background: #fee2e2; color: #991b1b; }
+  .mcplog-body { padding: 4px 14px 12px; font-size: 12px; }
+  .mcplog-body h4 { font-size: 11px; text-transform: uppercase; letter-spacing: .04em; color: var(--text-2); margin: 8px 0 4px; }
+  .mcplog-file-row { font-family: ui-monospace, monospace; color: var(--text-2); padding: 2px 0; word-break: break-all; }
+  .mcplog-block-row { color: #92400e; padding: 2px 0; word-break: break-all; }
+
+  .mcplog-list-scroll { max-height: 720px; overflow-y: auto; padding-right: 4px; }
+  .mcplog-group > summary { background: var(--bg-2); font-weight: 600; }
+  .mcplog-group .mcplog-entry { margin: 6px 0 6px 12px; }
+</style>
+<div id="mcp-activation-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:var(--bg); border-radius:10px; padding:24px; max-width:420px; box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 id="mcp-activation-title" style="margin:0 0 12px; font-size:15px; font-weight:700;"></h3>
+    <ol id="mcp-activation-steps" style="margin:0 0 18px; padding-left:20px; font-size:13px; line-height:1.7; color:var(--text-2);"></ol>
+    <div style="text-align:right;">
+      <button type="button" class="btn" onclick="document.getElementById('mcp-activation-modal').style.display='none';">Verstanden</button>
+    </div>
+  </div>
+</div>
+
+<div class="mcplog-page">
+  <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:8px;">
+    <h1 style="margin-bottom:0;">MCP</h1>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p>MCP (Model Context Protocol) ist der offene Standard, über den KI-Anwendungen wie Claude Desktop direkt auf Archivio zugreifen. Hier wird die Schnittstelle eingerichtet, gesteuert, welche Inhalte nie übermittelt werden dürfen, und protokolliert, was tatsächlich übermittelt wurde.</p>
+    </div>
+  </div>
+
+  <div class="mcplog-section">
+    <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">
+      <span>MCP-Schnittstelle</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Läuft nur lokal auf diesem Rechner über den Archivio Helper (bzw. den Archivio Server, falls dieser hier direkt läuft) — es wird nichts an einen Cloud-Dienst übertragen.</p>
+        <p>Unterstützt werden bewusst nur Anwendungen, die MCP über eine lokale Konfigurationsdatei einbinden (aktuell Claude Desktop). Cloud-Connectoren wie ChatGPT oder Perplexity verlangen stattdessen eine von aussen erreichbare Adresse und werden hier deshalb nicht angeboten — das würde bedeuten, den Server aus dem Büronetz herauszugeben.</p>
+      </div>
+    </h2>
+    <div class="mcplog-install-row">
+      <select id="mcp-client-select">
+        <option value="claude_desktop">Claude Desktop</option>
+      </select>
+      <button type="button" class="btn" onclick="installMcp()">MCP-Schnittstelle installieren</button>
+    </div>
+    <div id="mcp-install-status" class="mcplog-install-status">Status wird geprüft…</div>
+  </div>
+
+  <div class="mcplog-section">
+    <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">
+      <span>Sperrliste</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Ergänzt die automatische Norm-Erkennung um von Hand gesetzte Regeln: einzelne Dateien, Namens-Muster, ganze Ordner oder Projekte werden nie über MCP ausgegeben — lokal bleiben sie weiterhin durchsuchbar.</p>
+        <p>Ein Namens-Muster (z. B. <code>*Lohn*</code>) prüft sowohl den Dateinamen als auch den vollen Pfad.</p>
+        <p><strong>Wildcard-Syntax</strong> für Namens-Muster und Ordner: <code>*xx*</code> — enthält „xx" irgendwo; <code>xx*</code> — beginnt mit „xx" (trifft NICHT „vorxx"); nur <code>xx</code> ohne Stern — ausschliesslich der exakt gleichnamige Ordner/Datei.</p>
+      </div>
+    </h2>
+    {% include "_settings_block_rules.html" %}
+  </div>
+
+  <div class="mcplog-section">
+    <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">
+      <span>Protokoll</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Jede Suche, jeder semantische Treffer und jedes vollständig geladene Dokument, inklusive der Fälle, in denen etwas blockiert wurde (Norm oder Sperrliste).</p>
+        <p>Dieses Protokoll ist selbst nicht über MCP abfragbar.</p>
+      </div>
+    </h2>
+
+  <div class="mcplog-stats">
+    <div><div class="mcplog-stat-value">{{ total_30d }}</div><div class="mcplog-stat-label">Zugriffe (30 Tage)</div></div>
+    <div><div class="mcplog-stat-value">{{ files_30d }}</div><div class="mcplog-stat-label">Übermittelte Dateien (30 Tage)</div></div>
+  </div>
+
+  <form class="mcplog-filters" method="get" action="/mcp-log">
+    <select name="project_id">
+      <option value="">Alle Projekte</option>
+      {% for p in projects %}
+      <option value="{{ p.id }}" {% if filter_project_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+      {% endfor %}
+    </select>
+    <select name="status">
+      <option value="">Alle Status</option>
+      <option value="ok" {% if filter_status == 'ok' %}selected{% endif %}>Übermittelt</option>
+      <option value="blocked" {% if filter_status == 'blocked' %}selected{% endif %}>Blockiert</option>
+      <option value="error" {% if filter_status == 'error' %}selected{% endif %}>Fehler</option>
+    </select>
+    <input type="date" name="date_from" value="{{ filter_from }}" title="Von">
+    <input type="date" name="date_to" value="{{ filter_to }}" title="Bis">
+    <button class="btn btn-sm" type="submit">Filtern</button>
+    <a class="btn btn-sm" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}">⬇ CSV export</a>
+  </form>
+
+  {% macro render_entry(e) %}
+  <details class="mcplog-entry">
+    <summary>
+      <span class="mcplog-ts">{{ e.ts }}</span>
+      <span class="mcplog-tool">{{ e.tool }}</span>
+      <span class="mcplog-query">{{ e.query or '—' }}{% if e.project_name %} · {{ e.project_name }}{% endif %}</span>
+      <span class="mcplog-badge {{ e.status }}">
+        {% if e.status == 'ok' %}übermittelt{% elif e.status == 'blocked' %}blockiert{% else %}fehler{% endif %}
+      </span>
+    </summary>
+    <div class="mcplog-body">
+      {% if e.query %}
+      <h4>Anfrage</h4>
+      <div class="mcplog-file-row" style="color:var(--text);">{{ e.query }}</div>
+      {% endif %}
+      {% if e.files %}
+      <h4>Übermittelte Dateien ({{ e.files | length }})</h4>
+      {% for f in e.files %}
+      <div class="mcplog-file-row" title="{{ f.path or '' }}">{{ f.filename or f.path }}</div>
+      {% endfor %}
+      {% endif %}
+      {% if e.blocked %}
+      <h4>Blockiert</h4>
+      {% for b in e.blocked %}
+      <div class="mcplog-block-row" title="{{ b.path or '' }}">{% if b.filename or b.path %}{{ b.filename or b.path }} — {% endif %}{{ b.reason }}</div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% endmacro %}
+
+  {% if not groups %}
+  <p class="mcplog-empty">Keine Zugriffe im gewählten Zeitraum/Filter.</p>
+  {% endif %}
+
+  <div class="mcplog-list-scroll">
+    {% for g in groups %}
+      {% if g.count == 1 %}
+        {{ render_entry(g.entries[0]) }}
+      {% else %}
+      <details class="mcplog-entry mcplog-group">
+        <summary>
+          <span class="mcplog-ts">{{ g.ts_start }} – {{ g.ts_end.split('T')[1] if g.ts_end.split('T')[0] == g.ts_start.split('T')[0] else g.ts_end }}</span>
+          <span class="mcplog-tool">Session</span>
+          <span class="mcplog-query">
+            {{ g.count }} Zugriffe{% if g.projects %} · {{ g.projects | join(', ') }}{% endif %}
+          </span>
+          <span class="mcplog-badge {{ g.status }}">
+            {% if g.status == 'ok' %}übermittelt{% elif g.status == 'blocked' %}blockiert{% else %}fehler{% endif %}
+          </span>
+        </summary>
+        <div class="mcplog-body" style="padding:8px 10px;">
+          <p style="font-size:11px; color:var(--text-3); margin:0 0 8px;">
+            {{ g.count }} Aufrufe · {{ g.files_count }} übermittelte Datei(en){% if g.blocked_count %} · {{ g.blocked_count }} blockiert{% endif %} — vermutlich eine einzelne Unterhaltung, Claude hat mehrfach nachgefragt.
+          </p>
+          {% for e in g.entries %}
+          {{ render_entry(e) }}
+          {% endfor %}
+        </div>
+      </details>
+      {% endif %}
+    {% endfor %}
+  </div>
+  </div>
+</div>
+
+<script>
+function refreshMcpStatus() {
+  var el = document.getElementById('mcp-install-status');
+  fetch(HELPER + '/mcp-status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var installed = d.clients && d.clients.claude_desktop;
+      el.textContent = installed
+        ? '✓ Für Claude Desktop eingerichtet.'
+        : 'Noch nicht eingerichtet.';
+      el.className = 'mcplog-install-status ' + (installed ? 'ok' : '');
+    })
+    .catch(function() {
+      el.textContent = 'Archivio Helper nicht erreichbar — läuft er in der Menüleiste?';
+      el.className = 'mcplog-install-status err';
+    });
+}
+
+// Pro Client die Schritte, die NACH der Registrierung noch im jeweiligen Programm
+// selbst nötig sind -- das Eintragen in die Config-Datei allein reicht bei den
+// meisten Apps nicht, sie muss den neuen Connector zusätzlich noch freischalten.
+var MCP_ACTIVATION_STEPS = {
+  claude_desktop: {
+    title: 'Claude Desktop — letzter Schritt',
+    steps: [
+      'In Claude Desktop: Einstellungen → Connectors (Konnektoren) öffnen.',
+      '„Archivio" dort freischalten und Zugriff erlauben.',
+      'Im Chat unten links auf das Plus-Symbol klicken → Connectors → „Archivio" aktivieren.',
+    ],
+  },
+};
+
+function showMcpActivationSteps(client) {
+  var info = MCP_ACTIVATION_STEPS[client] || {
+    title: 'Letzter Schritt',
+    steps: ['Bitte in der Dokumentation dieser Anwendung nachsehen, wie „Archivio" dort als Connector/MCP-Server aktiviert wird.'],
+  };
+  document.getElementById('mcp-activation-title').textContent = info.title;
+  var ol = document.getElementById('mcp-activation-steps');
+  ol.innerHTML = '';
+  info.steps.forEach(function(s) {
+    var li = document.createElement('li');
+    li.textContent = s;
+    ol.appendChild(li);
+  });
+  document.getElementById('mcp-activation-modal').style.display = 'flex';
+}
+
+function installMcp() {
+  var client = document.getElementById('mcp-client-select').value;
+  var el = document.getElementById('mcp-install-status');
+  el.textContent = 'Wird eingerichtet…';
+  el.className = 'mcplog-install-status';
+  fetch(HELPER + '/install-mcp', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({client: client}),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      el.textContent = d.message || (d.ok ? 'Fertig.' : 'Fehler.');
+      el.className = 'mcplog-install-status ' + (d.ok ? 'ok' : 'err');
+      if (d.ok) {
+        // Helper einmal frisch neu starten -- rein defensiv, damit er sicher mit
+        // sauberem Zustand läuft. Fehler hier bewusst ignoriert: der Neustart ist
+        // ein Komfort-Schritt, kein Teil der eigentlichen Installation.
+        fetch(HELPER + '/restart-app', { method: 'POST' }).catch(function() {});
+        showMcpActivationSteps(client);
+      }
+    })
+    .catch(function() {
+      el.textContent = 'Archivio Helper nicht erreichbar — läuft er in der Menüleiste?';
+      el.className = 'mcplog-install-status err';
+    });
+}
+
+window.addEventListener('load', refreshMcpStatus);
+</script>
+{% endblock %}

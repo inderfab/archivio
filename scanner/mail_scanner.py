@@ -105,7 +105,7 @@ def match_mailbox_to_project(conn, mailbox_name: str) -> int | None:
     """Postfachname enthält Projektnummer → project_id oder None.
 
     Sucht die Nummer im Ordnernamen des Pfades (letztes Segment) sowie im
-    Projektnamen — damit "211_Derendingen" zu "211 Emmenhof Derendingen" passt.
+    Projektnamen — damit "123_Ortsname" zu "123 Musterprojekt Ortsname" passt.
     """
     m = re.search(r'\d{3,}', mailbox_name)
     if not m:
@@ -118,8 +118,8 @@ def match_mailbox_to_project(conn, mailbox_name: str) -> int | None:
     ).fetchall()
     if not rows:
         return None
-    # Bevorzuge Treffer, wo die Nummer am Wortanfang steht (z.B. "211 Emmenhof"
-    # schlägt einen zufälligen Treffer "12211_Archiv")
+    # Bevorzuge Treffer, wo die Nummer am Wortanfang steht (z.B. "123 Musterprojekt"
+    # schlägt einen zufälligen Treffer "45123_Archiv")
     for row in rows:
         folder = row["path"].rstrip("/").rsplit("/", 1)[-1]
         proj_number = re.match(r'(\d{3,})', row["name"] or "")

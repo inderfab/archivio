@@ -54,7 +54,43 @@ def _urlencode(v: str) -> str:
     return quote(str(v), safe="")
 
 
+def _fmt_duration(seconds) -> str:
+    """Sekunden -> "45s" / "21min" / "1h 5min" -- Sekundengenauigkeit interessiert
+    bei Scans, die Minuten oder Stunden dauern, niemanden (siehe Systemstatus)."""
+    if seconds is None:
+        return "—"
+    try:
+        seconds = int(round(float(seconds)))
+    except (TypeError, ValueError):
+        return "—"
+    if seconds < 60:
+        return f"{seconds}s"
+    minutes, _ = divmod(seconds, 60)
+    if minutes < 60:
+        return f"{minutes}min"
+    hours, minutes = divmod(minutes, 60)
+    return f"{hours}h {minutes}min" if minutes else f"{hours}h"
+
+
+def _fmt_ms(ms) -> str:
+    """Millisekunden -> "180 ms" / "1.2s" -- dieselbe Faustregel wie fmt_duration:
+    bei Suchgeschwindigkeit interessiert nicht die exakte Millisekunde, wohl aber
+    ob eine Suche spürbar unter oder über einer Sekunde lag (siehe Suche-Protokoll
+    im Systemstatus)."""
+    if ms is None:
+        return "—"
+    try:
+        ms = int(round(float(ms)))
+    except (TypeError, ValueError):
+        return "—"
+    if ms < 1000:
+        return f"{ms} ms"
+    return f"{ms / 1000:.1f}s"
+
+
 templates.env.filters["fmt_date"]     = _fmt_date
 templates.env.filters["fmt_datetime"] = _fmt_datetime
 templates.env.filters["fmt_size"]     = _fmt_size
+templates.env.filters["fmt_duration"] = _fmt_duration
+templates.env.filters["fmt_ms"]       = _fmt_ms
 templates.env.filters["urlencode"]    = _urlencode

@@ -463,6 +463,8 @@ class ArchivioServer(rumps.App):
             self._link_action_title(), callback=self.toggle_link_action)
         self._update_item = rumps.MenuItem(
             "Update verfügbar", callback=self._install_pending_update)
+        self._mcp_item = rumps.MenuItem(
+            self._mcp_item_title(), callback=self.open_mcp_page)
         self._pending_update_info: updater.UpdateInfo | None = None
         self._zc = self._zc_info = None
 
@@ -476,6 +478,7 @@ class ArchivioServer(rumps.App):
             rumps.separator,
             self._autostart_item,
             self._link_action_item,
+            self._mcp_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen",    callback=self.open_browser),
             rumps.MenuItem("Auf Updates prüfen", callback=self.check_update),
@@ -503,7 +506,6 @@ class ArchivioServer(rumps.App):
             link_action_provider=self._link_action,
         )
         bridge.register_url_handler(log)
-        bridge.ensure_mcp_registered("Archivio Server", log)
         bridge.ensure_quick_action_installed(log)
         threading.Thread(target=self._boot, daemon=True).start()
 
@@ -556,9 +558,20 @@ class ArchivioServer(rumps.App):
         self._nas_item.title = (
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
         self._ki_item.title = _ollama_status_label()
+        self._mcp_item.title = self._mcp_item_title()
         # Ollama neu starten falls es unerwartet gestoppt ist
         if _ollama_available() and not _is_ollama_running():
             threading.Thread(target=_start_ollama, daemon=True).start()
+
+    def _mcp_item_title(self) -> str:
+        return ("✓ MCP-Schnittstelle eingerichtet" if bridge.is_mcp_installed()
+                else "MCP-Schnittstelle installieren…")
+
+    def open_mcp_page(self, _):
+        """Öffnet die MCP-Seite im Browser -- die eigentliche Installation läuft von
+        dort aus über /install-mcp auf diesem lokalen Prozess, nicht mehr automatisch
+        beim Start (siehe shared/menubar_bridge.py::install_mcp_client)."""
+        subprocess.run(["open", "http://127.0.0.1:8000/mcp-log"])
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])
@@ -571,9 +584,9 @@ class ArchivioServer(rumps.App):
 
     def _link_action(self) -> str:
         try:
-            return json.loads(_UPDATE_STATE.read_text()).get("link_action", "open")
+            return json.loads(_UPDATE_STATE.read_text()).get("link_action", "reveal")
         except Exception:
-            return "open"
+            return "reveal"
 
     def _link_action_title(self) -> str:
         return ("Archivio-Links: Direkt öffnen" if self._link_action() == "open"
@@ -594,7 +607,6 @@ class ArchivioServer(rumps.App):
         except Exception as e:
             log.warning("Link-Verhalten konnte nicht gespeichert werden: %s", e)
         sender.title = self._link_action_title()
-        sender.state = new_state
 
     def _ki_action(self, _):
         if not _ollama_available():

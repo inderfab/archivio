@@ -1,0 +1,114 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivio und eure Daten – Merkblatt</title>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff; color: #111; line-height: 1.7;
+    }
+    header {
+      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
+    }
+    .back-link { font-size: 13px; color: #999; text-decoration: none; }
+    .back-link:hover { color: #111; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
+    h2 { font-size: 18px; font-weight: 700; margin: 34px 0 10px; letter-spacing: -0.2px; }
+    p { margin-bottom: 14px; color: #333; }
+    p:last-child { margin-bottom: 0; }
+    a { color: #111; }
+
+    .callout {
+      background: #f7f7f7; border-left: 3px solid #111; padding: 14px 18px;
+      border-radius: 0 6px 6px 0; margin: 20px 0; font-size: 14px; color: #444;
+    }
+    .callout strong { color: #111; }
+
+    footer {
+      border-top: 1px solid #e8e8e8; padding: 32px 48px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px; color: #999; flex-wrap: wrap; gap: 8px;
+    }
+    footer a { color: #999; text-decoration: none; }
+    footer a:hover { color: #111; }
+
+    @media print {
+      header, footer { display: none; }
+      .page { padding: 0; max-width: none; }
+      a { color: #111; text-decoration: none; }
+    }
+    @media (max-width: 600px) {
+      header { padding: 20px 24px; }
+      footer { padding: 24px; flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <div class="page">
+    <h1>Archivio und eure Daten</h1>
+
+    <p>Archivio ist gebaut worden, um in einem Architekturbüro zu laufen, in dem täglich mit Bauherren-, Behörden- und Personendaten gearbeitet wird. Deshalb hier transparent, was das Programm tut und was nicht.</p>
+
+    <h2>Was Archivio liest</h2>
+    <p>Archivio scannt die Ordner, die ihr freigebt, und die verknüpften Mailkonten. Der Zugriff erfolgt ausschliesslich lesend. Es werden keine Dateien verändert, verschoben, umbenannt oder gelöscht. Aus dem Gelesenen wird eine lokale Suchdatenbank aufgebaut.</p>
+    <p>Das schliesst auch verknüpfte E-Mail-Konten ein — nicht nur Dateien auf dem NAS. Wenn ihr ein Postfach mit Archivio verbindet, werden dessen Mails ebenfalls durchsuchbar. Wir empfehlen, das im Büro vorher anzukündigen, bevor ein Postfach eingebunden wird.</p>
+
+    <h2>Was ihr steuert</h2>
+    <p>Ihr bestimmt, welche Ordner Archivio sehen darf und welche gesperrt sind. Die Freigabe erfolgt bewusst pro Ordner — was ihr nicht freigebt, wird nicht indexiert. Personaldossiers, Honorarvereinbarungen, Verträge oder laufende Rechtsfälle könnt ihr vollständig ausschliessen.</p>
+
+    <h2>Was im Haus bleibt</h2>
+    <p>Volltextsuche, KI-Suche, Fotogalerie, Direktlinks und die gesamte Datenbank laufen zu 100 Prozent lokal auf eurem Rechner im Büro. Die Archivio-Oberfläche ist nur im internen Netzwerk erreichbar. Es gibt keine Cloud, kein Benutzerkonto, keine Telemetrie. In diesem Betriebsmodus verlässt kein Dokument und keine Information euer Büro.</p>
+
+    <h2>Was das Büro verlässt — nur bei aktivierter MCP KI-Schnittstelle</h2>
+    <p>Die Anbindung an KI-Dienste ist optional und standardmässig ausgeschaltet, und muss zusätzlich pro Projekt einzeln freigegeben werden — ein neu hinzugefügtes Projekt ist nie automatisch für einen KI-Dienst sichtbar. Wenn ihr sie aktiviert und Projekte freigebt, gilt Folgendes:</p>
+    <p>Die Suche selbst läuft weiterhin lokal. Euer Archiv und euer Index bleiben auf eurem Rechner. Was den Server verlässt, sind die Ausschnitte derjenigen Dokumente, die der KI-Dienst für eine konkrete Frage tatsächlich abruft — und auch nur aus den Projekten, die ihr dafür freigegeben habt. Bei komplexeren Fragen sucht der KI-Dienst mehrfach und ruft entsprechend mehr Material ab.</p>
+    <p>Nicht übermittelt werden Dokumente, die Archivio als urheberrechtlich geschützte Normen erkennt (SIA und weitere), sowie alles, was ihr auf die Sperrliste gesetzt oder gar nicht erst freigegeben habt. Jede Übermittlung — und jede Blockierung — wird im Reiter „MCP" der Archivio-Weboberfläche protokolliert und ist dort jederzeit nachvollziehbar.</p>
+    <p>Die Lizenzbedingungen der jeweils verwendeten Normen (SIA, VSS und weitere) gelten unverändert weiter — die lokale Durchsuchbarkeit in Archivio ändert nichts an eurer eigenen Lizenzpflicht gegenüber dem Herausgeber.</p>
+
+    <h2>Empfehlung für die Claude-Anbindung</h2>
+    <p>Nutzt dafür ein Team- oder Enterprise-Konto beziehungsweise die API, nicht ein privates Pro-Abo. Für diese kommerziellen Angebote gilt gemäss Anthropic, dass Ein- und Ausgaben standardmässig nicht für das Modelltraining verwendet werden. Bei den Consumer-Plänen hängt das von einer Einstellung im Konto ab, und die Aufbewahrungsfristen unterscheiden sich.</p>
+    <p>Die massgeblichen Angaben findet ihr direkt bei Anthropic:<br>
+    <a href="https://privacy.claude.com" target="_blank" rel="noopener">privacy.claude.com</a> sowie das <a href="https://trust.anthropic.com" target="_blank" rel="noopener">Anthropic Trust Center</a>.</p>
+
+    <h2>Eure Verantwortung</h2>
+    <p>Archivio gibt euch die Kontrolle darüber, was freigegeben wird. Die Entscheidung, ob und welche Daten ihr an einen externen Dienst weitergebt, liegt bei euch — insbesondere im Hinblick auf das revidierte Datenschutzgesetz, eure Verträge mit Bauherrschaften und allfällige Geheimhaltungsvereinbarungen. Wir empfehlen, die Claude-Anbindung im Büro einmal bewusst zu besprechen und festzuhalten, welche Projekte freigegeben sind.</p>
+
+    <div class="callout">
+      <strong>Fragen:</strong> <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
+    </div>
+  </div>
+
+  <footer>
+    <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
+    <div style="display:flex;gap:24px;align-items:center;">
+      <a href="docs.html">Anleitung</a>
+      <a href="haftungsausschluss.html">Haftungsausschluss</a>
+      <span>© 2026 Archivio</span>
+    </div>
+  </footer>
+
+</body>
+</html>

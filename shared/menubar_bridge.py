@@ -14,10 +14,12 @@ from __future__ import annotations
 import html as _html
 import http.server
 import json
+import os
 import shutil
 import subprocess
 import sys
 import threading
+import time
 from pathlib import Path
 from urllib.parse import parse_qs, quote, unquote, urlparse
 
@@ -152,6 +154,35 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 self._handle_choose_folder()
             elif parsed.path == "/choose-file":
                 self._handle_choose_file()
+            elif parsed.path == "/install-mcp":
+                length = int(self.headers.get("Content-Length", 0) or 0)
+                try:
+                    raw = self.rfile.read(length) if length else b"{}"
+                    body = json.loads(raw or b"{}")
+                except Exception:
+                    body = {}
+                client = body.get("client", "claude_desktop")
+                ok, message = install_mcp_client(client, log)
+                self._json_response(200, {"ok": ok, "message": message})
+            elif parsed.path == "/restart-app":
+                # Nach der MCP-Installation gewuenscht (frischer Start dieses Prozesses).
+                # Antwort zuerst senden, dann in einem eigenen, vom Prozess abgeloesten
+                # Kindprozess (start_new_session) kurz warten und neu oeffnen -- erst
+                # NACHDEM dieser Prozess (os._exit) wirklich beendet ist, sonst kurzzeitig
+                # zwei Instanzen gleichzeitig (Port-Konflikt auf 44380/8000, siehe
+                # "zwei Menueleisten-Icons"-Problem beim Paket-Update).
+                self._json_response(200, {"ok": True})
+                def _do_restart():
+                    time.sleep(0.3)
+                    try:
+                        subprocess.Popen(
+                            ["/bin/sh", "-c", f'sleep 1; open -a "{app_name}"'],
+                            start_new_session=True,
+                        )
+                    except Exception as e:
+                        log.warning("Neustart fehlgeschlagen: %s", e)
+                    os._exit(0)
+                threading.Thread(target=_do_restart, daemon=True).start()
             else:
                 self._cors_headers(404)
 
@@ -244,7 +275,7 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
             if parsed.path == "/link" and path:
                 ua = self.headers.get("User-Agent", "")
                 if _looks_like_real_browser(ua):
-                    action = link_action_provider() if link_action_provider else "open"
+                    action = link_action_provider() if link_action_provider else "reveal"
                     self._perform(action, path)
                 else:
                     # Vermutlich ein automatisierter Link-Vorschau-Abruf (Mail/Messages
@@ -271,6 +302,9 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                     self._cors_headers(200, body, "application/json")
                 else:
                     self._cors_headers(404)
+            elif parsed.path == "/mcp-status":
+                status = {client: is_mcp_installed(client) for client in MCP_CLIENTS}
+                self._json_response(200, {"clients": status})
             else:
                 self._cors_headers(404)
 
@@ -494,45 +528,68 @@ def ensure_quick_action_installed(log) -> None:
 
 _CLAUDE_APP_PATH = Path("/Applications/Claude.app")
 
+# Ein Eintrag pro unterstütztem MCP-Client. Bewusst nur lokale, dateibasierte
+# Clients (schreiben eine Config-Datei, starten Archivio als lokalen Subprozess) --
+# Cloud-Connectoren wie ChatGPT/Perplexity/Le Chat brauchen stattdessen eine von
+# aussen erreichbare URL, was dem "bleibt komplett im Haus"-Prinzip von Archivio
+# widerspricht und deshalb bewusst nicht unterstützt wird. Weitere lokale Clients
+# (VS Code, Claude Code, Gemini CLI, Codex CLI) lassen sich hier später ergänzen,
+# ohne den Rest der Installations-Logik anzufassen.
+MCP_CLIENTS = {
+    "claude_desktop": {"label": "Claude Desktop", "app_path": _CLAUDE_APP_PATH,
+                        "config_path": CLAUDE_CONFIG_PATH},
+}
 
-def ensure_mcp_registered(app_name: str, log) -> None:
-    if not CLAUDE_CONFIG_PATH.parent.exists():
-        # Ordner existiert erst, sobald Claude Desktop mindestens einmal geoeffnet
-        # wurde -- ohne diesen Fallback bleibt die Registrierung fuer jeden, der
-        # Claude Desktop installiert aber noch nie gestartet hat, dauerhaft und
-        # unbemerkt aus (kein Fehler, keine Meldung). Ist die App gar nicht
-        # installiert, gibt es nichts zu tun.
-        if not _CLAUDE_APP_PATH.exists():
-            return
-        try:
-            CLAUDE_CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
-        except Exception as e:
-            log.warning("Claude-Konfigurationsordner konnte nicht angelegt werden: %s", e)
-            return
+
+def _mcp_target_config() -> dict:
+    return {
+        "command": sys.executable,
+        "args": [str(Path(__file__).parent / "archivio_mcp.py")],
+    }
+
+
+def is_mcp_installed(client: str = "claude_desktop") -> bool:
+    """Prüft, ob Archivio für den gewählten Client bereits als MCP-Server
+    eingetragen ist -- rein lesend, keine Seiteneffekte."""
+    info = MCP_CLIENTS.get(client)
+    if not info:
+        return False
     try:
+        cfg = json.loads(info["config_path"].read_text())
+        return cfg.get("mcpServers", {}).get("archivio") == _mcp_target_config()
+    except Exception:
+        return False
+
+
+def install_mcp_client(client: str, log) -> tuple[bool, str]:
+    """Trägt Archivio als MCP-Server für den gewählten Client ein -- NUR auf
+    ausdrücklichen Klick (Button "MCP-Schnittstelle installieren" auf der
+    Archivio-Webseite), nie mehr automatisch beim Start von Server/Helper. Eine
+    stillschweigende Änderung an einer fremden App beim blossen Öffnen des
+    Helpers war genau das Verhalten, das hier bewusst abgeschafft wurde."""
+    info = MCP_CLIENTS.get(client)
+    if not info:
+        return False, f"Unbekannter Client: {client}"
+    if not info["app_path"].exists():
+        return False, f"{info['label']} ist auf diesem Rechner nicht installiert."
+    config_path = info["config_path"]
+    try:
+        config_path.parent.mkdir(parents=True, exist_ok=True)
         try:
-            cfg = json.loads(CLAUDE_CONFIG_PATH.read_text())
+            cfg = json.loads(config_path.read_text())
         except Exception:
             cfg = {}
         servers = cfg.setdefault("mcpServers", {})
-        target = {
-            "command": sys.executable,
-            "args": [str(Path(__file__).parent / "archivio_mcp.py")],
-        }
+        target = _mcp_target_config()
         if servers.get("archivio") == target:
-            return
+            return True, f"{info['label']} war bereits eingerichtet."
         servers["archivio"] = target
-        CLAUDE_CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
-        log.info("Archivio als MCP-Server in Claude Desktop registriert: %s", target)
-        import rumps
-
-        rumps.notification(
-            app_name,
-            "Claude Desktop: Archivio verfügbar",
-            "Bitte Claude Desktop neu starten, damit das Archivio-Tool aktiv wird.",
-        )
+        config_path.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        log.info("Archivio als MCP-Server registriert (%s): %s", client, target)
+        return True, f"{info['label']} eingerichtet — bitte {info['label']} neu starten."
     except Exception as e:
-        log.warning("MCP-Registrierung in Claude Desktop fehlgeschlagen: %s", e)
+        log.warning("MCP-Installation fehlgeschlagen (%s): %s", client, e)
+        return False, f"Installation fehlgeschlagen: {e}"
 
 
 # ── Netzwerk-Discovery (mDNS/Bonjour via zeroconf) ────────────────────────────

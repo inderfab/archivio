@@ -111,6 +111,30 @@ def test_excluded_folders_not_indexed(tmp_db, sample_files):
             f"Datei aus Ordner '{excluded}' wurde fälschlicherweise indexiert"
 
 
+def test_excluded_folders_wildcard_pattern(tmp_db, tmp_path):
+    """scanner.excluded_folders unterstützt seit Kurzem auch Wildcard-Muster
+    (z.B. '*privat*') zusätzlich zum exakten Namen -- gleiche fnmatch-Syntax wie
+    die Sperrliste (scanner/block_list.py)."""
+    from config import settings
+
+    root = tmp_path / "scan"
+    root.mkdir()
+    (root / "Privatnotizen").mkdir()
+    (root / "Privatnotizen" / "geheim.txt").write_text("geheim", encoding="utf-8")
+    (root / "Projektordner").mkdir()
+    (root / "Projektordner" / "plan.txt").write_text("Grundriss", encoding="utf-8")
+
+    settings._settings.setdefault("scanner", {})["excluded_folders"] = ["*privat*"]
+
+    project_id = queries.insert_project(tmp_db, "Test", str(root))
+    tmp_db.commit()
+    scan_project(project_id, root)
+
+    names = {r["filename"] for r in tmp_db.execute("SELECT filename FROM documents").fetchall()}
+    assert "geheim.txt" not in names
+    assert "plan.txt" in names
+
+
 def test_duplicate_file_same_hash(tmp_db, sample_files):
     import shutil
     copy = sample_files / "subdir"

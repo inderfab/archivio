@@ -8,3 +8,5 @@ __pycache__/
 .DS_Store
 config.yaml
 dist/
+
+internal/

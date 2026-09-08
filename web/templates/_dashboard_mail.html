@@ -1,7 +1,17 @@
 <div id="mail-section"
      {% if scan_status == 'running' %}hx-get="/dashboard/mail/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 
-  <div class="section-title" style="padding-top:28px; margin-bottom:16px;">Mail-Integration</div>
+  <div class="section-title" style="padding-top:28px; margin-bottom:16px; display:flex; align-items:center; justify-content:space-between; position:relative;">
+    <span>Mail-Integration</span>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p><strong>Postfach aktivieren/deaktivieren:</strong> Schalter links neben dem Postfach.</p>
+      <p><strong>Projekt-Zuordnung, automatisch:</strong> Enthält der Postfach-/Ordnername eine Projektnummer (z. B. „123_Projektname"), wird das passende Projekt automatisch zugeordnet, sobald „Postfächer aktualisieren" läuft — ohne Bestätigung nötig.</p>
+      <p><strong>Vorschlag statt Automatik:</strong> Findet sich keine Nummer, aber Namen überschneiden sich mit einem Projekt, erscheint stattdessen nur ein Vorschlag — der wird nie automatisch übernommen, sondern muss per „Übernehmen" bestätigt werden.</p>
+      <p><strong>Manuell:</strong> Über das Dropdown jederzeit änderbar, auch nachträglich. „+ Als eigenes Projekt speichern" macht aus einem Postfach ohne passenden Ordner ein eigenständiges Projekt.</p>
+      <p><strong>MCP-Freigabe (☁):</strong> Ist das Postfach einem Projekt zugeordnet, übernimmt es dessen Freigabe-Status (hier nicht separat einstellbar). Nur bei aktiven, noch nicht zugeordneten Postfächern gibt es einen eigenen Schalter.</p>
+    </div>
+  </div>
 
   {# Aktions-Leiste #}
   <div style="display:flex; gap:8px; margin-bottom:16px; flex-wrap:wrap; align-items:center;">
@@ -51,6 +61,20 @@
                   title="{{ 'Mail-Scan deaktivieren' if c.active else 'Mail-Scan aktivieren' }}">
           </button>
         </form>
+
+        {% if c.active and c.project_id %}
+        <span class="mcp-toggle {{ 'on' if c.project_mcp_enabled else '' }}"
+              title="{{ 'Für KI-Anwendungen freigegeben' if c.project_mcp_enabled else 'Nicht für KI-Anwendungen freigegeben' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar.">☁</span>
+        {% elif c.active %}
+        <form hx-post="/dashboard/mail/mcp-toggle"
+              hx-target="#mail-section" hx-swap="outerHTML"
+              style="display:contents;">
+          <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+          <button type="submit"
+                  class="mcp-toggle {{ 'on' if c.mcp_enabled else '' }}"
+                  title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if c.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }} (noch keinem Projekt zugeordnet)">☁</button>
+        </form>
+        {% endif %}
 
         {% if not c.active %}
         {# Kompakt: nur Name (nicht aktiv) #}

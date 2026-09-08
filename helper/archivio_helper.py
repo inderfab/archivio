@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import subprocess
 import sys
 import threading
@@ -28,8 +29,22 @@ log.info("Archivio Helper starting (Python %s)", sys.version)
 
 
 # ── Config ────────────────────────────────────────────────────────────────────
-
-CONFIG_PATH  = Path(__file__).parent / "config.json"
+# WICHTIG: nutzer-schreibbares Verzeichnis, NICHT Path(__file__).parent -- das
+# App-Bundle unter /Applications gehört root und ist für den laufenden (nicht-root)
+# Prozess schreibgeschützt. Ein CONFIG_PATH im Bundle sähe lesend unauffällig aus
+# (der zuletzt bekannte/gebündelte Default wird brav zurückgegeben), aber JEDER
+# Schreibversuch (server_url nach "Server suchen"/"Server ändern") schlägt still
+# fehl (siehe _save_config()) -- der Helper zeigt im Menü dann zwar die frisch
+# gefundene Adresse (self._server_url, nur im Prozessspeicher), aber sowohl ein
+# Neustart als auch jeder externe Leser von config.json (z.B. archivio_mcp.py über
+# /config) sehen weiterhin den alten, nie tatsächlich gespeicherten Wert. Genau das
+# hat vor dieser Änderung dazu geführt, dass MCP nach einem Neustart des Helpers
+# wieder auf "localhost:8000" zurückfiel, obwohl das Menü die richtige Adresse
+# zeigte. STATE_PATH (unten) macht es fürs Autostart-Flag schon richtig -- gleiches
+# Verzeichnis, aus demselben Grund.
+_CONFIG_DIR  = Path.home() / ".archivio"
+CONFIG_PATH  = _CONFIG_DIR / "helper_config.json"
+_BUNDLED_CONFIG_PATH = Path(__file__).parent / "config.json"  # nur als Erstbefüllung
 VERSION_PATH = Path(__file__).parent / "VERSION"
 
 
@@ -37,12 +52,19 @@ def _load_config() -> dict:
     try:
         return json.loads(CONFIG_PATH.read_text())
     except Exception:
+        pass
+    # Erstmaliger Start (oder Umstieg von einer Version, die noch ins Bundle
+    # schrieb): einmalig aus dem gebündelten Default lesen, falls vorhanden.
+    try:
+        return json.loads(_BUNDLED_CONFIG_PATH.read_text())
+    except Exception:
         return {"server_url": "http://localhost:8000", "version": "1.0.0",
                 "github_repo": "inderfab/archivio"}
 
 
 def _save_config(cfg: dict):
     try:
+        _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
         CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
     except Exception as e:
         log.error("Config save failed: %s", e)
@@ -152,6 +174,8 @@ class ArchivioHelper(rumps.App):
             "Autostart beim Login", callback=self.toggle_autostart)
         self._link_action_item = rumps.MenuItem(
             self._link_action_title(), callback=self.toggle_link_action)
+        self._mcp_item = rumps.MenuItem(
+            self._mcp_item_title(), callback=self.open_mcp_page)
 
         self.menu = [
             self._title_item,
@@ -164,6 +188,7 @@ class ArchivioHelper(rumps.App):
             self._search_item,
             self._autostart_item,
             self._link_action_item,
+            self._mcp_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen", callback=self.open_browser),
             rumps.separator,
@@ -181,10 +206,9 @@ class ArchivioHelper(rumps.App):
         bridge.start_local_server(
             "Archivio Helper", log,
             config_provider=lambda: _load_config().get("server_url", ""),
-            link_action_provider=lambda: _load_config().get("link_action", "open"),
+            link_action_provider=lambda: _load_config().get("link_action", "reveal"),
         )
         bridge.register_url_handler(log)
-        bridge.ensure_mcp_registered("Archivio Helper", log)
         bridge.ensure_quick_action_installed(log)
         threading.Thread(target=self._status_loop, daemon=True).start()
         # Update-Check kurz nach dem Start (5s warten bis Server erreichbar)
@@ -276,31 +300,44 @@ class ArchivioHelper(rumps.App):
             self._update_item.title = "Auf Updates prüfen"
 
     def _update_action(self, _):
-        cfg = _load_config()
-        server = cfg.get("server_url", "http://localhost:8000").rstrip("/")
-        settings_url = f"{server}/dashboard/settings"
         if self._pending_update:
-            version, _ = self._pending_update
-            if rumps.alert(
-                title="Update verfügbar",
-                message=f"Version {version} verfügbar. Zur Download-Seite öffnen?",
-                ok="Zur Download-Seite", cancel="Abbrechen",
-            ):
-                subprocess.run(["open", settings_url])
+            version, download_url = self._pending_update
         else:
             result = _check_update()
             if result is None:
                 rumps.alert(f"Archivio Helper {_local_version()} ist aktuell.")
-            else:
-                version, _ = result
-                self._pending_update = (version, _)
-                self._update_item.title = f"🟡  Update: v{version} verfügbar"
-                if rumps.alert(
-                    title="Update verfügbar",
-                    message=f"Version {version} verfügbar. Zur Download-Seite öffnen?",
-                    ok="Zur Download-Seite", cancel="Abbrechen",
-                ):
-                    subprocess.run(["open", settings_url])
+                return
+            version, download_url = result
+            self._pending_update = (version, download_url)
+            self._update_item.title = f"🟡  Update: v{version} verfügbar"
+
+        if rumps.alert(
+            title="Update verfügbar",
+            message=f"Version {version} verfügbar. Jetzt herunterladen und installieren?",
+            ok="Herunterladen", cancel="Abbrechen",
+        ):
+            threading.Thread(
+                target=self._download_and_install_update, args=(download_url, version), daemon=True
+            ).start()
+
+    def _download_and_install_update(self, download_url: str, version: str):
+        """Lädt das Helper-.pkg direkt herunter -- OHNE Browser -- und öffnet es. Das
+        startet den macOS-Installer, der die laufende Helper-App automatisch beendet,
+        ersetzt und neu startet (siehe helper/build.sh), genau wie ein manueller
+        Doppelklick auf ein heruntergeladenes .pkg."""
+        try:
+            resp = requests.get(download_url, timeout=120)
+            resp.raise_for_status()
+            cd = resp.headers.get("content-disposition", "")
+            m = re.search(r'filename="?([^"]+)"?', cd)
+            fname = m.group(1) if m else f"archivio-helper-{version}.pkg"
+            dest = Path.home() / "Downloads" / fname
+            dest.write_bytes(resp.content)
+            subprocess.run(["open", str(dest)])
+        except Exception as e:
+            log.error("Update-Download fehlgeschlagen: %s", e)
+            rumps.notification("Archivio Helper", "Update fehlgeschlagen",
+                                f"Download nicht möglich: {e}")
 
     def _status_loop(self):
         import time
@@ -323,6 +360,17 @@ class ArchivioHelper(rumps.App):
             f"{'erreichbar' if ok else 'nicht erreichbar'}"
         )
         # Kein Titeltext — Icon genügt
+        self._mcp_item.title = self._mcp_item_title()
+
+    def _mcp_item_title(self) -> str:
+        return ("✓ MCP-Schnittstelle eingerichtet" if bridge.is_mcp_installed()
+                else "MCP-Schnittstelle installieren…")
+
+    def open_mcp_page(self, _):
+        """Öffnet die MCP-Seite im Browser -- die eigentliche Installation läuft von
+        dort aus über /install-mcp auf diesem Helper, nicht mehr automatisch beim
+        Start (siehe shared/menubar_bridge.py::install_mcp_client)."""
+        subprocess.run(["open", f"{self._server_url}/mcp-log"])
 
     def open_browser(self, _):
         subprocess.run(["open", self._server_url])
@@ -352,7 +400,7 @@ class ArchivioHelper(rumps.App):
         sender.state = new_state
 
     def _link_action_title(self) -> str:
-        action = _load_config().get("link_action", "open")
+        action = _load_config().get("link_action", "reveal")
         return ("Archivio-Links: Direkt öffnen" if action == "open"
                 else "Archivio-Links: Zum Pfad gehen")
 
@@ -361,7 +409,7 @@ class ArchivioHelper(rumps.App):
         Page unter /link, siehe shared/menubar_bridge.py _link_landing_page) zwischen
         Direkt-Oeffnen und Im-Finder-Zeigen."""
         cfg = _load_config()
-        current = cfg.get("link_action", "open")
+        current = cfg.get("link_action", "reveal")
         new_action = "reveal" if current == "open" else "open"
         cfg["link_action"] = new_action
         _save_config(cfg)

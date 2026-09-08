@@ -1,0 +1,20 @@
+{% macro norm_row(d) %}
+<div class="norm-list-row" id="norm-row-{{ d.id }}">
+  <span class="norm-list-type">{{ d.type }}</span>
+  <span class="norm-list-filename" title="{{ d.filename }}">{{ d.filename }}</span>
+  <span class="norm-list-validity">{{ d.valid_from or '—' }}</span>
+  <span class="norm-list-status norm-status-{{ d.check_status }}" title="{% if d.checked_at %}Zuletzt geprüft: {{ d.checked_at }}{% else %}Noch nie geprüft{% endif %}">{{ d.check_label }}</span>
+  <button type="button" class="norm-check-btn" title="Aktualität jetzt prüfen"
+          hx-post="/norms/check/{{ d.id }}" hx-target="#norm-row-{{ d.id }}" hx-swap="outerHTML"
+          hx-indicator="#norm-check-spin-{{ d.id }}">
+    <span id="norm-check-spin-{{ d.id }}">🔄</span>
+  </button>
+  <button type="button" class="norm-check-btn" title="Im Finder zeigen" data-path="{{ d.path }}"
+          onclick="helperReveal(this.dataset.path)">📁</button>
+  <button type="button" class="norm-check-btn norm-unmark-btn" title="Fälschlich als Norm erkannt -- aus der Liste entfernen"
+          hx-post="/norms/unmark/{{ d.id }}" hx-target="#norm-row-{{ d.id }}" hx-swap="outerHTML"
+          hx-confirm="„{{ d.filename }}“ wirklich dauerhaft als „keine Norm“ markieren?">✕</button>
+  <span class="norm-list-path" title="{{ d.path }}">{{ d.path }}</span>
+</div>
+{% endmacro %}
+{% if d is defined %}{{ norm_row(d) }}{% endif %}

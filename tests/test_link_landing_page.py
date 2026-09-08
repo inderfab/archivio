@@ -64,6 +64,8 @@ def test_looks_like_real_browser():
 
 
 def test_link_with_browser_user_agent_opens_file_immediately(monkeypatch, tmp_path):
+    """Ohne expliziten link_action_provider gilt der Default "reveal" (im Finder
+    anzeigen statt direkt öffnen) -- siehe shared/menubar_bridge.py."""
     target = tmp_path / "plan.pdf"
     target.write_text("dummy")
     srv, port, calls = _start_test_server(monkeypatch)
@@ -71,7 +73,7 @@ def test_link_with_browser_user_agent_opens_file_immediately(monkeypatch, tmp_pa
         r = requests.get(f"http://127.0.0.1:{port}/link", params={"path": str(target)},
                           headers={"User-Agent": _SAFARI_UA})
         assert r.status_code == 200
-        assert calls == [["open", str(target)]]
+        assert calls == [["open", "-R", str(target)]]
     finally:
         srv.shutdown()
 

@@ -7,6 +7,7 @@ Erlaubt:  open(..., 'rb'), open(..., 'r'), Path.stat(), os.walk(), Path.is_file(
 from __future__ import annotations
 
 import atexit
+import fnmatch
 import gc
 import logging
 import multiprocessing
@@ -228,9 +229,26 @@ def _supported_extensions() -> set[str]:
     return {e.lower() for e in settings.get("scanner.supported_extensions", [])}
 
 
-def _excluded_folders() -> set[str]:
-    return {unicodedata.normalize('NFC', f.lower())
-            for f in settings.get("scanner.excluded_folders", [])}
+def _excluded_folders() -> tuple[set[str], list[str]]:
+    """Exakte Namen (schneller Set-Lookup) und Wildcard-Muster (z.B. '*privat*',
+    enthalten ein '*') getrennt -- der häufige Fall ohne Wildcard bleibt O(1),
+    nur bei tatsächlich konfigurierten Mustern wird zusätzlich fnmatch geprüft.
+    Gleiche Wildcard-Syntax wie bei der Sperrliste (scanner/block_list.py)."""
+    exact, patterns = set(), []
+    for f in settings.get("scanner.excluded_folders", []):
+        f = unicodedata.normalize('NFC', f.lower())
+        if '*' in f:
+            patterns.append(f)
+        else:
+            exact.add(f)
+    return exact, patterns
+
+
+def _is_excluded_name(name: str, excluded_exact: set[str], excluded_patterns: list[str]) -> bool:
+    n = unicodedata.normalize('NFC', name.lower())
+    if n in excluded_exact:
+        return True
+    return any(fnmatch.fnmatch(n, p) for p in excluded_patterns)
 
 
 # ── Worker-Funktion (läuft im Pool-Prozess) ────────────────────────────────────
@@ -341,16 +359,14 @@ def _total_workers_rss_gb() -> float:
         return 0.0
 
 
-def _first_level_dirs(root: Path, excluded: set[str]) -> list[Path]:
+def _first_level_dirs(root: Path, excluded_exact: set[str], excluded_patterns: list[str]) -> list[Path]:
     """Gibt die direkte erste Ebene der Unterordner zurück — ein einziger listdir()-Aufruf."""
     try:
         return sorted([
             d for d in root.iterdir()
             if d.is_dir()
             and not d.name.startswith('.')
-            # Exakter Ordnername, keine Teilstring-Suche -- sonst schliesst "Log" auch
-            # "Analog" oder "Logitech" aus.
-            and unicodedata.normalize('NFC', d.name.lower()) not in excluded
+            and not _is_excluded_name(d.name, excluded_exact, excluded_patterns)
         ])
     except OSError:
         return []
@@ -367,7 +383,7 @@ def scan_project(project_id: int, root: Path,
     SIGKILL → sofortige Speicherfreigabe → neuer Pool.
     """
     supported = _supported_extensions()
-    excluded  = _excluded_folders()
+    excluded_exact, excluded_patterns = _excluded_folders()
 
     # Vom Benutzer via UI ignorierte Unterordner (ignored_paths-Tabelle)
     _ic = connection.get_connection()
@@ -456,8 +472,7 @@ def scan_project(project_id: int, root: Path,
             dirnames[:] = [
                 d for d in dirnames
                 if not d.startswith('.')
-                # Exakter Ordnername, keine Teilstring-Suche -- siehe _first_level_dirs().
-                and unicodedata.normalize('NFC', d.lower()) not in excluded
+                and not _is_excluded_name(d, excluded_exact, excluded_patterns)
                 and Path(d).suffix.lower() not in _FAKE_DIR_SUFFIXES
                 and str(Path(dirpath) / d) not in ignored_paths
             ]
@@ -940,17 +955,20 @@ def _classify_norm(conn, doc_id: int, path: Path, text: str) -> None:
     hier duerfen den Scan nicht abbrechen (z.B. norms.yaml fehlt in einem
     Dev-Checkout) -- deshalb breit abgefangen."""
     try:
-        from scanner.norms import get_classifier
+        from scanner.norms import extract_valid_from, get_classifier
         row = conn.execute(
             "SELECT norm_manual FROM documents WHERE id = ?", (doc_id,)
         ).fetchone()
         if row and row["norm_manual"]:
             return
         verdict = get_classifier(conn).classify(str(path), text)
+        # Gültigkeitsdatum nur ermitteln, wenn es sich überhaupt um eine Norm
+        # handelt -- bei den meisten Dokumenten (kein Treffer) sonst unnötige Arbeit.
+        valid_from = extract_valid_from(text) if verdict.is_norm else None
         with conn:
             conn.execute(
-                "UPDATE documents SET is_norm = ?, norm_reason = ? WHERE id = ?",
-                (1 if verdict.is_norm else 0, verdict.reason, doc_id),
+                "UPDATE documents SET is_norm = ?, norm_reason = ?, norm_valid_from = ? WHERE id = ?",
+                (1 if verdict.is_norm else 0, verdict.reason, valid_from, doc_id),
             )
     except Exception as exc:
         log.warning("Norm-Klassifikation fehlgeschlagen für %s: %s", path.name, exc)
