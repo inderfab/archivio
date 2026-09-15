@@ -60,6 +60,8 @@
   .searchlog-badge.empty { background: #fef3c7; color: #92400e; }
   .searchlog-badge.none { background: #f3f4f6; color: #4b5563; }
   .searchlog-body { padding: 4px 14px 12px; font-size: 12px; color: var(--text-2); }
+  .searchlog-detail-row { margin-bottom: 4px; }
+  .searchlog-detail-row strong { color: var(--text); }
 </style>
 <div class="sysstat-page">
   <h1>Systemstatus</h1>
@@ -79,10 +81,11 @@
   {% macro render_scan(s) %}
   <details class="sysstat-row" style="display:block;">
     <summary>
-      <span class="sysstat-ts">{{ s.started_at }}</span>
+      <span class="sysstat-ts">{{ s.started_at|fmt_ts }}</span>
       <span class="sysstat-project">{{ s.project_name or '—' }}</span>
       <span class="sysstat-metric">{{ s.duration_s|fmt_duration }}</span>
       <span class="sysstat-metric">{{ s.processed }}/{{ s.total }} Dateien</span>
+      <span class="sysstat-metric">{{ s.new_count }} neu</span>
       <span class="sysstat-metric">{{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% RAM){% endif %} · {{ s.peak_cpu_pct|round|int }}% CPU</span>
       <span class="sysstat-badge {{ s.status }}">
         {% if s.status == 'done' %}fertig{% elif s.status == 'cancelled' %}abgebrochen{% else %}fehler{% endif %}
@@ -110,9 +113,10 @@
     {% else %}
     <details class="sysstat-row sysstat-group" style="display:block;">
       <summary>
-        <span class="sysstat-ts">{{ g.ts_start }}</span>
+        <span class="sysstat-ts">{{ g.ts_start|fmt_ts }}</span>
         <span class="sysstat-project">Sammel-Scan · {{ g.count }} Projekte</span>
         <span class="sysstat-metric">{{ g.total_files }} Dateien</span>
+        <span class="sysstat-metric">{{ g.total_new }} neu</span>
         <span class="sysstat-metric">{{ g.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (g.peak_memory_mb / total_ram_mb * 100)|round(1) }}% RAM){% endif %} · {{ g.peak_cpu_pct|round|int }}% CPU</span>
         <span class="sysstat-badge {{ g.status }}">
           {% if g.status == 'done' %}fertig{% elif g.status == 'cancelled' %}abgebrochen{% else %}fehler{% endif %}
@@ -157,7 +161,7 @@
       {% for e in search_entries %}
       <details class="searchlog-entry">
         <summary>
-          <span class="sysstat-ts">{{ e.ts }}</span>
+          <span class="sysstat-ts">{{ e.ts|fmt_ts }}</span>
           <span class="searchlog-kind">{{ 'KI' if e.kind == 'ki-suche' else 'Suche' }}</span>
           <span class="searchlog-query">{{ e.query or '—' }}{% if e.project_name %} · {{ e.project_name }}{% endif %}</span>
           <span class="sysstat-metric">{{ e.result_count }} Treffer</span>
@@ -166,9 +170,19 @@
             {% if e.result_count == 0 %}0 Treffer{% elif e.clicks %}✓ geöffnet{% if e.clicks > 1 %} ({{ e.clicks }}×){% endif %}{% else %}kein Klick{% endif %}
           </span>
         </summary>
-        {% if e.filters %}
-        <div class="searchlog-body">{{ e.filters }}</div>
-        {% endif %}
+        <div class="searchlog-body">
+          <div class="searchlog-detail-row"><strong>Suchfrage:</strong> {{ e.query or '—' }}</div>
+          <div class="searchlog-detail-row"><strong>Projekt:</strong> {{ e.project_name or 'Alle Projekte' }}</div>
+          <div class="searchlog-detail-row"><strong>Filter:</strong> {{ e.filters or '—' }}</div>
+          <div class="searchlog-detail-row"><strong>Treffer:</strong> {{ e.result_count }}</div>
+          <div class="searchlog-detail-row"><strong>Dauer:</strong> {{ e.duration_ms|fmt_ms }}</div>
+          {% if e.query_string %}
+          <a class="btn btn-sm" style="margin-top:6px;"
+             href="/?{{ e.query_string }}{{ '&mode=ki' if e.kind == 'ki-suche' else '' }}">
+            Resultate anzeigen →
+          </a>
+          {% endif %}
+        </div>
       </details>
       {% endfor %}
     </div>

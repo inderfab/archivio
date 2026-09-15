@@ -88,9 +88,25 @@ def _fmt_ms(ms) -> str:
     return f"{ms / 1000:.1f}s"
 
 
+def _fmt_ts(iso: str | None) -> str:
+    """ISO-Zeitstempel -> "14.9.26 21:33" (lokale Zeit, ohne führende Nullen bei
+    Tag/Monat, zweistelliges Jahr) -- kompakte Spalte fürs Systemstatus, wo eine
+    lange Liste von Zeitstempeln überfliegbar bleiben soll statt volles ISO-Format
+    ("2026-09-14T21:33:43Z") anzuzeigen, das niemand auf einen Blick liest."""
+    if not iso:
+        return "—"
+    try:
+        from datetime import datetime
+        dt = datetime.fromisoformat(iso.replace("Z", "+00:00")).astimezone()
+        return f"{dt.day}.{dt.month}.{dt.strftime('%y')} {dt.strftime('%H:%M')}"
+    except Exception:
+        return iso
+
+
 templates.env.filters["fmt_date"]     = _fmt_date
 templates.env.filters["fmt_datetime"] = _fmt_datetime
 templates.env.filters["fmt_size"]     = _fmt_size
 templates.env.filters["fmt_duration"] = _fmt_duration
 templates.env.filters["fmt_ms"]       = _fmt_ms
+templates.env.filters["fmt_ts"]       = _fmt_ts
 templates.env.filters["urlencode"]    = _urlencode

@@ -27,6 +27,7 @@ def log_search(
     result_count: int,
     duration_ms: int,
     token: str | None = None,
+    query_string: str | None = None,
 ) -> int | None:
     """Schreibt eine Protokollzeile, gibt deren id zurück -- die braucht der
     Aufrufer, um sie den gerade angezeigten Ergebnissen mitzugeben, damit ein
@@ -45,30 +46,62 @@ def log_search(
     Anfrage übrig. Ein Klick markiert die Zeile implizit als abgeschlossen
     (clicks>0 sperrt sie fürs Zusammenfassen), ein längeres Zeitfenster ebenso --
     beides zusammen genügt, ohne dass der Client explizit "fertig getippt"
-    signalisieren müsste."""
+    signalisieren müsste.
+
+    query_string (der rohe Query-String der /search- bzw. /search/ai-Anfrage):
+    erlaubt der "Resultate anzeigen"-Schaltfläche im Suche-Protokoll, Suchfrage
+    UND alle aktiven Filter exakt zu reproduzieren -- siehe index.html, liest ihn
+    beim Laden aus der URL und stellt Suchfeld/Filter entsprechend wieder her.
+
+    Die SELECT-dann-INSERT/UPDATE-Prüfung für token läuft bewusst in einer
+    BEGIN-IMMEDIATE-Transaktion: zwei Anfragen desselben Tippvorgangs (z.B.
+    Text tippen UND direkt danach einen Filter umschalten) können am Server
+    nahezu gleichzeitig ankommen. Ohne expliziten Schreib-Lock VOR dem SELECT
+    sehen beide Anfragen "noch keine Zeile für dieses token" und legen fälschlich
+    ZWEI Zeilen an, statt sich zu einer zusammenzufassen -- genau das Problem, das
+    token eigentlich lösen soll. WAL-Modus (siehe db/connection.py) plus 30s
+    Timeout auf der Connection sorgen dafür, dass die zweite Anfrage einfach kurz
+    wartet statt mit "database is locked" zu scheitern."""
     try:
         if token:
-            existing = conn.execute(
-                "SELECT id FROM search_log WHERE token = ? AND clicks = 0 "
-                "AND ts >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) "
-                "ORDER BY id DESC LIMIT 1",
-                (token, f"-{_COALESCE_WINDOW_S} seconds"),
-            ).fetchone()
-            if existing:
-                with conn:
+            conn.execute("BEGIN IMMEDIATE")
+            try:
+                existing = conn.execute(
+                    "SELECT id FROM search_log WHERE token = ? AND clicks = 0 "
+                    "AND ts >= strftime('%Y-%m-%dT%H:%M:%SZ', 'now', ?) "
+                    "ORDER BY id DESC LIMIT 1",
+                    (token, f"-{_COALESCE_WINDOW_S} seconds"),
+                ).fetchone()
+                if existing:
                     conn.execute(
                         "UPDATE search_log SET ts = strftime('%Y-%m-%dT%H:%M:%SZ','now'), "
                         "kind = ?, query = ?, project_id = ?, filters = ?, "
-                        "result_count = ?, duration_ms = ? WHERE id = ?",
+                        "result_count = ?, duration_ms = ?, query_string = ? WHERE id = ?",
                         (kind, query or None, project_id, filters or None,
-                         result_count, duration_ms, existing["id"]),
+                         result_count, duration_ms, query_string or None, existing["id"]),
                     )
-                return existing["id"]
+                    row_id = existing["id"]
+                else:
+                    cur = conn.execute(
+                        """INSERT INTO search_log
+                           (kind, query, project_id, filters, result_count, duration_ms, token, query_string)
+                           VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                        (kind, query or None, project_id, filters or None, result_count, duration_ms,
+                         token, query_string or None),
+                    )
+                    row_id = cur.lastrowid
+                conn.commit()
+                return row_id
+            except Exception:
+                conn.rollback()
+                raise
         with conn:
             cur = conn.execute(
-                """INSERT INTO search_log (kind, query, project_id, filters, result_count, duration_ms, token)
-                   VALUES (?, ?, ?, ?, ?, ?, ?)""",
-                (kind, query or None, project_id, filters or None, result_count, duration_ms, token or None),
+                """INSERT INTO search_log
+                   (kind, query, project_id, filters, result_count, duration_ms, token, query_string)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+                (kind, query or None, project_id, filters or None, result_count, duration_ms,
+                 None, query_string or None),
             )
             return cur.lastrowid
     except Exception as exc:

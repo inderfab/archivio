@@ -109,6 +109,7 @@ def test_system_status_page_renders(tmp_db):
     assert "Testprojekt" in r.text
     assert "200" in r.text
     assert "% RAM" in r.text
+    assert "2 neu" in r.text
 
 
 def test_log_scan_stores_batch_id(tmp_db):
@@ -127,16 +128,16 @@ def test_group_scan_log_entries_groups_by_batch_id():
 
     scans = [
         {"batch_id": "b1", "project_name": "P3", "started_at": "2026-01-01T00:02:00Z",
-         "finished_at": "2026-01-01T00:03:00Z", "total": 5, "error_count": 0,
+         "finished_at": "2026-01-01T00:03:00Z", "total": 5, "new_count": 2, "error_count": 0,
          "peak_memory_mb": 300, "peak_cpu_pct": 20, "status": "done"},
         {"batch_id": "b1", "project_name": "P2", "started_at": "2026-01-01T00:01:00Z",
-         "finished_at": "2026-01-01T00:02:00Z", "total": 3, "error_count": 1,
+         "finished_at": "2026-01-01T00:02:00Z", "total": 3, "new_count": 1, "error_count": 1,
          "peak_memory_mb": 500, "peak_cpu_pct": 50, "status": "error"},
         {"batch_id": "b1", "project_name": "P1", "started_at": "2026-01-01T00:00:00Z",
-         "finished_at": "2026-01-01T00:01:00Z", "total": 2, "error_count": 0,
+         "finished_at": "2026-01-01T00:01:00Z", "total": 2, "new_count": 0, "error_count": 0,
          "peak_memory_mb": 100, "peak_cpu_pct": 10, "status": "done"},
         {"batch_id": None, "project_name": "Solo", "started_at": "2026-01-01T00:05:00Z",
-         "finished_at": "2026-01-01T00:06:00Z", "total": 1, "error_count": 0,
+         "finished_at": "2026-01-01T00:06:00Z", "total": 1, "new_count": 1, "error_count": 0,
          "peak_memory_mb": 50, "peak_cpu_pct": 5, "status": "done"},
     ]
     groups = _group_scan_log_entries(scans)
@@ -147,6 +148,7 @@ def test_group_scan_log_entries_groups_by_batch_id():
 
     assert batch_group["count"] == 3
     assert batch_group["total_files"] == 10
+    assert batch_group["total_new"] == 3
     assert batch_group["total_errors"] == 1
     assert batch_group["ts_start"] == "2026-01-01T00:00:00Z"
     assert batch_group["ts_end"] == "2026-01-01T00:03:00Z"
@@ -162,10 +164,10 @@ def test_group_scan_log_entries_all_done_status_is_done():
 
     scans = [
         {"batch_id": "b1", "project_name": "P1", "started_at": "2026-01-01T00:00:00Z",
-         "finished_at": "2026-01-01T00:01:00Z", "total": 1, "error_count": 0,
+         "finished_at": "2026-01-01T00:01:00Z", "total": 1, "new_count": 0, "error_count": 0,
          "peak_memory_mb": 10, "peak_cpu_pct": 5, "status": "done"},
         {"batch_id": "b1", "project_name": "P2", "started_at": "2026-01-01T00:01:00Z",
-         "finished_at": "2026-01-01T00:02:00Z", "total": 1, "error_count": 0,
+         "finished_at": "2026-01-01T00:02:00Z", "total": 1, "new_count": 0, "error_count": 0,
          "peak_memory_mb": 10, "peak_cpu_pct": 5, "status": "done"},
     ]
     groups = _group_scan_log_entries(scans)

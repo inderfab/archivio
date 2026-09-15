@@ -1775,12 +1775,47 @@ document.addEventListener('keydown', function(e) {
 refreshSearchTagFilterList();  // Suche ist der Standard-Modus beim Laden
 
 document.addEventListener('DOMContentLoaded', function() {
-  // Deep-Link von /norms ("In der Suche anzeigen") — Ergebnis-Umfang vorausfüllen und
-  // Suche auslösen. "scope" ist der aktuelle Parameter, "norms=only" der veraltete.
+  // Deep-Link -- von /norms ("In der Suche anzeigen", nur "scope"/"norms") oder vom
+  // Suche-Protokoll im Systemstatus ("Resultate anzeigen", voller Query-String samt
+  // Suchfrage und allen aktiven Filtern, siehe scanner/search_log.py::query_string).
+  // Stellt Suchfeld + Filter aus der URL wieder her und löst danach die Suche aus.
   var params = new URLSearchParams(location.search);
-  var scopeParam = params.get('scope') || (params.get('norms') === 'only' ? 'norms' : '');
-  if (scopeParam && _RESULT_SCOPES.indexOf(scopeParam) !== -1) {
-    setResultScope(scopeParam);
+  var _DEEP_LINK_PARAMS = ['q', 'project_id', 'type', 'scope', 'norms', 'search_in', 'tag_id',
+    'from_addr', 'to_addr', 'subject_filter', 'date_from', 'date_to', 'duplicates_only'];
+  var hasDeepLink = _DEEP_LINK_PARAMS.some(function(name) { return !!params.get(name); });
+
+  if (hasDeepLink) {
+    if (params.get('mode') === 'ki') switchSearchMode(true);
+
+    var q = params.get('q');
+    if (q) document.getElementById('q').value = q;
+
+    var projectId = params.get('project_id');
+    if (projectId) document.getElementById('project_id_select').value = projectId;
+
+    var typeParam = params.get('type');
+    if (typeParam) {
+      var typeSelect = document.querySelector('select[name="type"]');
+      if (typeSelect) typeSelect.value = typeParam;
+    }
+
+    ['from_addr', 'to_addr', 'subject_filter', 'date_from', 'date_to', 'duplicates_only'].forEach(function(name) {
+      var v = params.get(name);
+      if (!v) return;
+      var el = document.querySelector('#search-form [name="' + name + '"]');
+      if (el) el.value = v;
+    });
+
+    var scopeParam = params.get('scope') || (params.get('norms') === 'only' ? 'norms' : '');
+    if (scopeParam && _RESULT_SCOPES.indexOf(scopeParam) !== -1) setResultScope(scopeParam);
+
+    var searchInParam = params.get('search_in');
+    if (searchInParam) setSearchInScope(searchInParam);
+
+    var tagIdParam = params.get('tag_id');
+    if (tagIdParam) setSearchTagFilter(tagIdParam);
+
+    updateChips();
     // Kleine Verzögerung: htmx hängt seine Listener teils erst kurz nach
     // DOMContentLoaded vollständig ein, ein sofortiger Trigger direkt beim Laden
     // würde sonst manchmal ins Leere laufen.

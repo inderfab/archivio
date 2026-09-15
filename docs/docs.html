@@ -250,14 +250,17 @@
         <li><a href="#setup">Installation</a></li>
         <li><a href="#erste-schritte">Erster Start</a></li>
         <li class="nav-section">Einrichten</li>
-        <li><a href="#nas">NAS verknüpfen</a></li>
+        <li><a href="#nas">Datei-Server verknüpfen</a></li>
         <li><a href="#projekte">Unterordner als Projekte</a></li>
         <li><a href="#ordner">Ordner ignorieren</a></li>
         <li><a href="#mitarbeiter">Mitarbeiter-Macs</a></li>
+        <li><a href="#mail">Mail-Integration</a></li>
         <li><a href="#link-kopieren">Archivio-Link kopieren</a></li>
         <li><a href="#mcp">Claude Desktop verbinden (MCP)</a></li>
         <li class="nav-section">Funktionen</li>
         <li><a href="#suche">Suche</a></li>
+        <li><a href="#fotos">Fotos</a></li>
+        <li><a href="#normen">Normen</a></li>
         <li><a href="#ki">KI-Suche aktivieren</a></li>
         <li><a href="#scan">Automatischer Scan</a></li>
       </ul>
@@ -377,21 +380,32 @@
 
       <div class="doc-section" id="erste-schritte">
         <h2>Erster Start</h2>
-        <p>Nach dem Start ist die Weboberfläche unter <code>http://&lt;Server-IP&gt;:8000</code> erreichbar — z.&nbsp;B. <code>http://192.168.1.10:8000</code>.</p>
-        <p>Beim ersten Öffnen ist die Datenbank leer. Zuerst ein Projekt anlegen und den NAS-Ordner verknüpfen, dann einen ersten Scan starten.</p>
+        <p><strong>Archivio Server</strong> ist eine reine Menüleisten-App — es öffnet sich kein Fenster und kein Dock-Symbol beim Start. Die Weboberfläche selbst über die Menüleiste aufrufen:</p>
+        <ol class="step-list">
+          <li><span>Das Programm <strong>„Archivio Server"</strong> starten (Programme-Ordner oder Spotlight).</span></li>
+          <li><span>Oben rechts in der Menüleiste erscheint das Archivio-Symbol — anklicken und <strong>„Archivio öffnen"</strong> wählen.</span></li>
+        </ol>
+        <div class="install-screenshots">
+          <figure>
+            <img src="img/menubar-archivio-oeffnen.png" alt="Menüleiste – Archivio öffnen anklicken">
+            <figcaption>„Archivio öffnen" in der Menüleiste.</figcaption>
+          </figure>
+        </div>
+        <p>Die Weboberfläche ist ausserdem direkt unter <code>http://&lt;Server-IP&gt;:8000</code> erreichbar — z.&nbsp;B. <code>http://192.168.1.10:8000</code>, auch von jedem anderen Mac im selben Netzwerk.</p>
+        <p>Beim ersten Öffnen ist die Datenbank leer. Zuerst ein Projekt anlegen und den Ordner auf dem Datei-Server verknüpfen, dann einen ersten Scan starten.</p>
       </div>
 
       <div class="doc-section" id="nas">
-        <h2>NAS verknüpfen</h2>
-        <p>Archivio liest Dateien direkt vom NAS. Das NAS muss auf dem Server-Mac eingehängt sein, bevor ein Scan läuft.</p>
+        <h2>Datei-Server verknüpfen</h2>
+        <p>Archivio liest Dateien direkt vom Datei-Server. Dieser muss auf dem Server-Mac eingehängt sein, bevor ein Scan läuft.</p>
         <ol class="step-list">
-          <li><span>Im Finder: <strong>Gehe zu → Mit Server verbinden</strong> (<code>⌘K</code>) → NAS-Adresse eingeben → verbinden.</span></li>
+          <li><span>Im Finder: <strong>Gehe zu → Mit Server verbinden</strong> (<code>⌘K</code>) → Adresse des Datei-Servers eingeben → verbinden.</span></li>
           <li><span>In der Archivio-Weboberfläche: <strong>Dashboard → Projekte → Neues Projekt</strong>.</span></li>
-          <li><span>Projektname vergeben und den Pfad zum NAS-Ordner eintragen, z.&nbsp;B. <code>/Volumes/NAS/Projekte/2024</code>.</span></li>
+          <li><span>Projektname vergeben und den Pfad zum Ordner auf dem Datei-Server eintragen, z.&nbsp;B. <code>/Volumes/Dateiserver/Projekte/2024</code>.</span></li>
           <li><span>Speichern → <strong>Scan starten</strong>.</span></li>
         </ol>
         <div class="callout">
-          <strong>Tipp:</strong> Der NAS-Ordner sollte beim Serverstart automatisch eingehängt sein. Das lässt sich in den macOS-Systemeinstellungen unter „Benutzer &amp; Gruppen → Anmeldeobjekte" einrichten.
+          <strong>Tipp:</strong> Der Datei-Server sollte beim Serverstart automatisch eingehängt sein. Das lässt sich in den macOS-Systemeinstellungen unter „Benutzer &amp; Gruppen → Anmeldeobjekte" einrichten.
         </div>
       </div>
 
@@ -460,11 +474,27 @@
         -->
       </div>
 
+      <div class="doc-section" id="mail">
+        <h2>Mail-Integration</h2>
+        <p>Postfächer, die auf dem Server-Mac in der macOS-<strong>Mail</strong>-App eingerichtet sind, lassen sich ebenfalls durchsuchbar machen — Mails erscheinen dann neben Dokumenten und Plänen in derselben Suche.</p>
+        <ol class="step-list">
+          <li><span>Das gewünschte Konto zuerst in der <strong>Mail</strong>-App auf dem Server-Mac einrichten.</span></li>
+          <li><span>Im Dashboard, Abschnitt <strong>„Mail-Integration"</strong>, auf <strong>„Postfächer aktualisieren"</strong> klicken — Archivio findet die eingerichteten Postfächer automatisch.</span></li>
+          <li><span>Enthält ein Postfach- oder Ordnername eine Projektnummer (z.&nbsp;B. <code>123_Projektname</code>), wird das passende Projekt automatisch zugeordnet. Ohne Nummer, aber mit ähnlichem Namen, erscheint stattdessen nur ein Vorschlag, der erst per <strong>„Übernehmen"</strong> bestätigt werden muss — nie automatisch.</span></li>
+          <li><span>Zuordnung jederzeit über das Dropdown von Hand ändern. <strong>„+ Als eigenes Projekt speichern"</strong> macht aus einem Postfach ohne passenden Ordner ein eigenständiges Projekt.</span></li>
+          <li><span>Auf <strong>„Aktive Postfächer scannen"</strong> klicken, um die Mails zu indexieren.</span></li>
+        </ol>
+        <div class="callout">
+          <strong>MCP-Freigabe:</strong> Ist ein Postfach einem Projekt zugeordnet, übernimmt es dessen Freigabe für die Claude-Anbindung. Nur bei aktiven, noch nicht zugeordneten Postfächern lässt sich die Freigabe separat schalten.
+        </div>
+        <p style="font-size:13px;color:#888;">Ein neues Postfach vorher im Büro ankündigen — siehe <a href="merkblatt.html">Merkblatt</a>.</p>
+      </div>
+
       <div class="doc-section" id="link-kopieren">
         <h2>Archivio-Link kopieren</h2>
         <p>Server und Helper installieren automatisch eine Finder-Schnellaktion. Damit lässt sich
         jede Datei mit einem Klick als Link teilen — z.&nbsp;B. per Mail oder Chat — den jede Person
-        mit installiertem Archivio Helper direkt öffnen kann, ohne selbst im NAS-Ordner danach
+        mit installiertem Archivio Helper direkt öffnen kann, ohne selbst auf dem Datei-Server danach
         suchen zu müssen.</p>
         <ol class="step-list">
           <li><span>Datei im Finder mit <strong>Rechtsklick</strong> auswählen.</span></li>
@@ -524,10 +554,33 @@
         <p>Unterhalb des Suchfelds stehen drei Scope-Buttons, die festlegen, <em>wo</em> gesucht wird:</p>
         <ul>
           <li><strong>Dokumente</strong> — durchsucht den vollständigen Textinhalt aller indizierten Dokumente (Standard).</li>
-          <li><strong>Ordnernamen</strong> — sucht ausschliesslich in den Ordnernamen auf dem NAS. Nützlich um Projekte oder Ablageorte schnell zu finden.</li>
+          <li><strong>Ordnernamen</strong> — sucht ausschliesslich in den Ordnernamen auf dem Datei-Server. Nützlich um Projekte oder Ablageorte schnell zu finden.</li>
           <li><strong>Dateinamen</strong> — sucht ausschliesslich im Dateinamen. Nur Dateien, deren Name den Begriff enthält, werden angezeigt — Dokumente, die den Begriff nur im Inhalt haben, werden nicht gelistet.</li>
         </ul>
         <p>Mehrere Bereiche können gleichzeitig aktiv sein. Über die weiteren Filter lässt sich die Suche zusätzlich auf bestimmte Projekte, Dateitypen oder Zeiträume einschränken.</p>
+      </div>
+
+      <div class="doc-section" id="fotos">
+        <h2>Fotos</h2>
+        <p>Über den Umschalter <strong>„Fotos"</strong> neben „Suche" wechselt die Oberfläche in die Foto-Galerie — alle Bilder eines Projekts als Raster, unabhängig vom Ordner.</p>
+        <ul>
+          <li><strong>Bewertung</strong> — beim Überfahren mit der Maus erscheinen Sterne (0–5), ein Klick setzt die Bewertung. Über den Filter oberhalb der Galerie lässt sich nach Bewertung eingrenzen, auch nach „Unbewertet".</li>
+          <li><strong>Tags</strong> — Taste <code>T</code> auf einem Foto öffnet die Tag-Eingabe. Tags lassen sich umbenennen und als Filter verwenden.</li>
+          <li><strong>Sortierung und Grösse</strong> — Sortierung (z.&nbsp;B. neuste zuerst) und maximale Dateigrösse sind oberhalb der Galerie einstellbar.</li>
+        </ul>
+      </div>
+
+      <div class="doc-section" id="normen">
+        <h2>Normen</h2>
+        <p>Archivio erkennt SIA-, VSS- und weitere Normen automatisch anhand von Ordnerstruktur und Dokumentinhalt (Typ, Nummer, Gültigkeitsdatum) und listet sie separat im Reiter <strong>„Normen"</strong> auf.</p>
+        <ol class="step-list">
+          <li><span>Neu gefundene Norm-Ordner erscheinen unter <strong>„Ordner-Vorschläge"</strong> — bestätigen oder ablehnen, je nachdem ob es sich tatsächlich um einen Normen-Ordner handelt.</span></li>
+          <li><span>Pro Norm zeigt die Liste Typ, Nummer und Gültigkeitsdatum, sofern erkannt.</span></li>
+          <li><span>Über <strong>🔄</strong> neben einer einzelnen Norm oder <strong>„🌐 Aktualität aller Normen prüfen"</strong> für den ganzen Bestand lässt sich online abgleichen, ob eine neuere Ausgabe existiert (SIA-/VSS-Shop). Das braucht Internetzugang — ohne Verbindung erscheint „Kein Internetzugang" statt eines Absturzes, ein Sammel-Abgleich bricht dann sauber ab, statt sich durch den ganzen Bestand zu hängen.</span></li>
+        </ol>
+        <div class="callout">
+          <strong>Urheberrecht:</strong> Erkannte Normen sind lokal durchsuchbar, werden aber nie über die Claude-Anbindung übermittelt — siehe <a href="#mcp">Claude Desktop verbinden ↑</a>. Die Lizenzbedingungen der jeweiligen Normen gelten davon unabhängig weiter.
+        </div>
       </div>
 
       <div class="doc-section" id="ki">
@@ -558,14 +611,14 @@
 
       <div class="doc-section" id="scan">
         <h2>Automatischer Scan</h2>
-        <p>Damit neue Dateien auf dem NAS automatisch gefunden werden, kann ein täglicher Scan eingerichtet werden.</p>
+        <p>Damit neue Dateien auf dem Datei-Server automatisch gefunden werden, kann ein täglicher Scan eingerichtet werden.</p>
         <ol class="step-list">
           <li><span>Dashboard → <strong>Einstellungen</strong> öffnen.</span></li>
           <li><span>Im Abschnitt „Automatischer Scan" eine Uhrzeit eintragen, z.&nbsp;B. <code>02:00</code>.</span></li>
           <li><span>Speichern. Der Scan läuft täglich zur eingestellten Zeit — vorausgesetzt, der Server läuft.</span></li>
         </ol>
         <div class="callout">
-          <strong>Manueller Scan:</strong> Im Dashboard kann jederzeit ein Scan per Knopfdruck gestartet werden. Bei grossen NAS-Ordnern dauert der erste Scan einige Stunden.
+          <strong>Manueller Scan:</strong> Im Dashboard kann jederzeit ein Scan per Knopfdruck gestartet werden. Bei einem grossen Ordner auf dem Datei-Server dauert der erste Scan einige Stunden.
         </div>
       </div>
 

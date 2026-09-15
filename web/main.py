@@ -290,6 +290,7 @@ async def search_ai(
             filters=(f"Typ: {type}" if type else ""),
             result_count=len(sources or []),
             duration_ms=duration_ms,
+            query_string=str(request.query_params),
         )
     finally:
         log_conn.close()
@@ -487,6 +488,7 @@ async def search(
                 result_count=total + len(folder_results),
                 duration_ms=duration_ms,
                 token=search_token or None,
+                query_string=str(request.query_params),
             )
         finally:
             log_conn.close()
@@ -1021,6 +1023,7 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
         es = g["entries"]
         g["count"]          = len(es)
         g["total_files"]    = sum(e["total"] or 0 for e in es)
+        g["total_new"]      = sum(e["new_count"] or 0 for e in es)
         g["total_errors"]   = sum(e["error_count"] or 0 for e in es)
         g["ts_start"]       = min(e["started_at"] for e in es)
         g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)

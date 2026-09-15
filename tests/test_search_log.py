@@ -180,6 +180,44 @@ def test_log_search_same_token_outside_window_starts_new_row(tmp_db):
     assert row["query"] == "neu"
 
 
+def test_log_search_concurrent_same_token_does_not_duplicate(tmp_db):
+    """Regression: zwei nahezu gleichzeitige Anfragen mit demselben token (z.B.
+    Text tippen und sofort danach einen Filter umschalten, beides innerhalb des
+    300ms-Debounce-Fensters) dürfen nicht als zwei Zeilen enden, nur weil beide
+    beim SELECT noch keine bestehende Zeile sehen -- siehe BEGIN IMMEDIATE in
+    log_search(). Nutzt echte, unabhängige Connections (wie zwei parallele
+    HTTP-Requests), nicht dieselbe tmp_db-Connection, sonst würde die Race gar
+    nicht erst auftreten können."""
+    import threading
+
+    from db import connection
+    from scanner.search_log import log_search
+
+    results = []
+    barrier = threading.Barrier(2)
+
+    def worker(query):
+        conn = connection.get_connection()
+        barrier.wait()
+        row_id = log_search(conn, "suche", query, None, "", 1, 10, token="race-token")
+        results.append(row_id)
+        conn.close()
+
+    t1 = threading.Thread(target=worker, args=("a",))
+    t2 = threading.Thread(target=worker, args=("b",))
+    t1.start()
+    t2.start()
+    t1.join()
+    t2.join()
+
+    assert len(results) == 2
+    assert results[0] == results[1]
+    count = tmp_db.execute(
+        "SELECT COUNT(*) FROM search_log WHERE token = 'race-token'"
+    ).fetchone()[0]
+    assert count == 1
+
+
 def test_log_search_without_token_always_inserts(tmp_db):
     from scanner.search_log import log_search
 
@@ -205,6 +243,72 @@ def test_search_route_with_repeated_token_coalesces_rows(tmp_db):
     rows = tmp_db.execute("SELECT * FROM search_log").fetchall()
     assert len(rows) == 1
     assert rows[0]["query"] == "netzwerk"
+
+
+def test_log_search_stores_query_string(tmp_db):
+    from scanner.search_log import log_search
+
+    row_id = log_search(
+        tmp_db, "suche", "Vertrag", None, "Typ: pdf", 5, 100,
+        query_string="q=Vertrag&type=pdf",
+    )
+    row = tmp_db.execute("SELECT query_string FROM search_log WHERE id = ?", (row_id,)).fetchone()
+    assert row["query_string"] == "q=Vertrag&type=pdf"
+
+
+def test_log_search_coalesce_updates_query_string(tmp_db):
+    """Beim Zusammenfassen eines Tippvorgangs (siehe Token-Tests oben) muss auch
+    der query_string auf den zuletzt eingetippten Stand aktualisiert werden --
+    sonst würde "Resultate anzeigen" auf eine veraltete Zwischen-Anfrage zeigen."""
+    from scanner.search_log import log_search
+
+    row_id = log_search(tmp_db, "suche", "ne", None, "", 12, 50, token="tok-1",
+                         query_string="q=ne&search_token=tok-1")
+    row_id2 = log_search(tmp_db, "suche", "netzwerk", None, "", 3, 70, token="tok-1",
+                          query_string="q=netzwerk&search_token=tok-1")
+
+    assert row_id == row_id2
+    row = tmp_db.execute("SELECT query_string FROM search_log WHERE id = ?", (row_id,)).fetchone()
+    assert row["query_string"] == "q=netzwerk&search_token=tok-1"
+
+
+def test_search_route_stores_full_query_string(tmp_db):
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    _make_doc(tmp_db, p, "plan.txt", "Grundriss Erdgeschoss")
+    tmp_db.commit()
+
+    c = TestClient(app)
+    c.get("/search", params={"q": "Grundriss", "project_id": str(p), "type": "pdf"})
+
+    row = tmp_db.execute("SELECT query_string FROM search_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert row["query_string"] is not None
+    assert "q=Grundriss" in row["query_string"]
+    assert f"project_id={p}" in row["query_string"]
+    assert "type=pdf" in row["query_string"]
+
+
+def test_system_status_shows_search_result_link_with_query_string(tmp_db):
+    from fastapi.testclient import TestClient
+    from web.main import app
+    from scanner.search_log import log_search
+
+    p = queries.insert_project(tmp_db, "Testprojekt", "/scan")
+    log_search(tmp_db, "suche", "Vertrag", project_id=p, filters="Typ: pdf",
+               result_count=5, duration_ms=120, query_string="q=Vertrag&project_id=%s&type=pdf" % p)
+    tmp_db.commit()
+
+    c = TestClient(app)
+    r = c.get("/system-status")
+    assert r.status_code == 200
+    assert "Resultate anzeigen" in r.text
+    assert 'href="/?q=Vertrag' in r.text
+    assert f"project_id={p}" in r.text
+    assert "type=pdf" in r.text
+    assert "Testprojekt" in r.text
+    assert "Typ: pdf" in r.text
 
 
 def test_search_log_export_csv_contains_entry(tmp_db):

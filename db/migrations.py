@@ -36,6 +36,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "020_norm_freshness", _m020)
     _apply(conn, "021_search_log", _m021)
     _apply(conn, "022_search_log_token", _m022)
+    _apply(conn, "023_search_log_query_string", _m023)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -555,4 +556,20 @@ def _m022(conn: sqlite3.Connection):
         if "duplicate column" not in str(e).lower():
             raise
     conn.execute("CREATE INDEX IF NOT EXISTS idx_search_log_token ON search_log(token)")
+    conn.commit()
+
+
+def _m023(conn: sqlite3.Connection):
+    """Roher Query-String der ursprünglichen /search- bzw. /search/ai-Anfrage --
+    die "Resultate anzeigen"-Schaltfläche im Suche-Protokoll (Systemstatus) muss
+    Suchfrage UND alle aktiven Filter (Projekt, Typ, Zeitraum, Umfang, Tag, ...)
+    exakt reproduzieren können. Der bereits vorhandene 'filters'-Text ist nur eine
+    für Menschen lesbare Zusammenfassung, daraus liesse sich kein funktionierender
+    Link zurückbauen -- der rohe Query-String dagegen schon: index.html liest ihn
+    beim Laden aus, füllt Suchfeld/Filter entsprechend und löst die Suche aus."""
+    try:
+        conn.execute("ALTER TABLE search_log ADD COLUMN query_string TEXT")
+    except Exception as e:
+        if "duplicate column" not in str(e).lower():
+            raise
     conn.commit()
