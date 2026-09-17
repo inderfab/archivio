@@ -1,29 +1,149 @@
-<details id="problem-docs-section" class="problem-docs">
-  <summary class="problem-docs-summary">
-    Nicht verarbeitbare Dokumente
-    <span class="problem-docs-badge">{{ problem_docs|length }}</span>
-    {% set error_count = problem_docs | selectattr("category", "equalto", "error") | list | length %}
-    {% if error_count > 0 %}
-    <button class="btn btn-sm"
-            hx-post="/dashboard/retry-errors"
-            hx-target="#problem-docs-section"
-            hx-swap="outerHTML"
-            style="margin-left: 12px; font-size: 12px; padding: 2px 10px; font-weight: normal;">
-      ↺ {{ error_count }} Fehler nochmals versuchen
-    </button>
-    {% endif %}
-  </summary>
-  {% if retry_done %}
-  <div style="padding: 8px 12px; background: var(--surface-2, #f0fdf4); color: #166534; border-radius: 6px; margin: 8px 0; font-size: 13px;">
+<div id="problem-docs-container" style="margin-top: 32px;">
+  <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; position:relative; margin-bottom:12px;">
+    <span>Dokumentenverarbeitung</span>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p>Übersicht aller Dokumente, deren Inhalt (noch) nicht durchsuchbar ist — aufgeteilt nach Grund. „Nicht unterstützte Dateiformate" ist normal (Bilder, CAD-Dateien, Videos, …), die anderen Kategorien lassen sich zumindest teilweise nachholen.</p>
+    </div>
+  </div>
+
+  {% if retry_done is not none %}
+  <div style="padding: 8px 12px; background: var(--surface-2, #f0fdf4); color: #166534; border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
     ✓ {{ retry_done }} Dokument{{ "e" if retry_done != 1 else "" }} auf «ausstehend» gesetzt — beim nächsten Scan neu verarbeitet.
   </div>
   {% endif %}
-  <div class="problem-docs-list">
-    {% for doc in problem_docs %}
-    <div class="problem-doc-row problem-doc-{{ doc.category }}">
-      <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
-      <span class="problem-doc-reason">{{ doc.reason }}</span>
-    </div>
-    {% endfor %}
+
+  {% if extracting %}
+  <div style="padding: 8px 12px; background: var(--bg-2); color: var(--text-2); border-radius: 6px; margin-bottom: 12px; font-size: 13px;">
+    ⏳ Wird im Hintergrund verarbeitet — Liste aktualisiert sich beim nächsten Neuladen der Seite.
   </div>
-</details>
+  {% endif %}
+
+  {% set nothing_open = unsupported_total == 0 and oversized_total == 0 and error_total == 0 and no_text_total == 0 and missing_embedding == 0 %}
+  {% if nothing_open %}
+  <p style="color: var(--text-3); font-size: 13px; font-style: italic;">Keine offenen Punkte — alles verarbeitet.</p>
+  {% endif %}
+
+  {% if error_total > 0 %}
+  <details class="problem-docs" style="margin-bottom:8px;">
+    <summary class="problem-docs-summary">
+      <span>Fehler bei der Extraktion</span>
+      <span class="problem-docs-badge">{{ error_total }}</span>
+      <button type="button" class="btn btn-sm"
+              hx-post="/dashboard/retry-errors" hx-target="#problem-docs-container" hx-swap="outerHTML"
+              onclick="event.stopPropagation()"
+              style="margin-left:auto; font-size:12px; padding:2px 10px; font-weight:normal; text-transform:none; letter-spacing:normal;">
+        ↺ Nochmals versuchen
+      </button>
+    </summary>
+    <div class="problem-docs-list">
+      {% for doc in error_files %}
+      <div class="problem-doc-row problem-doc-error">
+        <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
+        <span class="problem-doc-reason">{{ doc.reason }}</span>
+      </div>
+      {% endfor %}
+      {% if error_total > error_files|length %}
+      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ error_total - error_files|length }} weitere</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if no_text_total > 0 %}
+  <details class="problem-docs" style="margin-bottom:8px;">
+    <summary class="problem-docs-summary">
+      <span>Kein Textinhalt gefunden</span>
+      <span class="problem-docs-badge">{{ no_text_total }}</span>
+      <button type="button" class="btn btn-sm"
+              hx-post="/dashboard/retry-no-text" hx-target="#problem-docs-container" hx-swap="outerHTML"
+              onclick="event.stopPropagation()"
+              style="margin-left:auto; font-size:12px; padding:2px 10px; font-weight:normal; text-transform:none; letter-spacing:normal;">
+        ↺ Nochmals versuchen
+      </button>
+    </summary>
+    <div class="problem-docs-list">
+      <div class="problem-doc-row" style="color:var(--text-3); font-size:11px;">
+        {% for ext, cnt in no_text_by_ext.items() %}{{ ext or '(ohne Endung)' }}: {{ cnt }}{% if not loop.last %} · {% endif %}{% endfor %}
+      </div>
+      {% for doc in no_text_sample %}
+      <div class="problem-doc-row problem-doc-no_text">
+        <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
+        <span class="problem-doc-reason">{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene</span>
+      </div>
+      {% endfor %}
+      {% if no_text_total > no_text_sample|length %}
+      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ no_text_total - no_text_sample|length }} weitere</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if oversized_total > 0 %}
+  <details class="problem-docs" style="margin-bottom:8px;">
+    <summary class="problem-docs-summary">
+      <span>Zu gross für automatische Extraktion</span>
+      <span class="problem-docs-badge">{{ oversized_total }}</span>
+    </summary>
+    <div class="problem-docs-list">
+      {% for doc in oversized_files %}
+      <div class="problem-doc-row">
+        <span class="problem-doc-name" title="{{ doc.path or doc.filename }}">{{ doc.filename }}</span>
+        <span class="problem-doc-reason">{{ doc.filesize|fmt_size }}</span>
+        <button type="button" class="btn btn-sm"
+                hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Jetzt scannen
+        </button>
+      </div>
+      {% endfor %}
+      {% if oversized_total > oversized_files|length %}
+      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ oversized_total - oversized_files|length }} weitere (grösste {{ oversized_files|length }} angezeigt)</div>
+      {% endif %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if unsupported_total > 0 %}
+  <details class="problem-docs" style="margin-bottom:8px;">
+    <summary class="problem-docs-summary">
+      <span>Nicht unterstützte Dateiformate</span>
+      <span class="problem-docs-badge">{{ unsupported_total }}</span>
+    </summary>
+    <div class="problem-docs-list">
+      {% for ext, cnt in unsupported_by_ext.items() %}
+      <div class="problem-doc-row">
+        <span class="problem-doc-name">{{ ext or '(ohne Endung)' }}</span>
+        <span class="problem-doc-reason">{{ cnt }} Datei{{ "en" if cnt != 1 else "" }}</span>
+      </div>
+      {% endfor %}
+    </div>
+  </details>
+  {% endif %}
+
+  {% if missing_embedding > 0 %}
+  <details class="problem-docs" style="margin-bottom:8px;">
+    <summary class="problem-docs-summary">
+      <span>Noch keine Embeddings für die KI-Suche</span>
+      <span class="problem-docs-badge">{{ missing_embedding }}</span>
+      <button type="button" class="btn btn-sm"
+              hx-post="/dashboard/run-embeddings-now" hx-target="this" hx-swap="outerHTML"
+              onclick="event.stopPropagation()"
+              style="margin-left:auto; font-size:12px; padding:2px 10px; font-weight:normal; text-transform:none; letter-spacing:normal;">
+        Jetzt nachholen
+      </button>
+    </summary>
+    <div class="problem-docs-list">
+      <div class="problem-doc-row" style="color:var(--text-3);">
+        Läuft automatisch nach jedem Scan, sofern Ollama zu dem Zeitpunkt läuft. „Jetzt nachholen" startet es sofort, unabhängig vom nächsten Scan.
+      </div>
+    </div>
+  </details>
+  {% endif %}
+
+  {% if pending_total > 0 %}
+  <div style="font-size:12px; color:var(--text-3); padding:4px 2px;">
+    {{ pending_total }} Dokument{{ "e" if pending_total != 1 else "" }} warten auf den nächsten Scan.
+  </div>
+  {% endif %}
+</div>

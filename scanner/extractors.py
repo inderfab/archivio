@@ -18,7 +18,7 @@ log = logging.getLogger(__name__)
 
 _IN_WORKER_PROCESS = False  # wird von _scan_file_worker auf True gesetzt
 
-_PDF_TIMEOUT = 120   # Sekunden für PyMuPDF / pypdf (Daemon-Thread, nur ausserhalb Worker)
+_PDF_TIMEOUT = 120   # Sekunden für pypdfium2 / pypdf (Daemon-Thread, nur ausserhalb Worker)
 _OCR_TIMEOUT = 7200  # Sicherheitsnetz für OCR-Prozess — per-Seiten-Timeout greift früher
 _PAGE_TEXT_TIMEOUT = 15   # Sekunden pro Seite für Text-Extraktion (nur im Worker via SIGALRM)
 _PAGE_OCR_TIMEOUT  = 60   # Sekunden pro Seite für OCR (nur im _worker_ocr-Prozess)
@@ -43,11 +43,29 @@ def _alarm_raise(signum, frame):
 
 # ── OCR-Worker (Subprocess — Tesseract kann GIL halten) ──────────────────────
 
+_OCR_RENDER_DPI = 150  # ausreichend für Tesseract, ohne unnötig viel RAM/Zeit pro Seite
+
+
 def _ocr_pages(path_str: str) -> list[dict]:
     """OCR aller Seiten. Pro Seite _PAGE_OCR_TIMEOUT via SIGALRM (nur im Hauptthread
-    des jeweiligen Prozesses gültig). Gibt [{page_number, content}] zurück.
-    Läuft je nach Kontext inline im Worker-Prozess ODER im Subprozess (_worker_ocr)."""
+    des jeweiligen Prozesses gültig) UND zusätzlich über pytesseract's eigenen
+    timeout-Parameter (zuverlässiger speziell für den Tesseract-Subprozess-Aufruf,
+    der ein SIGALRM je nach Python-/subprocess-Version nicht immer sofort
+    unterbricht) -- beide zusammen begrenzen dieselbe Zeitspanne, verdoppeln sie
+    nicht: das SIGALRM feuert so oder so nach _PAGE_OCR_TIMEOUT Sekunden ab dem
+    Seitenstart, unabhängig davon wie viele Sprach-Versuche dazwischen laufen.
+    Gibt [{page_number, content}] zurück. Läuft je nach Kontext inline im
+    Worker-Prozess ODER im Subprozess (_worker_ocr).
+
+    Rendert jede Seite mit pypdfium2 (Apache-2.0/BSD-lizenziert, dieselbe Engine
+    wie Chromes PDF-Viewer) zu einem Bild und übergibt es Tesseract via
+    pytesseract (Apache-2.0) -- Ersatz für PyMuPDFs eingebaute OCR-Bridge, die
+    unter AGPL-3.0 steht und für kommerziellen Vertrieb closed-source ohne
+    kostenpflichtige Zusatzlizenz nicht nutzbar ist."""
     import signal
+
+    import pypdfium2 as pdfium
+    import pytesseract
 
     class _OCRPageTimeout(Exception):
         pass
@@ -55,23 +73,27 @@ def _ocr_pages(path_str: str) -> list[dict]:
     def _ocr_alarm(signum, frame):
         raise _OCRPageTimeout()
 
-    import fitz
-    FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
     result = []
     old_handler = signal.signal(signal.SIGALRM, _ocr_alarm)
     try:
-        with fitz.open(path_str) as doc:
-            for i, page in enumerate(doc, start=1):
+        pdf = pdfium.PdfDocument(path_str)
+        try:
+            for i, page in enumerate(pdf, start=1):
                 text = ""
                 signal.alarm(_PAGE_OCR_TIMEOUT)
                 try:
+                    bitmap = page.render(scale=_OCR_RENDER_DPI / 72)
+                    try:
+                        image = bitmap.to_pil()
+                    finally:
+                        bitmap.close()
                     for lang in ("deu+eng", "deu", "eng"):
                         try:
-                            tp = page.get_textpage_ocr(
-                                flags=FLAGS, language=lang, dpi=150, full=True,
-                            )
-                            text = page.get_text(textpage=tp, flags=FLAGS).strip()
-                            if text:
+                            candidate = pytesseract.image_to_string(
+                                image, lang=lang, timeout=_PAGE_OCR_TIMEOUT,
+                            ).strip()
+                            if candidate:
+                                text = candidate
                                 break
                         except _OCRPageTimeout:
                             raise
@@ -83,8 +105,11 @@ def _ocr_pages(path_str: str) -> list[dict]:
                     text = ""
                 finally:
                     signal.alarm(0)
+                    page.close()
                 if len(text) >= 50:
                     result.append({"page_number": i, "content": text})
+        finally:
+            pdf.close()
     finally:
         signal.alarm(0)
         signal.signal(signal.SIGALRM, old_handler)
@@ -166,15 +191,6 @@ def extract_txt(path: Path) -> tuple[str, str]:
 
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
-def _shrink_fitz_store() -> None:
-    """Leert den MuPDF-internen Speicher-Cache nach jeder PDF-Verarbeitung."""
-    try:
-        import fitz
-        fitz.TOOLS.store_shrink(100)
-    except Exception:
-        pass
-
-
 def _has_mojibake(pages: list[dict]) -> bool:
     if not pages:
         return False
@@ -187,7 +203,7 @@ def _has_mojibake(pages: list[dict]) -> bool:
 def _run_pdf_in_thread(fn, path: Path, timeout: int = _PDF_TIMEOUT) -> list[dict]:
     """Führt PDF-Extraktion in Daemon-Thread aus.
     Bei Timeout: Thread läuft als Daemon weiter (kein Blockieren), Datei wird übersprungen.
-    PyMuPDF/pypdf geben den GIL für I/O frei → Server bleibt responsiv.
+    pypdfium2/pypdf geben den GIL für I/O frei → Server bleibt responsiv.
     """
     result: list = []
     error:  list = []
@@ -256,11 +272,13 @@ def extract_pdf_metadata(path: Path) -> dict:
     """Liest Creator/Producer aus PDF-Metadaten. Erkennt ArchiCAD/Vectorworks → is_plan."""
     creator = producer = ""
     try:
-        import fitz
-        with fitz.open(str(path)) as doc:
-            m = doc.metadata or {}
-            creator  = str(m.get("creator",  "") or "")
-            producer = str(m.get("producer", "") or "")
+        import pypdfium2 as pdfium
+        pdf = pdfium.PdfDocument(str(path))
+        try:
+            creator  = str(pdf.get_metadata_value("Creator")  or "")
+            producer = str(pdf.get_metadata_value("Producer") or "")
+        finally:
+            pdf.close()
     except Exception:
         try:
             import pypdf
@@ -274,23 +292,64 @@ def extract_pdf_metadata(path: Path) -> dict:
     return {"creator_app": creator_app, "is_plan": bool(creator_app)}
 
 
+def _page_annotation_text(page) -> str:
+    """Sammelt Kommentartext aus /Annots -> /Contents einer pypdf-Seite (z.B.
+    Bauleitungs-Rückmeldungen/Markups auf Planausschnitten, siehe "Rückmeldung"-
+    Ordner in der Praxis). PyMuPDF liest das automatisch mit (tier 1 vorher),
+    pypdfium2s Textebene und pypdf.extract_text() beide nicht -- ohne diese
+    Ergänzung gehen Planrand-Kommentare beim Extrahieren verloren, obwohl der
+    Text im PDF bereits als sauberer String vorliegt (kein OCR nötig -- OCR
+    erkennt kleine Anmerkungen auf grossformatigen Planblättern bei 150dpi
+    ohnehin oft nicht zuverlässig)."""
+    try:
+        annots = page.get("/Annots")
+        if not annots:
+            return ""
+        texts = []
+        for a in annots:
+            contents = a.get_object().get("/Contents")
+            if contents:
+                texts.append(str(contents).strip())
+        return "\n".join(t for t in texts if t)
+    except Exception:
+        return ""
+
+
+def _pdf_annotation_texts(path_str: str) -> dict[int, str]:
+    """Annotation-Text pro Seite, 1-indiziert. Best-effort -- ein pypdf-Fehler
+    hier darf die pypdfium2-Textebene (tier 1) nicht zu Fall bringen."""
+    try:
+        import pypdf
+        result = {}
+        for i, page in enumerate(pypdf.PdfReader(path_str).pages, start=1):
+            t = _page_annotation_text(page)
+            if t:
+                result[i] = t
+        return result
+    except Exception:
+        return {}
+
+
 def extract_pdf_pages(path: Path) -> list[dict]:
     """Gibt [{page_number, content}] zurück.
 
     Reihenfolge:
-    1. PyMuPDF   — schnell, beste Qualität (Daemon-Thread, 120s Timeout)
-    2. pypdf     — Fallback wenn PyMuPDF fehlt/scheitert (Daemon-Thread, 120s Timeout)
+    1. pypdfium2 — schnell, gute Qualität (Daemon-Thread, 120s Timeout). Apache-2.0/
+                   BSD-lizenziert (Googles PDFium, dieselbe Engine wie Chrome) --
+                   Ersatz für PyMuPDF (AGPL-3.0, für kommerziellen Vertrieb
+                   closed-source nicht ohne Zusatzlizenz nutzbar).
+    2. pypdf     — Fallback wenn pypdfium2 fehlt/scheitert (Daemon-Thread, 120s Timeout)
     3. OCR       — nur wenn 1+2 keinen lesbaren Text liefern (Subprocess, 90s SIGKILL)
 
     Jeder Schritt wird übersprungen wenn der vorherige lesbare Seiten liefert.
     Dateien die alle drei Schritte nicht lesen können: status='error', beim nächsten
     Scan übersprungen (solange Datei unverändert bleibt).
     """
-    # ── 1. PyMuPDF ───────────────────────────────────────────────────────────
+    # ── 1. pypdfium2 ─────────────────────────────────────────────────────────
     try:
-        def _pymupdf(p):
-            import fitz
-            FLAGS = fitz.TEXT_PRESERVE_WHITESPACE | fitz.TEXT_DEHYPHENATE
+        def _pypdfium2(p):
+            import pypdfium2 as pdfium
+            annots = _pdf_annotation_texts(str(p))
             pages = []
             # Per-Seiten-Timeout nur im Worker (Hauptthread → SIGALRM verfügbar).
             # Im Server-Thread würde signal.signal ValueError werfen.
@@ -298,12 +357,17 @@ def extract_pdf_pages(path: Path) -> list[dict]:
             if use_alarm:
                 old_handler = _signal.signal(_signal.SIGALRM, _alarm_raise)
             try:
-                with fitz.open(str(p)) as doc:
-                    for i, page in enumerate(doc, start=1):
+                pdf = pdfium.PdfDocument(str(p))
+                try:
+                    for i, page in enumerate(pdf, start=1):
                         if use_alarm:
                             _signal.alarm(_PAGE_TEXT_TIMEOUT)
                         try:
-                            text = page.get_text(flags=FLAGS).strip()
+                            textpage = page.get_textpage()
+                            try:
+                                text = textpage.get_text_range().strip()
+                            finally:
+                                textpage.close()
                         except _PageTimeout:
                             log.warning("Seite %d Text-Timeout (%ds) übersprungen: %s",
                                         i, _PAGE_TEXT_TIMEOUT, Path(p).name)
@@ -314,28 +378,33 @@ def extract_pdf_pages(path: Path) -> list[dict]:
                         finally:
                             if use_alarm:
                                 _signal.alarm(0)
+                            page.close()
+                        annot_text = annots.get(i, "")
+                        if annot_text:
+                            text = f"{text}\n{annot_text}".strip() if text else annot_text
                         if len(text) >= 50:
                             pages.append({"page_number": i, "content": text})
+                finally:
+                    pdf.close()
             finally:
                 if use_alarm:
                     _signal.alarm(0)
                     _signal.signal(_signal.SIGALRM, old_handler)
             return pages
 
-        pages = _run_pdf(_pymupdf, path, _PDF_TIMEOUT)
+        pages = _run_pdf(_pypdfium2, path, _PDF_TIMEOUT)
         if pages and not _has_mojibake(pages):
-            _shrink_fitz_store()
             return pages
         if pages:
-            log.info("PyMuPDF Mojibake erkannt: %s", path.name)
+            log.info("pypdfium2 Mojibake erkannt: %s", path.name)
     except ImportError:
-        log.debug("fitz nicht installiert: %s", path.name)
+        log.debug("pypdfium2 nicht installiert: %s", path.name)
         pages = []
     except ExtractionError:
-        log.info("PyMuPDF Timeout/Fehler: %s — versuche pypdf", path.name)
+        log.info("pypdfium2 Timeout/Fehler: %s — versuche pypdf", path.name)
         pages = []
     except Exception as e:
-        log.info("PyMuPDF Fehler (%s): %s — versuche pypdf", path.name, e)
+        log.info("pypdfium2 Fehler (%s): %s — versuche pypdf", path.name, e)
         pages = []
 
     # ── 2. pypdf ─────────────────────────────────────────────────────────────
@@ -345,6 +414,9 @@ def extract_pdf_pages(path: Path) -> list[dict]:
             result = []
             for i, page in enumerate(pypdf.PdfReader(str(p)).pages, start=1):
                 text = (page.extract_text() or "").strip()
+                annot_text = _page_annotation_text(page)
+                if annot_text:
+                    text = f"{text}\n{annot_text}".strip() if text else annot_text
                 if len(text) >= 50:
                     result.append({"page_number": i, "content": text})
             return result
@@ -356,7 +428,7 @@ def extract_pdf_pages(path: Path) -> list[dict]:
             log.info("pypdf Mojibake erkannt: %s", path.name)
     except ImportError:
         if not pages:
-            raise UnsupportedFormat("Weder pymupdf noch pypdf installiert")
+            raise UnsupportedFormat("Weder pypdfium2 noch pypdf installiert")
     except ExtractionError:
         log.info("pypdf Timeout/Fehler: %s — versuche OCR", path.name)
         pypdf_pages = []

@@ -72,12 +72,6 @@
     belastet hat, statt nur zu vermuten.
   </p>
 
-  <div class="sysstat-stats">
-    <div><div class="sysstat-stat-value">{{ total_30d }}</div><div class="sysstat-stat-label">Scans (30 Tage)</div></div>
-    <div><div class="sysstat-stat-value">{{ errors_30d }}</div><div class="sysstat-stat-label">Fehler (30 Tage)</div></div>
-    <div><div class="sysstat-stat-value">{{ avg_duration|fmt_duration }}</div><div class="sysstat-stat-label">Ø Dauer (30 Tage)</div></div>
-  </div>
-
   {% macro render_scan(s) %}
   <details class="sysstat-row" style="display:block;">
     <summary>
@@ -115,6 +109,7 @@
       <summary>
         <span class="sysstat-ts">{{ g.ts_start|fmt_ts }}</span>
         <span class="sysstat-project">Sammel-Scan · {{ g.count }} Projekte</span>
+        <span class="sysstat-metric">{{ g.total_duration_s|fmt_duration }}</span>
         <span class="sysstat-metric">{{ g.total_files }} Dateien</span>
         <span class="sysstat-metric">{{ g.total_new }} neu</span>
         <span class="sysstat-metric">{{ g.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (g.peak_memory_mb / total_ram_mb * 100)|round(1) }}% RAM){% endif %} · {{ g.peak_cpu_pct|round|int }}% CPU</span>
@@ -132,6 +127,13 @@
   </div>
   </div>
   {% endif %}
+
+  <div id="problem-docs-container"
+       hx-get="/dashboard/problem-docs"
+       hx-trigger="load, archivio:scanComplete from:body"
+       hx-swap="outerHTML"
+       style="margin-top: 40px; color: var(--text-3); font-size: 13px;">
+  </div>
 
   <div class="searchlog-section">
     <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">

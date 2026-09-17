@@ -1025,6 +1025,7 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
         g["total_files"]    = sum(e["total"] or 0 for e in es)
         g["total_new"]      = sum(e["new_count"] or 0 for e in es)
         g["total_errors"]   = sum(e["error_count"] or 0 for e in es)
+        g["total_duration_s"] = sum(e.get("duration_s") or 0 for e in es)
         g["ts_start"]       = min(e["started_at"] for e in es)
         g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)
         g["peak_memory_mb"] = max((e["peak_memory_mb"] or 0) for e in es)
@@ -1184,9 +1185,6 @@ async def system_status_page(request: Request):
     groups = _group_scan_log_entries(scans)
 
     since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-    recent = conn.execute(
-        "SELECT status, error_count, duration_s FROM scan_log WHERE started_at >= ?", (since,)
-    ).fetchall()
 
     search_rows = conn.execute(
         "SELECT * FROM search_log ORDER BY ts DESC LIMIT 300"
@@ -1202,11 +1200,6 @@ async def system_status_page(request: Request):
     ).fetchall()
     conn.close()
 
-    total_30d   = len(recent)
-    errors_30d  = sum(r["error_count"] for r in recent)
-    avg_duration = (
-        sum(r["duration_s"] or 0 for r in recent) / total_30d if total_30d else 0
-    )
     search_total_30d = len(search_recent)
     search_avg_ms = (
         sum(r["duration_ms"] or 0 for r in search_recent) / search_total_30d if search_total_30d else 0
@@ -1222,9 +1215,6 @@ async def system_status_page(request: Request):
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,
-        "total_30d":        total_30d,
-        "errors_30d":       errors_30d,
-        "avg_duration":     avg_duration,
         "search_entries":   search_entries,
         "search_total_30d": search_total_30d,
         "search_avg_ms":    search_avg_ms,

@@ -84,6 +84,49 @@ def test_scoped_search_on_enabled_project_works(tmp_db):
     assert r.json()["results"], "freigegebenes Projekt soll durchsuchbar bleiben"
 
 
+def test_scoped_search_by_project_name_resolves_to_real_id(tmp_db):
+    """search()/semantic_search() zeigen dem LLM nur den Projekt-NAMEN an, nie die
+    interne DB-ID (siehe helper/archivio_mcp.py) -- ein späterer scope-Aufruf schickt
+    deshalb den Namen oder eine daraus geratene Zahl, keine echte ID. Vorher wurde
+    z.B. project_id="211" (aus "211 Emmenhof Derendingen" geraten) via int() direkt
+    als DB-ID benutzt -- passte keine echte Projekt-ID zufällig, blockierte das
+    genauso wie eine echte Whitelist-Sperre, obwohl das Projekt freigegeben war."""
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    enabled, disabled = _two_projects(tmp_db)
+    real_id = enabled
+    tmp_db.execute("UPDATE projects SET name='211 Emmenhof Derendingen' WHERE id=?", (real_id,))
+    tmp_db.commit()
+    assert real_id != 211, "Testannahme verletzt: echte ID darf nicht zufällig 211 sein"
+
+    c = TestClient(app)
+    for project_ref in ("211 Emmenhof Derendingen", "Emmenhof", "211"):
+        r = c.get("/api/mcp/search", params={"q": "Fassadenkonzept", "project_id": project_ref})
+        assert r.status_code == 200
+        assert r.json()["results"], f"project_id={project_ref!r} sollte auf das freigegebene Projekt auflösen"
+
+
+def test_scoped_search_with_unknown_project_ref_is_not_logged_as_blocked(tmp_db):
+    """Ein unbekannter/nicht auflösbarer Projekt-Bezug ist ein anderer Fall als eine
+    echte Whitelist-Sperre -- beides mit demselben "Nicht für Claude freigegeben"
+    zu loggen würde eine falsche Positiv-ID unauffindbar machen (siehe
+    _resolve_mcp_project_ref)."""
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    _two_projects(tmp_db)
+
+    c = TestClient(app)
+    r = c.get("/api/mcp/search", params={"q": "Fassadenkonzept", "project_id": "Nichtexistent"})
+    assert r.status_code == 200
+    assert r.json()["results"] == []
+
+    row = tmp_db.execute("SELECT * FROM mcp_log ORDER BY id DESC LIMIT 1").fetchone()
+    assert "nicht gefunden" in row["blocked_json"]
+    assert "Nicht für Claude freigegeben" not in row["blocked_json"]
+
+
 def test_semantic_search_scoped_on_disabled_project_returns_error(tmp_db):
     from fastapi.testclient import TestClient
     from web.main import app

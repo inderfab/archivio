@@ -57,13 +57,6 @@ def _worker_watchdog_init(parent_pid: int) -> None:
     """
     extractors._IN_WORKER_PROCESS = True
 
-    # fitz-internen Cache begrenzen — verhindert unkontrolliertes Wachstum bei grossen PDFs
-    try:
-        import fitz
-        fitz.TOOLS.store_maxsize = 200 * 1024 * 1024  # 200 MB Cache-Limit
-    except Exception:
-        pass
-
     def _watch():
         while True:
             time.sleep(3)
@@ -266,11 +259,6 @@ def _scan_file_worker(args: tuple) -> str:
     finally:
         conn.close()
         gc.collect()
-        try:
-            import fitz
-            fitz.TOOLS.store_shrink(100)
-        except Exception:
-            pass
 
 
 def _kill_workers(pool) -> None:
@@ -600,7 +588,7 @@ def scan_project(project_id: int, root: Path,
                             _track_pool(pool)
                             result = "error"; stalled = True; file_broken = True
                     except Exception as exc:
-                        # Worker-Prozess ist gestorben (Crash/Segfault in openpyxl/PyMuPDF,
+                        # Worker-Prozess ist gestorben (Crash/Segfault in openpyxl/pypdfium2,
                         # OS-OOM …) BEVOR er einen Status schreiben konnte — diese Datei ist
                         # die Ursache. Pool neu aufsetzen, sonst schlägt der nächste Task fehl.
                         log.warning("Pool-Fehler bei %s: %s", path.name, exc)

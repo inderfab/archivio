@@ -37,7 +37,7 @@ sign_inner() {
         # hier hat der tatsaechlich laufende python3-Prozess Hardened Runtime OHNE die
         # noetigen Ausnahmen (disable-library-validation, allow-unsigned-executable-memory)
         # und wird vom Kernel beim ersten Versuch, ausfuehrbaren Speicher zu allozieren
-        # (numpy/cryptography/lxml/pymupdf), sofort und ohne jede Fehlermeldung getoetet.
+        # (numpy/cryptography/lxml/pypdfium2), sofort und ohne jede Fehlermeldung getoetet.
         find "$ROOT" \( -name "*.so" -o -name "*.dylib" -o -perm +111 \) -type f -print0 \
             | while IFS= read -r -d '' f; do
                 file "$f" | grep -q 'Mach-O' || continue

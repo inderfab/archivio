@@ -157,14 +157,13 @@ async def dashboard(request: Request):
 @router.get("/problem-docs", response_class=HTMLResponse)
 async def problem_docs(request: Request):
     conn = connection.get_connection()
-    docs = _problem_documents(conn)
+    overview = _extraction_overview(conn)
     conn.close()
-    if not docs:
-        return HTMLResponse('<div id="problem-docs-container"></div>')
     return templates.TemplateResponse("_problem_docs.html", {
-        "request":      request,
-        "problem_docs": docs,
-        "retry_done":   0,
+        "request": request,
+        **overview,
+        "retry_done": None,
+        "retry_kind": None,
     })
 
 
@@ -179,15 +178,96 @@ async def retry_errors(request: Request):
             f" WHERE extraction_status = 'error' AND extension IN ({placeholders})",
             _TEXT_EXTRACTABLE,
         ).rowcount
-    docs = _problem_documents(conn)
+    overview = _extraction_overview(conn)
     conn.close()
-    if not docs:
-        return HTMLResponse('<details id="problem-docs-section"></details>')
     return templates.TemplateResponse("_problem_docs.html", {
-        "request":      request,
-        "problem_docs": docs,
-        "retry_done":   count,
+        "request": request,
+        **overview,
+        "retry_done": count,
+        "retry_kind": "error",
     })
+
+
+@router.post("/retry-no-text", response_class=HTMLResponse)
+async def retry_no_text(request: Request):
+    """Setzt 'ok'-Dokumente OHNE Textinhalt auf 'pending' -- typischerweise alte,
+    gescannte/bildbasierte PDFs, die schon 'ok' markiert wurden BEVOR es die
+    heutige OCR-Stufe gab (oder bevor sie verbessert wurde). Ein normaler Scan
+    überspringt alles was schon 'ok' ist für immer, unabhängig davon wie gut die
+    Extraktion inzwischen geworden ist -- ohne diesen Reset bekommen sie nie einen
+    zweiten Versuch mit der aktuellen Pipeline."""
+    conn = connection.get_connection()
+    with conn:
+        placeholders = ",".join("?" * len(_TEXT_EXTRACTABLE))
+        count = conn.execute(f"""
+            UPDATE documents SET extraction_status = 'pending'
+            WHERE extraction_status = 'ok' AND extension IN ({placeholders})
+              AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = documents.id)
+        """, _TEXT_EXTRACTABLE).rowcount
+    overview = _extraction_overview(conn)
+    conn.close()
+    return templates.TemplateResponse("_problem_docs.html", {
+        "request": request,
+        **overview,
+        "retry_done": count,
+        "retry_kind": "no_text",
+    })
+
+
+@router.post("/extract-now/{doc_id}", response_class=HTMLResponse)
+async def extract_now(request: Request, doc_id: int):
+    """Stösst die Extraktion für EIN übergrosses Dokument manuell an -- im
+    Hintergrund, nicht innerhalb dieser Anfrage: ein einzelnes sehr grosses oder
+    gescanntes PDF kann mit OCR mehrere Minuten bis (im Extremfall) Stunden
+    dauern (siehe scanner/extractors.py _OCR_TIMEOUT) -- ein synchroner Request
+    würde Browser/HTMX so lange hängen lassen. Die Liste zeigt das Ergebnis beim
+    nächsten Neuladen der Seite.
+
+    _extract_and_store() kennt selbst keine Grössengrenze -- die sitzt
+    ausschliesslich in walker._process_file() (schon das Hashen einer riesigen
+    Datei würde den automatischen Massen-Scan ausbremsen), ein bewusster
+    Einzelklick auf GENAU eine Datei darf sie übergehen."""
+    from scanner.walker import _extract_and_store
+
+    def _run():
+        bg_conn = connection.get_connection()
+        try:
+            row = bg_conn.execute(
+                "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1",
+                (doc_id,),
+            ).fetchone()
+            if row and row["path"] and Path(row["path"]).exists():
+                _extract_and_store(bg_conn, doc_id, Path(row["path"]))
+        except Exception as exc:
+            log.warning("Manuelle Extraktion fehlgeschlagen (Dokument %s): %s", doc_id, exc)
+        finally:
+            bg_conn.close()
+
+    threading.Thread(target=_run, daemon=True).start()
+
+    conn = connection.get_connection()
+    overview = _extraction_overview(conn)
+    conn.close()
+    return templates.TemplateResponse("_problem_docs.html", {
+        "request": request,
+        **overview,
+        "retry_done": None,
+        "retry_kind": None,
+        "extracting": True,
+    })
+
+
+@router.post("/run-embeddings-now", response_class=HTMLResponse)
+async def run_embeddings_now():
+    """Holt fehlende Embeddings ausserhalb des normalen Nach-Scan-Laufs nach --
+    nützlich wenn Ollama während des letzten Scans nicht lief und sich seither
+    ein Rückstand angesammelt hat. _run_post_scan_embedding() ist bereits gegen
+    Mehrfachstart abgesichert (siehe _embed_thread_lock)."""
+    threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
+    return HTMLResponse(
+        '<span style="color:var(--text-3); font-size:12px;">'
+        'Embeddings werden im Hintergrund nachgeholt…</span>'
+    )
 
 
 @router.get("/download/helper")
@@ -1847,64 +1927,142 @@ _TEXT_EXTRACTABLE = (
     ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
 )
 
-def _problem_documents(conn) -> list[dict]:
-    """Gibt Dokumente zurück bei denen die Textextraktion unerwartet scheiterte.
-    Nur Formate die Text enthalten sollten (PDF, Word, Mail …) — Bilder und
-    CAD-Dateien werden bewusst nicht ausgelesen und zählen nicht als Fehler."""
-    result = []
-
-    # Nur Text-Formate mit echtem Extraktionsfehler
-    placeholders = ",".join("?" * len(_TEXT_EXTRACTABLE))
-    rows = conn.execute(f"""
-        SELECT d.filename, d.extension, d.filesize, dp.path, d.extraction_status
-        FROM documents d
-        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
-        WHERE d.extraction_status = 'error'
-          AND d.extension IN ({placeholders})
-        ORDER BY d.extension, d.filename
-    """, _TEXT_EXTRACTABLE).fetchall()
-
-    for row in rows:
-        result.append({
-            "filename": row["filename"],
-            "reason":   _error_reason(row["extension"], row["path"]),
-            "category": "error",
-        })
-
-    # 2. ok aber keine Chunks — bildbasierte PDFs (Pläne, Scans)
-    empty_rows = conn.execute("""
-        SELECT d.filename, d.filesize
-        FROM documents d
-        WHERE d.extraction_status = 'ok'
-          AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
-        ORDER BY d.filename
-    """).fetchall()
-
-    _PLAN_KEYWORDS = ("grundriss", "lageplan", "situation", "aushub", "schnitt",
-                      "ansicht", "plan", "fassade", "detail")
-    for row in empty_rows:
-        nl = row["filename"].lower()
-        if any(kw in nl for kw in _PLAN_KEYWORDS):
-            reason = "Kein Textinhalt – Architekturplan"
-        elif row["filesize"] > 5 * 1024 * 1024:
-            reason = "Kein Textinhalt – Bilddatei / gescanntes PDF"
-        else:
-            reason = "Kein Textinhalt – Bildbasiertes PDF"
-        result.append({
-            "filename": row["filename"],
-            "reason":   reason,
-            "category": "no_text",
-        })
-
-    return result
-
-
 def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".xlsx":
         return "Timeout – Datei zu komplex für Extraktion"
     if extension == ".pdf":
         return "PDF fehlerhaft, passwortgeschützt oder unlesbar"
     return "Datei fehlerhaft oder Format nicht unterstützt"
+
+
+def _extraction_overview(conn) -> dict:
+    """Kategorisierte Übersicht aller Dokumente, deren Inhalt (noch) nicht
+    durchsuchbar ist -- Grundlage für den Abschnitt "Dokumentenverarbeitung" im
+    Dashboard. 'extraction_status' allein reicht nicht aus, weil sowohl 'listed'
+    als auch das (heute kaum noch vergebene, aber bei älteren Scans vorkommende)
+    'unsupported' ganz unterschiedliche Ursachen haben können (siehe
+    scanner/walker.py _process_file und _extract_and_store) -- hier anhand der
+    Dateiendung nachträglich auseinandersortiert:
+
+    - unsupported: Format wird nie als Text gelesen (Bilder, CAD, Video, Archive,
+      ...) ODER eine Endung die in config.yaml (scanner.supported_extensions)
+      nicht als durchsuchbar eingetragen ist -- kein Fehler, erwartetes Verhalten.
+      Fasst 'listed' UND 'unsupported' zusammen: für Dateiendungen ausserhalb der
+      konfigurierten Liste bedeuten beide DB-Status dasselbe für die Anzeige hier.
+    - oversized: eigentlich text-extrahierbares Format (PDF, Word, ...), aber die
+      Datei überschreitet _MAX_PDF_EXTRACT_MB/_MAX_EXTRACT_MB -- nie wirklich
+      versucht, lässt sich einzeln von Hand nachholen (extract_now()-Route).
+    - error: echter Extraktionsfehler (defekte/passwortgeschützte Datei, Timeout,
+      alle drei PDF-Stufen gescheitert).
+    - no_text: Extraktion erfolgreich (status='ok'), aber keine Chunks -- typischerweise
+      gescannte/bildbasierte PDFs ohne Textebene, oft schon 'ok' markiert BEVOR es
+      die heutige OCR-Stufe gab. Ein normaler Scan überspringt 'ok' für immer,
+      deshalb eigener Retry (retry_no_text()) statt automatisch erneut zu versuchen.
+    - pending: wartet auf den nächsten Scan -- normal, kein Handlungsbedarf.
+    - missing_embedding: Text vorhanden, aber noch keine Embeddings für die
+      KI-Suche (nur relevant wenn Ollama zwischenzeitlich nicht lief).
+    """
+    from scanner import extractors as _extractors
+    from scanner.walker import _LIST_ONLY_EXTENSIONS, _supported_extensions
+    supported = _supported_extensions()
+    # Massgeblich für "ist das wirklich nur eine Grössenfrage" ist NICHT die vom
+    # Büro editierbare supported_extensions-Liste (die kann Endungen enthalten,
+    # für die es schlicht keinen Extraktor gibt -- z.B. CAD-Formate, die manche
+    # config.yaml optimistisch einträgt), sondern die tatsächliche Dispatch-Tabelle
+    # in scanner/extractors.py. Nur wenn BEIDES zutrifft (konfiguriert UND ein
+    # echter Extraktor existiert) kann "zu gross" überhaupt die Ursache sein.
+    real_extractable = set(_extractors._REGISTRY.keys())
+
+    listed_by_ext = {
+        row["extension"]: row["cnt"]
+        for row in conn.execute(
+            "SELECT extension, COUNT(*) AS cnt FROM documents "
+            "WHERE extraction_status IN ('listed', 'unsupported') GROUP BY extension"
+        ).fetchall()
+    }
+    unsupported_by_ext: dict[str, int] = {}
+    oversized_exts: list[str] = []
+    for ext, cnt in listed_by_ext.items():
+        if ext in supported and ext in real_extractable and ext not in _LIST_ONLY_EXTENSIONS:
+            oversized_exts.append(ext)
+        else:
+            unsupported_by_ext[ext] = cnt
+
+    oversized_total = sum(listed_by_ext[e] for e in oversized_exts)
+    oversized_files: list[dict] = []
+    if oversized_exts:
+        placeholders = ",".join("?" * len(oversized_exts))
+        oversized_files = [dict(r) for r in conn.execute(f"""
+            SELECT d.id, d.filename, d.filesize, dp.path
+            FROM documents d
+            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE d.extraction_status IN ('listed', 'unsupported') AND d.extension IN ({placeholders})
+            ORDER BY d.filesize DESC
+            LIMIT 50
+        """, oversized_exts).fetchall()]
+
+    err_placeholders = ",".join("?" * len(_TEXT_EXTRACTABLE))
+    error_total = conn.execute(
+        f"SELECT COUNT(*) FROM documents WHERE extraction_status='error' "
+        f"AND extension IN ({err_placeholders})",
+        _TEXT_EXTRACTABLE,
+    ).fetchone()[0]
+    error_files: list[dict] = []
+    if error_total:
+        for row in conn.execute(f"""
+            SELECT d.filename, d.extension, dp.path
+            FROM documents d
+            LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+            WHERE d.extraction_status = 'error' AND d.extension IN ({err_placeholders})
+            ORDER BY d.extension, d.filename
+            LIMIT 200
+        """, _TEXT_EXTRACTABLE).fetchall():
+            error_files.append({
+                "filename": row["filename"],
+                "reason":   _error_reason(row["extension"], row["path"]),
+            })
+
+    no_text_by_ext = {
+        row["extension"]: row["cnt"]
+        for row in conn.execute("""
+            SELECT d.extension, COUNT(*) AS cnt
+            FROM documents d
+            WHERE d.extraction_status = 'ok'
+              AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+            GROUP BY d.extension
+        """).fetchall()
+    }
+    no_text_total = sum(no_text_by_ext.values())
+    no_text_sample = [dict(r) for r in conn.execute("""
+        SELECT d.filename, d.filesize
+        FROM documents d
+        WHERE d.extraction_status = 'ok'
+          AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
+        ORDER BY d.filesize DESC
+        LIMIT 50
+    """).fetchall()] if no_text_total else []
+
+    pending_total = conn.execute(
+        "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
+    ).fetchone()[0]
+
+    missing_embedding = conn.execute(
+        "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
+    ).fetchone()[0]
+
+    return {
+        "unsupported_total":   sum(unsupported_by_ext.values()),
+        "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
+        "oversized_total":     oversized_total,
+        "oversized_files":     oversized_files,
+        "error_total":         error_total,
+        "error_files":         error_files,
+        "no_text_total":       no_text_total,
+        "no_text_by_ext":      dict(sorted(no_text_by_ext.items(), key=lambda kv: -kv[1])),
+        "no_text_sample":      no_text_sample,
+        "pending_total":       pending_total,
+        "missing_embedding":   missing_embedding,
+    }
 
 
 def _global_stats(conn) -> dict:

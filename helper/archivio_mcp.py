@@ -180,7 +180,9 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     inhaltlich/sinngemäss ist statt nach einem bekannten Namen zu suchen.
 
     query: Suchbegriff(e).
-    project: optionale Projekt-ID zum Einschränken.
+    project: optional, zum Einschränken auf ein Projekt -- den Projektnamen genau so
+    übernehmen, wie er in eckigen Klammern [...] bei einem vorherigen Treffer stand
+    (z.B. "211 Emmenhof Derendingen" oder auch nur "Emmenhof"), keine ID erfinden.
     scope: Komma-getrennt aus "docs" (Dokumentinhalt), "filenames" (Dateinamen),
     "folders" (Ordnernamen) — standardmässig alle drei aktiv.
 
@@ -258,7 +260,9 @@ def semantic_search(query: str, project: str = "") -> str:
     formuliert Claude selbst.
 
     query: Frage oder Suchbegriff.
-    project: optionale Projekt-ID zum Einschränken.
+    project: optional, zum Einschränken auf ein Projekt -- den Projektnamen genau so
+    übernehmen, wie er in eckigen Klammern [...] bei einem vorherigen Treffer stand
+    (z.B. "211 Emmenhof Derendingen" oder auch nur "Emmenhof"), keine ID erfinden.
 
     Jeder Treffer hat eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)" --
     diese UNVERÄNDERT übernehmen, nicht in einen Codeblock setzen und nicht selbst

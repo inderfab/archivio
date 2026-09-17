@@ -44,6 +44,14 @@ def log_access(
     else:
         status = "ok"
     try:
+        pid = int(project_id) if project_id else None
+    except (TypeError, ValueError):
+        # project_id kann ein nicht auflösbarer Projekt-Name/-Bezug sein (siehe
+        # web/api.py::_resolve_mcp_project_ref) -- der Grund steht bereits in
+        # blocked_json, hier nur nicht an der int-Spalte scheitern und den
+        # gesamten Log-Eintrag verlieren.
+        pid = None
+    try:
         with conn:
             conn.execute(
                 """INSERT INTO mcp_log
@@ -52,7 +60,7 @@ def log_access(
                 (
                     tool,
                     query or None,
-                    int(project_id) if project_id else None,
+                    pid,
                     json.dumps(files, ensure_ascii=False),
                     chars_sent,
                     json.dumps(blocked, ensure_ascii=False),

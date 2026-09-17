@@ -10,7 +10,9 @@ pytest-asyncio==0.24.0
 
 # Extraktion
 pypdf>=4.0
-pymupdf>=1.24
+pypdfium2>=4.30        # PDF-Text/Rendering, Ersatz für PyMuPDF (AGPL-3.0, für kommerziellen
+                       # Vertrieb closed-source nicht ohne Zusatzlizenz nutzbar) -- Apache-2.0/BSD
+pytesseract>=0.3.10    # OCR-Bridge zu Tesseract (Apache-2.0), rendert über pypdfium2
 python-docx>=1.1
 openpyxl>=3.1
 striprtf>=0.0.26

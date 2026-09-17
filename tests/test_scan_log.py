@@ -129,16 +129,16 @@ def test_group_scan_log_entries_groups_by_batch_id():
     scans = [
         {"batch_id": "b1", "project_name": "P3", "started_at": "2026-01-01T00:02:00Z",
          "finished_at": "2026-01-01T00:03:00Z", "total": 5, "new_count": 2, "error_count": 0,
-         "peak_memory_mb": 300, "peak_cpu_pct": 20, "status": "done"},
+         "peak_memory_mb": 300, "peak_cpu_pct": 20, "status": "done", "duration_s": 60},
         {"batch_id": "b1", "project_name": "P2", "started_at": "2026-01-01T00:01:00Z",
          "finished_at": "2026-01-01T00:02:00Z", "total": 3, "new_count": 1, "error_count": 1,
-         "peak_memory_mb": 500, "peak_cpu_pct": 50, "status": "error"},
+         "peak_memory_mb": 500, "peak_cpu_pct": 50, "status": "error", "duration_s": 60},
         {"batch_id": "b1", "project_name": "P1", "started_at": "2026-01-01T00:00:00Z",
          "finished_at": "2026-01-01T00:01:00Z", "total": 2, "new_count": 0, "error_count": 0,
-         "peak_memory_mb": 100, "peak_cpu_pct": 10, "status": "done"},
+         "peak_memory_mb": 100, "peak_cpu_pct": 10, "status": "done", "duration_s": 60},
         {"batch_id": None, "project_name": "Solo", "started_at": "2026-01-01T00:05:00Z",
          "finished_at": "2026-01-01T00:06:00Z", "total": 1, "new_count": 1, "error_count": 0,
-         "peak_memory_mb": 50, "peak_cpu_pct": 5, "status": "done"},
+         "peak_memory_mb": 50, "peak_cpu_pct": 5, "status": "done", "duration_s": 60},
     ]
     groups = _group_scan_log_entries(scans)
 
@@ -155,6 +155,10 @@ def test_group_scan_log_entries_groups_by_batch_id():
     assert batch_group["peak_memory_mb"] == 500
     assert batch_group["peak_cpu_pct"] == 50
     assert batch_group["status"] == "error"
+    # Summe der Einzeldauern -- der Sammel-Scan lief zwar parallel/sequentiell über
+    # mehrere Projekte, aber die im Systemstatus interessierende Grösse ist die
+    # tatsächlich aufgewendete Scan-Zeit insgesamt, nicht die Wanduhrzeit-Spanne.
+    assert batch_group["total_duration_s"] == 180
 
     assert solo_group["count"] == 1
 

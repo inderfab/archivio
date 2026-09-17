@@ -40,6 +40,39 @@ def _project_mcp_enabled(conn, project_id: int) -> bool:
     return bool(row and row["mcp_enabled"])
 
 
+def _resolve_mcp_project_ref(conn, raw: str) -> tuple[str, str | None]:
+    """Löst eine vom MCP-Client (Claude) übergebene Projekt-Referenz auf eine echte
+    project_id auf. Grund: search()/semantic_search() zeigen dem LLM in den Treffern
+    nur den Projekt-NAMEN an (nie die interne DB-ID, siehe helper/archivio_mcp.py)
+    -- ein späterer scope-Aufruf schickt deshalb fast immer den Namen oder eine aus
+    dem Namen geratene Zahl (z.B. "211" aus "211 Emmenhof Derendingen"), keine echte
+    ID. Ohne diese Auflösung landet man bei _project_mcp_enabled(conn, 211) und
+    bekommt "nicht freigegeben" zurück, obwohl das Projekt (mit anderer echter ID)
+    längst freigegeben ist -- nicht unterscheidbar von einer echten Sperre.
+
+    Gibt (project_id, error) zurück; project_id ist bei Erfolg immer eine echte
+    numerische ID (als String) oder unverändert "" / "mailbox:...". error ist nur
+    gesetzt wenn raw nicht leer ist aber zu keinem eindeutigen Projekt passt --
+    das muss als eigener Grund geloggt werden, nicht als Whitelist-Sperre."""
+    if not raw or raw.startswith("mailbox:"):
+        return raw, None
+    if raw.isdigit():
+        row = conn.execute("SELECT id FROM projects WHERE id=? AND active=1", (int(raw),)).fetchone()
+        if row:
+            return str(row["id"]), None
+    rows = conn.execute("SELECT id, name FROM projects WHERE active=1").fetchall()
+    exact = [r for r in rows if r["name"].lower() == raw.lower()]
+    if exact:
+        return str(exact[0]["id"]), None
+    contains = [r for r in rows if raw.lower() in r["name"].lower()]
+    if len(contains) == 1:
+        return str(contains[0]["id"]), None
+    if len(contains) > 1:
+        names = ", ".join(r["name"] for r in contains)
+        return raw, f"Mehrere Projekte passen zu „{raw}“: {names} — bitte genauer angeben"
+    return raw, f"Projekt „{raw}“ nicht gefunden"
+
+
 def _mcp_enabled_mailboxes(conn) -> set[str]:
     return {r[0] for r in conn.execute(
         "SELECT mailbox_name FROM mail_scan_config WHERE mcp_enabled=1"
@@ -185,22 +218,25 @@ async def mcp_search(
     # Whitelist: ein explizit angefragtes, nicht freigegebenes Projekt wird gar nicht
     # erst durchsucht -- klarer, protokollierter Refusal statt eines still-leeren
     # Ergebnisses weiter unten (das kommt für den unscoped Fall trotzdem noch dazu).
+    # project_id kommt vom LLM praktisch nie als echte DB-ID (Suchtreffer zeigen nur
+    # den Projektnamen an) -- erst auflösen, siehe _resolve_mcp_project_ref.
     if project_id and not project_id.startswith("mailbox:"):
+        _wl_conn = connection.get_connection()
         try:
-            _pid = int(project_id)
-        except ValueError:
-            _pid = None
-        if _pid is not None:
-            _wl_conn = connection.get_connection()
-            try:
-                if not _project_mcp_enabled(_wl_conn, _pid):
-                    from scanner.mcp_log import log_access
-                    log_access(_wl_conn, "search", q, project_id, [],
-                               [{"path": f"Projekt {_pid}", "reason": "Nicht für Claude freigegeben"}],
-                               session_id=session_id)
-                    return JSONResponse({"results": [], "folders": []})
-            finally:
-                _wl_conn.close()
+            project_id, _resolve_err = _resolve_mcp_project_ref(_wl_conn, project_id)
+            if _resolve_err:
+                from scanner.mcp_log import log_access
+                log_access(_wl_conn, "search", q, project_id, [],
+                           [{"path": None, "reason": _resolve_err}], session_id=session_id)
+                return JSONResponse({"results": [], "folders": [], "notice": _resolve_err})
+            if not _project_mcp_enabled(_wl_conn, int(project_id)):
+                from scanner.mcp_log import log_access
+                log_access(_wl_conn, "search", q, project_id, [],
+                           [{"path": f"Projekt {project_id}", "reason": "Nicht für Claude freigegeben"}],
+                           session_id=session_id)
+                return JSONResponse({"results": [], "folders": []})
+        finally:
+            _wl_conn.close()
 
     def _do_search():
         conn = connection.get_connection()
@@ -326,24 +362,25 @@ async def mcp_semantic_search(
         return JSONResponse({"sources": [], "error": None, "ollama_missing": False})
 
     if project_id and not project_id.startswith("mailbox:"):
+        _wl_conn = connection.get_connection()
         try:
-            _pid = int(project_id)
-        except ValueError:
-            _pid = None
-        if _pid is not None:
-            _wl_conn = connection.get_connection()
-            try:
-                if not _project_mcp_enabled(_wl_conn, _pid):
-                    from scanner.mcp_log import log_access
-                    log_access(_wl_conn, "semantic_search", q, project_id, [],
-                               [{"path": f"Projekt {_pid}", "reason": "Nicht für Claude freigegeben"}],
-                               session_id=session_id)
-                    return JSONResponse({
-                        "sources": [], "ollama_missing": False,
-                        "error": "Dieses Projekt ist nicht für Claude freigegeben.",
-                    })
-            finally:
-                _wl_conn.close()
+            project_id, _resolve_err = _resolve_mcp_project_ref(_wl_conn, project_id)
+            if _resolve_err:
+                from scanner.mcp_log import log_access
+                log_access(_wl_conn, "semantic_search", q, project_id, [],
+                           [{"path": None, "reason": _resolve_err}], session_id=session_id)
+                return JSONResponse({"sources": [], "ollama_missing": False, "error": _resolve_err})
+            if not _project_mcp_enabled(_wl_conn, int(project_id)):
+                from scanner.mcp_log import log_access
+                log_access(_wl_conn, "semantic_search", q, project_id, [],
+                           [{"path": f"Projekt {project_id}", "reason": "Nicht für Claude freigegeben"}],
+                           session_id=session_id)
+                return JSONResponse({
+                    "sources": [], "ollama_missing": False,
+                    "error": "Dieses Projekt ist nicht für Claude freigegeben.",
+                })
+        finally:
+            _wl_conn.close()
 
     loop = asyncio.get_event_loop()
     sources, error, ollama_missing = await loop.run_in_executor(
@@ -852,29 +889,36 @@ async def debug_extract_error(filename: str = ""):
 
     import traceback
     from pathlib import Path
-    result = {"path": path, "fitz": None, "ocr": None, "pypdf": None}
+    result = {"path": path, "pypdfium2": None, "ocr": None, "pypdf": None}
 
-    # Test 1: fitz.open
+    # Test 1: pypdfium2
     try:
-        import fitz
-        doc = fitz.open(path)
-        result["fitz"] = f"ok — {doc.page_count} Seiten, encrypted={doc.is_encrypted}, needs_pass={doc.needs_pass}"
+        import pypdfium2 as pdfium
+        doc = pdfium.PdfDocument(path)
+        result["pypdfium2"] = f"ok — {len(doc)} Seiten"
         page = doc[0]
-        text = page.get_text().strip()
-        result["fitz_text_sample"] = repr(text[:100])
+        textpage = page.get_textpage()
+        text = textpage.get_text_range().strip()
+        result["pypdfium2_text_sample"] = repr(text[:100])
+        textpage.close()
+        page.close()
         doc.close()
     except Exception as e:
-        result["fitz"] = f"FEHLER: {traceback.format_exc()}"
+        result["pypdfium2"] = f"FEHLER: {traceback.format_exc()}"
 
-    # Test 2: OCR
+    # Test 2: OCR (pypdfium2-Rendering + pytesseract)
     try:
-        import fitz
-        doc = fitz.open(path)
+        import pypdfium2 as pdfium
+        import pytesseract
+        doc = pdfium.PdfDocument(path)
         page = doc[0]
-        tp = page.get_textpage_ocr(flags=0, language="deu+eng", dpi=72, full=True)
-        text = page.get_text(textpage=tp).strip()
+        bitmap = page.render(scale=72 / 72)
+        image = bitmap.to_pil()
+        bitmap.close()
+        text = pytesseract.image_to_string(image, lang="deu+eng").strip()
         result["ocr"] = f"ok — {len(text)} Zeichen"
         result["ocr_sample"] = repr(text[:100])
+        page.close()
         doc.close()
     except Exception as e:
         result["ocr"] = f"FEHLER: {str(e)}"
