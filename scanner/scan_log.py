@@ -10,10 +10,110 @@ import os
 import sqlite3
 import threading
 import time
+from datetime import datetime, timedelta, timezone
 
 import psutil
 
 log = logging.getLogger(__name__)
+
+# ── Archiv-Status für ruhende Projekte ──────────────────────────────────────────
+# Ein Projekt, das mehrfach in Folge nichts Neues liefert, wird seltener gescannt
+# (siehe web/api.py::scan_all()) -- der Scan selbst bleibt vollständig und korrekt,
+# nur seine Häufigkeit sinkt. Verdoppelnde Wochen-Leiter, gedeckelt bei 52 Wochen
+# (nie ganz aufhören zu prüfen -- ein Scan im Jahr kostet nichts, schützt aber vor
+# einem dauerhaft blinden Fleck).
+_ARCHIVE_QUALIFY_STREAK = 7               # so viele leere Scans in Folge -> Stufe 1
+_ARCHIVE_LADDER_WEEKS   = [1, 2, 4, 8, 16, 32, 52]
+_ARCHIVE_MANUAL_TIER    = 3               # manueller Schalter startet bei "4 Wochen"
+
+
+_ARCHIVE_TABLES = ("projects", "mail_scan_config")  # die einzigen Tabellen mit
+                                                     # archive_tier/-streak/-next_check_at
+
+
+def _set_archive_tier(conn: sqlite3.Connection, table: str, row_id: int, tier: int) -> None:
+    assert table in _ARCHIVE_TABLES
+    weeks      = _ARCHIVE_LADDER_WEEKS[tier - 1]
+    next_check = (datetime.now(timezone.utc) + timedelta(weeks=weeks)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    with conn:
+        conn.execute(
+            f"UPDATE {table} SET archive_tier=?, archive_streak=0, "
+            f"archive_next_check_at=? WHERE id=?",
+            (tier, next_check, row_id),
+        )
+
+
+def _clear_archive_state(conn: sqlite3.Connection, table: str, row_id: int) -> None:
+    assert table in _ARCHIVE_TABLES
+    with conn:
+        conn.execute(
+            f"UPDATE {table} SET archive_tier=0, archive_streak=0, "
+            f"archive_next_check_at=NULL WHERE id=?",
+            (row_id,),
+        )
+
+
+def _update_archive_state(
+    conn: sqlite3.Connection, project_id: int | None, status: str, new_count: int
+) -> None:
+    """Nach jedem abgeschlossenen Scan aufgerufen. Fehler/Abbruch sind kein
+    verlässlicher Datenpunkt (der Ordner wurde ja nicht wirklich vollständig
+    geprüft) und ändern nichts. new_count > 0 setzt sofort auf Stufe 0 zurück --
+    unabhängig davon, ob die Stufe automatisch oder manuell erreicht wurde."""
+    if project_id is None or status != "done":
+        return
+    row = conn.execute(
+        "SELECT archive_tier, archive_streak FROM projects WHERE id=?", (project_id,)
+    ).fetchone()
+    if row is None:
+        return
+    tier, streak = row["archive_tier"], row["archive_streak"]
+    if new_count > 0:
+        if tier or streak:
+            _clear_archive_state(conn, "projects", project_id)
+        return
+    if tier == 0:
+        streak += 1
+        if streak >= _ARCHIVE_QUALIFY_STREAK:
+            _set_archive_tier(conn, "projects", project_id, 1)
+        else:
+            with conn:
+                conn.execute(
+                    "UPDATE projects SET archive_streak=? WHERE id=?", (streak, project_id)
+                )
+    else:
+        _set_archive_tier(conn, "projects", project_id, min(tier + 1, len(_ARCHIVE_LADDER_WEEKS)))
+
+
+def _toggle_manual_archive(conn: sqlite3.Connection, table: str, row_id: int) -> bool:
+    row = conn.execute(f"SELECT archive_tier FROM {table} WHERE id=?", (row_id,)).fetchone()
+    if row is None:
+        return False
+    if row["archive_tier"] > 0:
+        _clear_archive_state(conn, table, row_id)
+        return False
+    _set_archive_tier(conn, table, row_id, _ARCHIVE_MANUAL_TIER)
+    return True
+
+
+def toggle_manual_archive(conn: sqlite3.Connection, project_id: int) -> bool:
+    """Schaltet den Archiv-Status eines Projekts manuell um (unabhängig vom
+    Aktiv/MCP-Schalter). Startet bei Stufe _ARCHIVE_MANUAL_TIER ("4 Wochen") statt
+    die Qualifikationsphase abzuwarten. Gibt den neuen Zustand zurück (True =
+    jetzt archiviert). Die automatische Rückstufung bei neuem Inhalt
+    (_update_archive_state) gilt unverändert weiter -- kein separater
+    "manueller" Zustand, nur ein anderer Startpunkt auf derselben Leiter."""
+    return _toggle_manual_archive(conn, "projects", project_id)
+
+
+def toggle_manual_mail_archive(conn: sqlite3.Connection, mail_config_id: int) -> bool:
+    """Wie toggle_manual_archive(), aber für ein Postfach OHNE Projekt (siehe
+    web/dashboard.py::mail_archive_toggle() -- mit Projekt verknüpfte Postfächer
+    übernehmen dessen archive_tier, gleiches Prinzip wie mcp_enabled/Migration
+    017_mail_mcp_enabled, dafür gibt es keinen eigenen Schalter)."""
+    return _toggle_manual_archive(conn, "mail_scan_config", mail_config_id)
 
 
 class ResourceSampler:
@@ -108,3 +208,4 @@ def log_scan(
                 round(peak_memory_mb, 1), round(peak_cpu_pct, 1), batch_id,
             ),
         )
+    _update_archive_state(conn, project_id, status, progress.get("new", 0))

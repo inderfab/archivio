@@ -37,6 +37,8 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "021_search_log", _m021)
     _apply(conn, "022_search_log_token", _m022)
     _apply(conn, "023_search_log_query_string", _m023)
+    _apply(conn, "024_project_archive", _m024)
+    _apply(conn, "025_mail_archive", _m025)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -572,4 +574,42 @@ def _m023(conn: sqlite3.Connection):
     except Exception as e:
         if "duplicate column" not in str(e).lower():
             raise
+    conn.commit()
+
+
+def _m024(conn: sqlite3.Connection):
+    """Archiv-Status für Projekte, die seit mehreren Scans nichts Neues mehr liefern
+    -- deren künftige Scans werden seltener angesetzt (siehe scanner/scan_log.py
+    _update_archive_state()), statt bei jedem Lauf den kompletten, unveränderten
+    Ordnerbaum erneut durchzukämmen. archive_tier=0 heisst normal; 1..7 indiziert
+    in die Wochen-Leiter. Kein Deckel-Zustand "nie wieder prüfen" -- selbst auf der
+    höchsten Stufe wird einmal im Jahr real nachgeschaut."""
+    for col, decl in (
+        ("archive_tier", "INTEGER NOT NULL DEFAULT 0"),
+        ("archive_streak", "INTEGER NOT NULL DEFAULT 0"),
+        ("archive_next_check_at", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE projects ADD COLUMN {col} {decl}")
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                raise
+    conn.commit()
+
+
+def _m025(conn: sqlite3.Connection):
+    """Gleicher Archiv-Status wie bei Projekten (_m024), jetzt auch für Postfächer
+    OHNE Projekt -- ein mit einem Projekt verknüpftes Postfach übernimmt dessen
+    archive_tier (gleiches Prinzip wie mail_scan_config.mcp_enabled, siehe
+    _m017), diese eigenen Spalten gelten dann nicht."""
+    for col, decl in (
+        ("archive_tier", "INTEGER NOT NULL DEFAULT 0"),
+        ("archive_streak", "INTEGER NOT NULL DEFAULT 0"),
+        ("archive_next_check_at", "TEXT"),
+    ):
+        try:
+            conn.execute(f"ALTER TABLE mail_scan_config ADD COLUMN {col} {decl}")
+        except Exception as e:
+            if "duplicate column" not in str(e).lower():
+                raise
     conn.commit()

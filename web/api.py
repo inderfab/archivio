@@ -9,7 +9,7 @@ import subprocess
 import threading
 import uuid
 import zipfile
-from datetime import datetime
+from datetime import datetime, timezone
 from pathlib import Path
 
 from fastapi import APIRouter
@@ -536,6 +536,96 @@ async def mcp_document(document_id: int, session_id: str = ""):
         conn.close()
 
 
+@router.get("/mcp/merge-pdf")
+async def mcp_merge_pdf(document_ids: str, session_id: str = ""):
+    """Führt mehrere über search()/semantic_search() gefundene PDF-Dokumente zu
+    einer neuen Datei zusammen (z.B. alle Materialblätter mehrerer Projekte) --
+    Claude kann PDFs nicht selbst zusammenführen (kein Dateizugriff über MCP),
+    Archivio übernimmt das serverseitig.
+
+    Anders als /api/pdf-zusammenfuehren (nur vom authentifizierten Web-UI aus
+    erreichbar, prüft nur die NAS-Ordner-Whitelist) durchläuft hier jede Id
+    zusätzlich dieselbe Freigabekette wie mcp_document(): Projekt-Whitelist,
+    dann Normen-Sperre, dann Sperrliste -- Claude könnte sonst beliebige
+    document_ids aus einer früheren, freigegebenen Suche mit einer Id aus einem
+    NICHT freigegebenen Projekt mischen und so dessen Inhalt indirekt doch
+    herausbekommen."""
+    try:
+        ids = [int(x) for x in document_ids.split(",") if x.strip()]
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Ungültige document_ids"}, status_code=400)
+    if not ids:
+        return JSONResponse({"ok": False, "error": "Keine Dokumente angegeben"}, status_code=400)
+
+    import pypdf
+
+    from scanner.block_list import is_blocked as block_is_blocked
+    from scanner.mcp_log import log_access
+    from scanner.norms import is_norm_doc
+
+    conn = connection.get_connection()
+    allowed_ids = _mcp_allowed_doc_ids(conn, ids)
+    writer = pypdf.PdfWriter()
+    merged = 0
+    sent: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        for doc_id in ids:
+            row = conn.execute(
+                "SELECT filename, project_id FROM documents WHERE id=?", (doc_id,)
+            ).fetchone()
+            if not row:
+                skipped.append({"path": None, "filename": str(doc_id), "reason": "Dokument nicht gefunden"})
+                continue
+            path_row = conn.execute(
+                "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1", (doc_id,)
+            ).fetchone()
+            filepath = path_row["path"] if path_row else None
+
+            if doc_id not in allowed_ids:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": "Nicht für Claude freigegeben"})
+                continue
+            if is_norm_doc(conn, doc_id, filepath):
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": "Norm erkannt"})
+                continue
+            is_blk, block_reason = block_is_blocked(conn, doc_id, filepath, row["project_id"])
+            if is_blk:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": block_reason})
+                continue
+
+            path, err = _resolve_pdf_path(conn, doc_id)
+            if err:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": err})
+                continue
+            try:
+                writer.append(str(path))
+                merged += 1
+                sent.append({"id": doc_id, "path": filepath, "filename": row["filename"], "extension": ".pdf"})
+            except Exception as e:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": f"nicht lesbar: {e}"})
+
+        if merged == 0:
+            writer.close()
+            log_access(conn, "merge_pdf", document_ids, None, [], skipped, session_id=session_id)
+            return JSONResponse(
+                {"ok": False, "error": "Keine gültigen, freigegebenen PDFs in der Auswahl", "skipped": skipped},
+                status_code=400,
+            )
+
+        buf = io.BytesIO()
+        writer.write(buf)
+        writer.close()
+        log_access(conn, "merge_pdf", document_ids, None, sent, skipped, session_id=session_id)
+        return JSONResponse({
+            "ok": True,
+            "merged": merged,
+            "skipped": skipped,
+            "pdf_base64": base64.b64encode(buf.getvalue()).decode("ascii"),
+        })
+    finally:
+        conn.close()
+
+
 @router.get("/mcp/base-folders")
 async def mcp_base_folders():
     """Gibt die Ordnerpfade der für Claude freigegebenen Projekte zurück — der
@@ -561,8 +651,14 @@ async def scan_all():
     # gescannt sortiert in SQLite ASC ganz nach vorne). So kommt nach einem
     # RAM-Neustart der Batch mit den NOCH offenen Projekten weiter, statt immer
     # wieder bei denselben (grossen) Projekten von vorne zu beginnen.
+    # Projekte im Archiv-Status (siehe scanner/scan_log.py) werden erst wieder
+    # aufgenommen, wenn ihre naechste Pruefung faellig ist -- der Einzel-Scan-
+    # Button eines Projekts (web/dashboard.py) ignoriert das bewusst immer.
     projects = conn.execute(
-        "SELECT id, name, path FROM projects WHERE active=1 ORDER BY last_scanned_at ASC"
+        "SELECT id, name, path FROM projects WHERE active=1 "
+        "AND (archive_next_check_at IS NULL OR archive_next_check_at <= ?) "
+        "ORDER BY last_scanned_at ASC",
+        (datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"),),
     ).fetchall()
     conn.close()
 
@@ -1656,6 +1752,7 @@ _GITHUB_REPO = "inderfab/archivio"
 async def update_check():
     """Prüft ob eine neue Version auf GitHub verfügbar ist."""
     import requests as _req
+    from packaging.version import InvalidVersion, Version
     current = _VERSION_FILE.read_text().strip() if _VERSION_FILE.exists() else "0.0.0"
     try:
         resp = _req.get(
@@ -1666,7 +1763,13 @@ async def update_check():
         if resp.status_code != 200:
             return JSONResponse({"current": current, "update_available": False})
         remote_ver = resp.json().get("tag_name", "").lstrip("v")
-        update_available = bool(remote_ver) and remote_ver != current
+        # Reiner Text-Vergleich (!=) hielt einen SERVER, der bereits neuer ist als das
+        # letzte veröffentlichte Release (z.B. frisch gebaut, noch nicht releast), für
+        # "veraltet" und bot ein Downgrade an -- echter Versionsvergleich statt dessen.
+        try:
+            update_available = bool(remote_ver) and Version(remote_ver) > Version(current)
+        except InvalidVersion:
+            update_available = bool(remote_ver) and remote_ver != current
         return JSONResponse({
             "current": current,
             "latest": remote_ver,

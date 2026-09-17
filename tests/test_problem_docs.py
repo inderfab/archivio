@@ -150,6 +150,72 @@ def test_extraction_overview_pending_and_missing_embedding_counts(tmp_db):
     assert overview["missing_embedding"] == 1  # der frisch gespeicherte Chunk hat noch kein Embedding
 
 
+def test_extraction_overview_error_files_include_id_and_path_for_actions(tmp_db):
+    """error_files braucht id (fürs erneute Scannen) und path (fürs Im-Finder-
+    Anzeigen) -- ohne beide könnten die Buttons pro Datei in _problem_docs.html
+    nicht funktionieren."""
+    from web.dashboard import _extraction_overview
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    doc_id = _make_doc(tmp_db, p, "kaputt.pdf", ".pdf", "error")
+    tmp_db.commit()
+
+    overview = _extraction_overview(tmp_db)
+    assert overview["error_files"][0]["id"] == doc_id
+    assert overview["error_files"][0]["path"] == "/scan/kaputt.pdf"
+
+
+def test_extraction_overview_no_text_sample_includes_id_and_path_for_actions(tmp_db):
+    from web.dashboard import _extraction_overview
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    doc_id = _make_doc(tmp_db, p, "scan.pdf", ".pdf", "ok", filesize=2_000_000)
+    tmp_db.commit()
+
+    overview = _extraction_overview(tmp_db)
+    assert overview["no_text_sample"][0]["id"] == doc_id
+    assert overview["no_text_sample"][0]["path"] == "/scan/scan.pdf"
+
+
+def test_extraction_overview_flags_gallery_extensions(tmp_db):
+    """.jpg ist zwar 'nicht unterstützt' (keine Textextraktion), aber schon über
+    die Fotogalerie durchsuchbar -- die Übersicht muss das unterscheidbar machen,
+    sonst wirkt die Kategorie wie eine unlösbare Sammelliste."""
+    from web.dashboard import _extraction_overview
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    _make_doc(tmp_db, p, "foto.jpg", ".jpg", "listed")
+    tmp_db.commit()
+
+    overview = _extraction_overview(tmp_db)
+    assert ".jpg" in overview["gallery_extensions"]
+
+
+def test_problem_docs_route_offers_finder_and_rescan_per_file(tmp_db):
+    """Fehler- und Kein-Textinhalt-Zeilen bekommen je einen 'Im Finder'- und
+    'Jetzt neu scannen'-Knopf für genau diese eine Datei -- vorher liess sich
+    nur pauschal die ganze Kategorie neu versuchen."""
+    from fastapi.testclient import TestClient
+    from web.main import app
+
+    p = queries.insert_project(tmp_db, "P", "/scan")
+    err_id  = _make_doc(tmp_db, p, "kaputt.pdf", ".pdf", "error")
+    scan_id = _make_doc(tmp_db, p, "scan.pdf", ".pdf", "ok", filesize=2_000_000)
+    _make_doc(tmp_db, p, "foto.jpg", ".jpg", "listed")
+    tmp_db.commit()
+
+    r = TestClient(app).get("/dashboard/problem-docs")
+    assert r.status_code == 200
+    assert "Im Finder" in r.text
+    assert "Jetzt neu scannen" in r.text
+    assert f"/dashboard/extract-now/{err_id}" in r.text
+    assert f"/dashboard/extract-now/{scan_id}" in r.text
+    assert "/scan/kaputt.pdf" in r.text
+    assert "/scan/scan.pdf" in r.text
+    # Bild-Hinweis nur bei tatsächlichen Galerie-Formaten
+    assert "bereits über" in r.text
+
+
 def test_problem_docs_route_renders_all_categories(tmp_db):
     from fastapi.testclient import TestClient
     from web.main import app

@@ -28,6 +28,14 @@
               class="mcp-toggle {{ 'on' if p.mcp_enabled else '' }}"
               title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if p.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }}">☁</button>
     </form>
+    <form hx-post="/dashboard/projects/{{ p.id }}/archive-toggle"
+          hx-target="#project-list"
+          hx-swap="innerHTML"
+          style="display:contents;">
+      <button type="submit"
+              class="archive-toggle {{ 'on' if p.archived else '' }}"
+              title="{{ 'Archiviert — wird seltener gescannt. Klicken zum Zurücksetzen auf normal.' if p.archived else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }}{% if p.archive_next_check %} · nächste Prüfung: {{ p.archive_next_check }}{% endif %}"><span class="archive-emoji">📦</span></button>
+    </form>
     {% endif %}
 
     {% if not p.active %}
@@ -152,6 +160,7 @@
   <p><strong>Unterordner als eigenes Projekt:</strong> „Unterordner ▸" öffnen, gewünschten Ordner anklicken, im Detailpanel „Diesen Ordner als eigenes Projekt" wählen — läuft danach separat, mit eigenem Scan und eigener MCP-Freigabe.</p>
   <p><strong>Ordner ignorieren:</strong> Im selben Ordner-Browser einen Ordner anklicken und im Detailpanel „Ignorieren" wählen. Betrifft nur diesen Scan-Durchlauf, keine Datenbankänderung.</p>
   <p><strong>Für KI-Anwendungen freigeben:</strong> ☁-Symbol neben einem aktiven Projekt. Standardmässig ist kein Projekt freigegeben — erst nach Klick kann eine angebundene KI-Anwendung über die MCP-Schnittstelle darauf zugreifen. Verwaltung und Protokoll dazu im Reiter „MCP".</p>
+  <p><strong>Archivieren:</strong> 📦-Symbol neben einem aktiven Projekt. Ein Projekt, das mehrfach in Folge nichts Neues mehr liefert, wird automatisch seltener gescannt (Rhythmus verdoppelt sich mit jeder weiteren leeren Prüfung, 1 Woche bis maximal 1 Jahr) — taucht dabei ein neuer/veränderter Ordnerinhalt auf, springt es sofort zurück auf normal. Klicken setzt ein Projekt manuell auf Archiv (startet bei 4 Wochen), erneutes Klicken hebt es wieder auf.</p>
   <p><strong>Nicht auffindbarer Ordner:</strong> Wurde ein Projektordner verschoben statt gelöscht, erscheint „📁 Neu verknüpfen" — verknüpft das Projekt mit dem neuen Pfad, ohne Tags/Bewertungen zu verlieren.</p>
 </div>
 {% endmacro %}
@@ -185,6 +194,13 @@
     {% endif %}
   </span>
   <a href="#nicht-zugeordnet">Anzeigen ↓</a>
+</div>
+{% endif %}
+
+{% if not groups and not orphans %}
+<div class="onboarding-card">
+  <p>Noch kein Projektordner eingerichtet — Archivio durchsucht erst dann Dokumente.</p>
+  <a class="btn btn-primary" href="/dashboard/settings#ordner">Neue Projektordner anlegen</a>
 </div>
 {% endif %}
 

@@ -10,6 +10,7 @@
       <p><strong>Vorschlag statt Automatik:</strong> Findet sich keine Nummer, aber Namen überschneiden sich mit einem Projekt, erscheint stattdessen nur ein Vorschlag — der wird nie automatisch übernommen, sondern muss per „Übernehmen" bestätigt werden.</p>
       <p><strong>Manuell:</strong> Über das Dropdown jederzeit änderbar, auch nachträglich. „+ Als eigenes Projekt speichern" macht aus einem Postfach ohne passenden Ordner ein eigenständiges Projekt.</p>
       <p><strong>MCP-Freigabe (☁):</strong> Ist das Postfach einem Projekt zugeordnet, übernimmt es dessen Freigabe-Status (hier nicht separat einstellbar). Nur bei aktiven, noch nicht zugeordneten Postfächern gibt es einen eigenen Schalter.</p>
+      <p><strong>Archiviert (📦):</strong> Wie bei Projekten (siehe Projektliste) — ein archiviertes Postfach wird seltener auf neue Mails geprüft. Ist das Postfach einem Projekt zugeordnet, übernimmt es dessen Archiv-Status, genau wie bei der MCP-Freigabe.</p>
     </div>
   </div>
 
@@ -65,6 +66,8 @@
         {% if c.active and c.project_id %}
         <span class="mcp-toggle {{ 'on' if c.project_mcp_enabled else '' }}"
               title="{{ 'Für KI-Anwendungen freigegeben' if c.project_mcp_enabled else 'Nicht für KI-Anwendungen freigegeben' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar.">☁</span>
+        <span class="archive-toggle {{ 'on' if c.project_archive_tier else '' }}"
+              title="{{ 'Archiviert' if c.project_archive_tier else 'Nicht archiviert' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar."><span class="archive-emoji">📦</span></span>
         {% elif c.active %}
         <form hx-post="/dashboard/mail/mcp-toggle"
               hx-target="#mail-section" hx-swap="outerHTML"
@@ -73,6 +76,14 @@
           <button type="submit"
                   class="mcp-toggle {{ 'on' if c.mcp_enabled else '' }}"
                   title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if c.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }} (noch keinem Projekt zugeordnet)">☁</button>
+        </form>
+        <form hx-post="/dashboard/mail/archive-toggle"
+              hx-target="#mail-section" hx-swap="outerHTML"
+              style="display:contents;">
+          <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
+          <button type="submit"
+                  class="archive-toggle {{ 'on' if c.archive_tier else '' }}"
+                  title="{{ 'Archiviert — klicken zum Zurücksetzen auf normal' if c.archive_tier else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }} (noch keinem Projekt zugeordnet)"><span class="archive-emoji">📦</span></button>
         </form>
         {% endif %}
 

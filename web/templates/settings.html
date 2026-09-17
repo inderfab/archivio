@@ -13,6 +13,35 @@
   .settings-banner.ok      { background: #f0fdf4; color: #166534; border: 1px solid #bbf7d0; }
   .settings-banner.warning { background: #fffbeb; color: #92400e; border: 1px solid #fde68a; }
 
+  /* Erinnerungsleiste: sticky am oberen Rand, damit sie beim Scrollen durch die
+     Sektionen sichtbar bleibt -- der Sinn ist ja gerade, ungespeicherte Änderungen
+     nicht zu übersehen. */
+  .save-reminder {
+    position: sticky; top: 12px; z-index: 20;
+    display: flex; align-items: center; gap: 12px;
+    padding: 10px 14px; border-radius: var(--radius);
+    background: #fffbeb; color: #92400e; border: 1px solid #fde68a;
+    font-size: 14px; margin-bottom: 20px;
+    box-shadow: 0 2px 8px rgba(0,0,0,.08);
+  }
+  .save-reminder button {
+    margin-left: auto; padding: 6px 16px; font-size: 13px; font-family: inherit;
+    border: 1px solid #92400e; border-radius: var(--radius);
+    background: #92400e; color: #fff; cursor: pointer; flex-shrink: 0;
+  }
+  .save-reminder button:hover { background: #78350f; }
+
+  /* Permanent leicht abgesetzt (neue Büros übersehen dieses Feld sonst leicht),
+     zusätzlich kurz stark hervorgehoben wenn per #ordner-Link direkt dorthin
+     gesprungen wird (z.B. vom leeren Dashboard aus). */
+  .ordner-callout {
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg-2); padding: 14px 16px;
+  }
+  .ordner-callout:target {
+    border-color: var(--accent); box-shadow: 0 0 0 3px rgba(55,65,81,.15);
+  }
+
   /* Immer offene Sektionen (kein <details>/Einklappen mehr) */
   .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: visible; }
   .settings-section-header {
@@ -122,9 +151,13 @@
 <div class="settings-page">
   <h1>Einstellungen</h1>
 
-  {% if saved %}
-  <div class="settings-banner ok">Einstellungen gespeichert.</div>
-  {% endif %}
+  <div class="settings-banner ok" id="settings-saved-banner" style="{% if not saved %}display:none;{% endif %}">Einstellungen gespeichert.</div>
+
+  <div class="save-reminder" id="save-reminder" style="display:none;">
+    <span>Du hast ungespeicherte Änderungen — jetzt speichern?</span>
+    <button type="button" onclick="saveSettingsNow()">Speichern</button>
+  </div>
+
   <form method="POST" action="/dashboard/settings" id="settings-form">
     {# Hidden submit so Enter works in any text input #}
     <button type="submit" style="display:none"></button>
@@ -150,10 +183,14 @@
           </div>
         </div>
 
-        <div>
-          <label style="font-size:13px; font-weight:500; color:var(--text); display:block; margin-bottom:6px;">
-            Projektordner
+        <div class="ordner-callout" id="ordner">
+          <label style="font-size:14px; font-weight:700; color:var(--text); display:block; margin-bottom:6px;">
+            📁 Projektordner
           </label>
+          <p style="font-size:12px; color:var(--text-2); margin:0 0 10px;">
+            Hier festlegen, welche Ordner Archivio durchsuchen soll — ohne mindestens einen
+            eingetragenen Ordner findet die Suche keine Dokumente.
+          </p>
           {% if fda_missing %}
           <div class="hint" style="margin-bottom:8px; padding:8px 10px; background:#fffbeb; border-left:3px solid #e6a817; border-radius:4px; color:var(--text-2);">
             <strong>macOS-Zugriff:</strong> Damit Archivio auf Dokumente, Desktop, Downloads oder NAS-Mounts zugreifen kann, benötigt die App <strong>Festplattenvollzugriff</strong>.<br>
@@ -405,6 +442,7 @@ function chooseBaseFolder(btn) {
       if (d.cancelled) return;
       if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
       input.value = d.path;
+      markSettingsDirty();
     })
     .catch(function() {
       alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.');
@@ -434,6 +472,7 @@ function chooseExcludedFolder(btn) {
       if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
       var parts = d.path.replace(/\/+$/, '').split('/');
       input.value = parts[parts.length - 1];
+      markSettingsDirty();
     })
     .catch(function() {
       alert('Archivio Helper läuft nicht. Bitte starten, oder den Ordnernamen von Hand eintragen.');
@@ -470,6 +509,64 @@ function startMetaBackfill(link) {
       }, 1000);
     })
     .catch(function(e) { prog.textContent = 'Fehler: ' + e; link.style.display = ''; });
+}
+
+// ── Speichern-Erinnerung ─────────────────────────────────────────────────────
+// Bewusst kein stilles Auto-Save (ein unvollständiger Zwischenwert dürfte nicht
+// ungefragt landen) -- stattdessen nach einer kurzen Pause aktiv nachfragen, plus
+// ein nativer Warnhinweis, falls die Seite mit ungespeicherten Änderungen
+// verlassen wird. Reagiert auf das ganze Formular, nicht auf einzelne Felder --
+// neue Zeilen (addBaseFolder() etc.) und der Folder-Picker melden sich über
+// markSettingsDirty() mit, ohne dass hier pro Feld etwas verdrahtet werden muss.
+var settingsDirty     = false;
+var settingsIdleTimer = null;
+var settingsForm      = document.getElementById('settings-form');
+var saveReminder      = document.getElementById('save-reminder');
+var savedBanner       = document.getElementById('settings-saved-banner');
+
+function markSettingsDirty() {
+  settingsDirty = true;
+  savedBanner.style.display = 'none';
+  clearTimeout(settingsIdleTimer);
+  settingsIdleTimer = setTimeout(function() {
+    if (settingsDirty) saveReminder.style.display = 'flex';
+  }, 4000);
+}
+
+settingsForm.addEventListener('input', markSettingsDirty);
+settingsForm.addEventListener('change', markSettingsDirty);
+// Löschen einer Zeile (Projektordner/Ausgeschlossene Ordner/Mail-Konto) ändert
+// den Formularinhalt ohne input/change-Event auf dem entfernten Element auszulösen.
+settingsForm.addEventListener('click', function(e) {
+  if (e.target.closest('.remove-btn')) markSettingsDirty();
+});
+// Echtes Abschicken (einer der drei "Speichern"-Buttons oder Enter) ist kein
+// Verlassen mit ungespeicherten Änderungen -- sonst würde beforeunload direkt
+// beim eigenen Speichern warnen.
+settingsForm.addEventListener('submit', function() {
+  settingsDirty = false;
+  clearTimeout(settingsIdleTimer);
+});
+
+window.addEventListener('beforeunload', function(e) {
+  if (!settingsDirty) return;
+  e.preventDefault();
+  e.returnValue = '';
+});
+
+function saveSettingsNow() {
+  var fd = new FormData(settingsForm);
+  fetch('/dashboard/settings', { method: 'POST', body: fd })
+    .then(function() {
+      settingsDirty = false;
+      clearTimeout(settingsIdleTimer);
+      saveReminder.style.display = 'none';
+      savedBanner.style.display = '';
+      setTimeout(function() { savedBanner.style.display = 'none'; }, 3000);
+    })
+    .catch(function() {
+      alert('Speichern fehlgeschlagen — bitte erneut versuchen.');
+    });
 }
 </script>
 {% endblock %}

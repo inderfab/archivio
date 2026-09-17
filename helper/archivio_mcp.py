@@ -38,6 +38,16 @@ _READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
 )
 
+# merge_documents_to_pdf legt neu eine Datei in ~/Downloads an -- anders als die
+# übrigen, rein lesenden Tools deshalb NICHT readOnlyHint=True (das würde MCP-Clients
+# fälschlich sagen, der Aufruf verändere nichts auf der Platte). Nicht destruktiv
+# (überschreibt/löscht keine bestehende Datei, jeder Aufruf bekommt einen eigenen
+# Zeitstempel im Dateinamen) und nicht idempotent (zweimal aufgerufen entstehen zwei
+# Dateien, kein Aktualisieren derselben).
+_WRITES_NEW_FILE = ToolAnnotations(
+    readOnlyHint=False, destructiveHint=False, idempotentHint=False, openWorldHint=False,
+)
+
 # Lokaler HTTP-Server der Archivio-Helper-Menubar-App (siehe archivio_helper.py).
 # Läuft auf derselben Station wie dieser MCP-Server; öffnet Dateien mit den
 # Rechten des Helpers (Full Disk Access) — der von Claude Desktop gestartete
@@ -393,6 +403,66 @@ def read_document(document_id: int, offset: int = 0) -> str:
 
     prefix = "\n".join(header) + "\n\n" if offset == 0 else ""
     return prefix + block + footer
+
+
+@mcp.tool(annotations=_WRITES_NEW_FILE)
+def merge_documents_to_pdf(document_ids: str, title: str = "Zusammengeführte Dokumente") -> str:
+    """Führt mehrere über search()/semantic_search() gefundene PDF-Dokumente zu EINER
+    neuen PDF-Datei zusammen -- z.B. wenn alle Materialblätter aus mehreren Projekten
+    gesucht und danach als eine gemeinsame Datei gewünscht wurden. Claude kann PDFs
+    nicht selbst zusammenführen (kein Dateizugriff über MCP); Archivio erledigt das
+    serverseitig, das Ergebnis landet lokal im Downloads-Ordner dieses Rechners.
+
+    document_ids: kommagetrennte Liste der [ID nnn]-Werte aus vorherigen
+    search()/semantic_search()-Treffern, z.B. "142,891,203". Dokumente ohne
+    Leserecht (nicht freigegebenes Projekt, erkannte Norm, Sperrliste) oder die
+    kein PDF sind, werden übersprungen und im Ergebnis einzeln mit Grund gemeldet,
+    nicht stillschweigend weggelassen.
+    title: kurzer, sprechender Name für die neue Datei (ohne Dateiendung) -- passend
+    zum Inhalt wählen, z.B. "Materialblätter Vergleich".
+    """
+    base = _server_url()
+    try:
+        resp = requests.get(
+            f"{base}/api/mcp/merge-pdf",
+            params={"document_ids": document_ids, "session_id": _SESSION_ID},
+            timeout=60,
+        )
+    except Exception as e:
+        return f"Fehler beim Zugriff auf Archivio ({base}): {e}"
+    if resp.status_code not in (200, 400):
+        return f"Archivio-Fehler ({resp.status_code}) beim Zusammenführen."
+
+    data = resp.json()
+    if not data.get("ok"):
+        lines = [data.get("error") or "PDF-Zusammenführung fehlgeschlagen."]
+        for s in data.get("skipped", []):
+            lines.append(f"- {s.get('filename')}: {s.get('reason')}")
+        return "\n".join(lines)
+
+    import base64
+    import re
+    import time
+
+    safe_title = re.sub(r"[^\w\-äöüÄÖÜ ]", "", title).strip() or "Zusammengeführte Dokumente"
+    filename   = f"{safe_title}_{time.strftime('%Y%m%d-%H%M%S')}.pdf"
+    out_path   = Path.home() / "Downloads" / filename
+    try:
+        out_path.write_bytes(base64.b64decode(data["pdf_base64"]))
+    except Exception as e:
+        return f"PDF wurde erstellt, konnte aber nicht gespeichert werden: {e}"
+
+    merged = data["merged"]
+    lines  = [
+        f"✓ {merged} Dokument{'e' if merged != 1 else ''} zu „{filename}“ zusammengeführt.",
+        f"Pfad: {out_path}",
+        _archivio_link_markdown(str(out_path)),
+    ]
+    if data.get("skipped"):
+        lines.append("\nÜbersprungen:")
+        for s in data["skipped"]:
+            lines.append(f"- {s.get('filename')}: {s.get('reason')}")
+    return "\n".join(lines)
 
 
 @mcp.tool(annotations=_READ_ONLY)

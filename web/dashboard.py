@@ -216,12 +216,14 @@ async def retry_no_text(request: Request):
 
 @router.post("/extract-now/{doc_id}", response_class=HTMLResponse)
 async def extract_now(request: Request, doc_id: int):
-    """Stösst die Extraktion für EIN übergrosses Dokument manuell an -- im
-    Hintergrund, nicht innerhalb dieser Anfrage: ein einzelnes sehr grosses oder
-    gescanntes PDF kann mit OCR mehrere Minuten bis (im Extremfall) Stunden
-    dauern (siehe scanner/extractors.py _OCR_TIMEOUT) -- ein synchroner Request
-    würde Browser/HTMX so lange hängen lassen. Die Liste zeigt das Ergebnis beim
-    nächsten Neuladen der Seite.
+    """Stösst die Extraktion für EIN einzelnes Dokument manuell an -- egal ob
+    bisher übergross, fehlerhaft oder ohne Textinhalt (alle drei Abschnitte in
+    _problem_docs.html nutzen dieselbe Route für ihren "Jetzt (neu) scannen"-
+    Knopf). Läuft im Hintergrund, nicht innerhalb dieser Anfrage: ein einzelnes
+    sehr grosses oder gescanntes PDF kann mit OCR mehrere Minuten bis (im
+    Extremfall) Stunden dauern (siehe scanner/extractors.py _OCR_TIMEOUT) -- ein
+    synchroner Request würde Browser/HTMX so lange hängen lassen. Die Liste zeigt
+    das Ergebnis beim nächsten Neuladen der Seite.
 
     _extract_and_store() kennt selbst keine Grössengrenze -- die sitzt
     ausschliesslich in walker._process_file() (schon das Hashen einer riesigen
@@ -386,6 +388,25 @@ async def toggle_project_mcp(request: Request, project_id: int):
         conn.execute(
             "UPDATE projects SET mcp_enabled = NOT mcp_enabled WHERE id=?", (project_id,)
         )
+    groups  = _project_groups(conn)
+    stats   = _global_stats(conn)
+    orphans = _orphaned_projects(conn)
+    conn.close()
+    return templates.TemplateResponse("_dashboard_projects.html", {
+        "request": request, "groups": groups, "stats": stats,
+        "orphans": orphans,
+    })
+
+
+@router.post("/projects/{project_id}/archive-toggle", response_class=HTMLResponse)
+async def toggle_project_archive(request: Request, project_id: int):
+    """Schaltet den Archiv-Status eines Projekts manuell um -- für Projekte, bei
+    denen man nicht erst die automatische Qualifikation (mehrere leere Scans in
+    Folge) abwarten will. Siehe scanner/scan_log.py::toggle_manual_archive()."""
+    from scanner.scan_log import toggle_manual_archive
+
+    conn = connection.get_connection()
+    toggle_manual_archive(conn, project_id)
     groups  = _project_groups(conn)
     stats   = _global_stats(conn)
     orphans = _orphaned_projects(conn)
@@ -729,8 +750,8 @@ async def mail_dashboard(request: Request):
     conn    = connection.get_connection()
     configs = conn.execute("""
         SELECT msc.id, msc.mailbox_name, msc.active, msc.last_scanned_at, msc.mail_count,
-               msc.mcp_enabled, p.name AS project_name, p.id AS project_id,
-               p.mcp_enabled AS project_mcp_enabled
+               msc.mcp_enabled, msc.archive_tier, p.name AS project_name, p.id AS project_id,
+               p.mcp_enabled AS project_mcp_enabled, p.archive_tier AS project_archive_tier
         FROM mail_scan_config msc
         LEFT JOIN projects p ON p.id = msc.project_id
         ORDER BY msc.mailbox_name
@@ -853,6 +874,28 @@ async def mail_mcp_toggle(
             "UPDATE mail_scan_config SET mcp_enabled = NOT mcp_enabled "
             "WHERE mailbox_name=? AND project_id IS NULL", (mailbox_name,)
         )
+    return await _mail_section_response(request, conn, context)
+
+
+@router.post("/mail/archive-toggle", response_class=HTMLResponse)
+async def mail_archive_toggle(
+    request:      Request,
+    mailbox_name: str = Form(...),
+    context:      str = Form(""),
+):
+    """Archiv-Status für ein Postfach OHNE Projekt manuell umschalten (gleiches
+    Prinzip wie mail_mcp_toggle() -- mit einem Projekt verknüpfte Postfächer
+    übernehmen dessen archive_tier, kein eigener Schalter dafür, siehe
+    _dashboard_mail.html)."""
+    from scanner.scan_log import toggle_manual_mail_archive
+
+    conn = connection.get_connection()
+    row = conn.execute(
+        "SELECT id FROM mail_scan_config WHERE mailbox_name=? AND project_id IS NULL",
+        (mailbox_name,),
+    ).fetchone()
+    if row:
+        toggle_manual_mail_archive(conn, row["id"])
     return await _mail_section_response(request, conn, context)
 
 
@@ -1870,6 +1913,12 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
     ).fetchall()
     _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
     _fresh_label, _fresh_class = _scan_freshness(_last_iso)
+    _archive_tier = db["archive_tier"] if "archive_tier" in db.keys() else 0
+    if _archive_tier:
+        # Überschreibt die normale Frische-Anzeige -- ein "archiviertes" Projekt
+        # zeigt bewusst nicht "gescannt vor X Tg." (klänge nach überfällig), siehe
+        # scanner/scan_log.py für die Stufenlogik.
+        _fresh_label, _fresh_class = "archiviert", "archived"
     return {
         "name":             db["name"],
         "sub_label":        label,
@@ -1878,6 +1927,9 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "id":               db["id"],
         "active":           bool(db["active"]),
         "mcp_enabled":      bool(db["mcp_enabled"]) if "mcp_enabled" in db.keys() else False,
+        "archived":         bool(_archive_tier),
+        "archive_next_check": _fmt_iso_datetime(db["archive_next_check_at"])
+                              if "archive_next_check_at" in db.keys() else None,
         "doc_count":        count,
         "last_scan":        _fmt_iso_date(last_scan),
         "last_scanned":     _fmt_iso_datetime(_last_iso),
@@ -1964,6 +2016,7 @@ def _extraction_overview(conn) -> dict:
     """
     from scanner import extractors as _extractors
     from scanner.walker import _LIST_ONLY_EXTENSIONS, _supported_extensions
+    from web.thumbnails import ALL_GALLERY_EXTENSIONS
     supported = _supported_extensions()
     # Massgeblich für "ist das wirklich nur eine Grössenfrage" ist NICHT die vom
     # Büro editierbare supported_extensions-Liste (die kann Endungen enthalten,
@@ -2010,7 +2063,7 @@ def _extraction_overview(conn) -> dict:
     error_files: list[dict] = []
     if error_total:
         for row in conn.execute(f"""
-            SELECT d.filename, d.extension, dp.path
+            SELECT d.id, d.filename, d.extension, dp.path
             FROM documents d
             LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
             WHERE d.extraction_status = 'error' AND d.extension IN ({err_placeholders})
@@ -2018,7 +2071,9 @@ def _extraction_overview(conn) -> dict:
             LIMIT 200
         """, _TEXT_EXTRACTABLE).fetchall():
             error_files.append({
+                "id":       row["id"],
                 "filename": row["filename"],
+                "path":     row["path"],
                 "reason":   _error_reason(row["extension"], row["path"]),
             })
 
@@ -2034,8 +2089,9 @@ def _extraction_overview(conn) -> dict:
     }
     no_text_total = sum(no_text_by_ext.values())
     no_text_sample = [dict(r) for r in conn.execute("""
-        SELECT d.filename, d.filesize
+        SELECT d.id, d.filename, d.filesize, dp.path
         FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
         WHERE d.extraction_status = 'ok'
           AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)
         ORDER BY d.filesize DESC
@@ -2053,6 +2109,7 @@ def _extraction_overview(conn) -> dict:
     return {
         "unsupported_total":   sum(unsupported_by_ext.values()),
         "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
+        "gallery_extensions":  ALL_GALLERY_EXTENSIONS,
         "oversized_total":     oversized_total,
         "oversized_files":     oversized_files,
         "error_total":         error_total,
@@ -2103,11 +2160,23 @@ def _run_mail_scan(only_mailbox: str | None = None):
             active = conn.execute(
                 "SELECT * FROM mail_scan_config WHERE mailbox_name=?", (only_mailbox,)
             ).fetchall()
+            archived_project_ids: set[int] = set()
         else:
             # stale-first: NULL (nie gescannt) zuerst, dann älteste
             active = conn.execute(
                 "SELECT * FROM mail_scan_config WHERE active=1 ORDER BY last_scanned_at ASC"
             ).fetchall()
+            # Verknüpfte Postfächer übernehmen den Archiv-Status ihres Projekts
+            # (gleiches Prinzip wie mcp_enabled, siehe Migration 017) -- ein
+            # gebündelter "Aktive Postfächer scannen"-Lauf überspringt sie
+            # deshalb genau wie scan_all() die zugehörigen Dateiordner. Der
+            # Einzel-Scan-Knopf (only_mailbox) ignoriert das bewusst immer.
+            now_iso = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+            archived_project_ids = {
+                r["id"] for r in conn.execute(
+                    "SELECT id FROM projects WHERE archive_next_check_at > ?", (now_iso,)
+                ).fetchall()
+            }
         conn.close()
 
         if not active:
@@ -2135,6 +2204,9 @@ def _run_mail_scan(only_mailbox: str | None = None):
             if row["project_id"] is None:
                 log.warning("Postfach '%s' hat kein Projekt — übersprungen", row["mailbox_name"])
                 mailbox_details.append(f"{row['mailbox_name']}: kein Projekt")
+                continue
+            if row["project_id"] in archived_project_ids:
+                mailbox_details.append(f"{row['mailbox_name']}: übersprungen (Projekt archiviert)")
                 continue
             try:
                 stats = scan_mailbox(client, row["mailbox_name"], row["project_id"],

@@ -41,6 +41,18 @@
       <div class="problem-doc-row problem-doc-error">
         <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
         <span class="problem-doc-reason">{{ doc.reason }}</span>
+        {% if doc.path %}
+        <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
+                onclick="helperReveal(this.dataset.path)"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Im Finder
+        </button>
+        {% endif %}
+        <button type="button" class="btn btn-sm"
+                hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Jetzt neu scannen
+        </button>
       </div>
       {% endfor %}
       {% if error_total > error_files|length %}
@@ -70,6 +82,18 @@
       <div class="problem-doc-row problem-doc-no_text">
         <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
         <span class="problem-doc-reason">{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene</span>
+        {% if doc.path %}
+        <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
+                onclick="helperReveal(this.dataset.path)"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Im Finder
+        </button>
+        {% endif %}
+        <button type="button" class="btn btn-sm"
+                hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Jetzt neu scannen
+        </button>
       </div>
       {% endfor %}
       {% if no_text_total > no_text_sample|length %}
@@ -114,7 +138,10 @@
       {% for ext, cnt in unsupported_by_ext.items() %}
       <div class="problem-doc-row">
         <span class="problem-doc-name">{{ ext or '(ohne Endung)' }}</span>
-        <span class="problem-doc-reason">{{ cnt }} Datei{{ "en" if cnt != 1 else "" }}</span>
+        <span class="problem-doc-reason">
+          {{ cnt }} Datei{{ "en" if cnt != 1 else "" }}
+          {% if ext in gallery_extensions %}· bereits über <a href="/">Suche → Fotos</a> zugänglich{% endif %}
+        </span>
       </div>
       {% endfor %}
     </div>
