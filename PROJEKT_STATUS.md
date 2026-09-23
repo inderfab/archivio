@@ -4,7 +4,7 @@
 > Sitzung/einem neuen Account nahtlos weitergearbeitet werden kann. Liegt bewusst im Repo,
 > damit sie account-übergreifend verfügbar ist. Ergänzt `CLAUDE.md` (Projektinstruktionen).
 >
-> **Stand: v3.0.11 (Server) · v3.1.0 (Helper) · 2026-07-10**
+> **Stand: v3.4.0 (Server) · v3.1.35 (Helper) · 2026-09-23**
 
 ---
 
@@ -33,7 +33,7 @@ Cloud. Läuft auf einem Mac im Büronetz, indexiert Dateien vom NAS und Mails pe
 
 **Dev-Mac (Apple Silicon) — hier wird entwickelt & gebaut:**
 - Pfad: lokaler Checkout des Repos (Repo-Wurzel)
-- venv: `.venv` (Python 3.9 — nur für Tests/lokalen Lauf; **psutil ggf. nachinstallieren**: `pip install psutil`, wird für walker-Tests gebraucht)
+- venv: `.venv` (Python 3.14 mit SQLite 3.53.x = dieselbe SQLite-Version wie das Bundle, siehe §12 — nur für Tests/lokalen Lauf)
 - Lokaler Lauf: `.venv/bin/uvicorn web.main:app --reload --port 8000`
 - Build: `bash scripts/build_server_app.sh` (baut Server **und** Helper)
 - Der Bash-Tool-Zugriff von Claude läuft auf DIESEM Mac — **nicht** auf dem iMac. iMac-Diagnose nur über den Nutzer (Copy-Paste von Terminal-Befehlen).
@@ -186,9 +186,29 @@ läuft** sauber neu.
 **Ebene 2 — launchd LaunchAgent (`io.archivio.server`):** hält die **ganze App** am Leben.
 - **`KeepAlive = true`** (seit 3.0.4!) + `RunAtLoad=true` + `ThrottleInterval=30`.
 - **Historie/Falle:** Vorher war `KeepAlive = SuccessfulExit:false` → nach einem **sauberen Exit 0** (macOS Logout/Ruhezustand/Update übers Wochenende) startete launchd **nicht** neu → Server lag tagelang tot. Deshalb jetzt `true`.
+
+**Ebene 3 — Einmal-Start-Sperre (`bridge.acquire_single_instance_lock`, seit 3.3.0):** `fcntl.flock` auf `~/.archivio/archivio-server.lock`, gesetzt in `menubar/server_app.py::__main__` **vor** allem anderen.
+- **Warum:** Der Server konnte über zwei Wege gleichzeitig starten — den LaunchAgent **und** ein Anmeldeobjekt aus älteren Installationen. Der Postinstall versucht das Login-Item zu löschen, scheitert dabei aber still (Automation-Berechtigung fehlt im Installer-Kontext). Dann startete jeder Supervisor seinen eigenen uvicorn und `_start_server()` → `_kill_port_8000()` schoss den jeweils anderen ab. Im Log auf dem iMac sichtbar als zwei „uvicorn gestartet" im Abstand von 37 ms plus ein Watchdog-Neustart 15 s später — ~30 s Gerangel nach jeder Anmeldung.
+- **KRITISCH — die zweite Instanz beendet sich NICHT,** sondern wartet in Bereitschaft (`while not acquire…: sleep(30)`) und übernimmt, wenn der aktive Supervisor wegfällt. Ein `sys.exit(0)` wäre hier falsch: mit `KeepAlive=true` (das bleiben muss, siehe oben) würde launchd alle 30 s eine neue Instanz starten, die sich sofort wieder beendet.
+- Das Fehlschlagen von `flock` **muss** das Handle schliessen — sonst leckt die 30-s-Warteschleife Dateideskriptoren (Test: `tests/test_single_instance_lock.py`).
+- Port 44380 taugt **nicht** als Sperre: auf einem Mac mit Server **und** Helper binden ihn beide, einer verliert ohnehin still.
+- `_kill_port_8000()` benutzt `-sTCP:LISTEN` (sonst trifft es auch ausgehende Verbindungen zu einem Archivio auf einem anderen Mac) und lässt einen **gesunden fremden Server** in Ruhe; `_start_server()` übernimmt ihn dann, statt einen eigenen zu starten.
+- **Logs:** `ArchivioServer.log`/`ArchivioHelper.log` rotieren (5 MB × 3) und laufen auf INFO, urllib3/zeroconf auf WARNING. Vorher DEBUG ohne Rotation → 321 MB bzw. 24 MB, ~2,7 MB/Tag.
 - „Beenden" im Menü macht `launchctl bootout` (sonst würde KeepAlive sofort neu starten).
 - Postinstall installiert/lädt den Agent (`launchctl bootstrap gui/$UID`), entfernt altes Login-Item, killt vorher laufende manuelle Instanz.
 - **Diagnose auf iMac:** `launchctl print "gui/$(id -u)/io.archivio.server" | grep state` → muss `running` sein.
+
+---
+
+### Startvorbereitung & Warteseite (seit v3.4.0)
+
+Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung`), nicht mehr blockierend im `lifespan`. Solange sie laufen, liefert eine Middleware allen Aufrufen eine Warteseite („Archivio wird vorbereitet", Selbstaktualisierung alle 4 s, HTTP 503).
+
+- **Warum das kein Schönheitsfix ist:** vorher nahm uvicorn erst nach den Migrationen Verbindungen an. Die v3.4.0-Migration braucht auf 240'000 Dokumenten ~3 min — in der Zeit sah der Nutzer nur „Verbindung fehlgeschlagen". **Schlimmer:** der Watchdog prüft alle 15 s `/api/status` und startet nach vier Fehlversuchen (60 s) neu. Eine Migration über 60 s wäre also mitten drin abgeschossen und von vorn begonnen worden — bei `_m026` (FTS-Neuaufbau, wird erst nach Abschluss in `_migrations` eingetragen) potenziell endlos.
+- **`/api/status` wird durchgelassen und OHNE Datenbankzugriff beantwortet** (`{"server": true, "vorbereitung": true, "seit_s": n}`). Eine Abfrage gegen die migrierende DB würde bis zum 30-s-Sperrtimeout hängen und den Server als hängend erscheinen lassen.
+- **`_start_zustand["laeuft"]` startet auf `False`** und wird erst im `lifespan` gesetzt. Der Wert heisst „läuft gerade", nicht „steht aus" — sonst antwortet alles mit der Warteseite, wo der lifespan nicht ausgeführt wird (Tests binden die App direkt ein; das kostete einmal 144 rote Tests).
+- Scheduler und Embedding-Nachlauf starten erst **nach** der Vorbereitung, nicht parallel dazu.
+- Tests: `tests/test_startvorbereitung.py`.
 
 ---
 
@@ -251,8 +271,44 @@ läuft** sauber neu.
   - **007:** `extraction_status` erlaubt zusätzlich `'listed'`. **KRITISCH:** vorher fehlte `'listed'` in der CHECK-Constraint → jeder Bild-/List-Only-Insert warf IntegrityError → ganze Transaktion (Dokument+Pfad) zurückgerollt → Bilder landeten NIE in der DB. (SQLite kann CHECK nicht per ALTER ändern → `writable_schema`-Patch.)
   - **008:** `documents_fts_doc_delete`-Trigger (AFTER DELETE ON documents) → sonst verwaiste FTS-Dateinamen-Treffer bei Dokumenten ohne `document_content`.
   - **009:** `projects.last_scanned_at`.
+- **Migrationen 026–028 (Datenbank-Verkleinerung, v3.4.0).** An der **echten Produktivdatenbank gemessen** (240'308 Dokumente, 652'783 Chunks): **5,97 → 4,46 GB (−25,3 %, 1,51 GB)**. Migration 2,9 min, anschliessendes `VACUUM` 15 s. Dev-DB zum Vergleich: 286 → 192 MB (−32,7 %).
+  Aufteilung der Ersparnis, nachgemessen per `dbstat`: **float16 −1002 MB** (652'783 × 1536 statt 3072 Bytes), **documents_fts samt Index ~−495 MB**, `created_at` ~−13 MB.
+  **Falle:** eine frühere Schätzung ging von −37 % aus, weil die FTS-Textkopie auf ~850 MB taxiert wurde. Diese Zahl stammte aus einer Abfrage mit Vorrang-Fehler (`sum(a)+sum(b)/1000000`), deren Ergebnis für jeden beliebigen Textumfang praktisch gleich aussieht — sie stützte die Annahme also nie. Real war die Kopie rund 350 MB. Lehre: Grössenanteile mit `dbstat` messen, nicht aus zusammengesetzten `length()`-Summen herleiten.
+  - **026 — `documents_fts` ohne `content`.** Die Tabelle ist eigenständig (kein `content=`) und speicherte deshalb eine **vollständige zweite Kopie aller Dokumenttexte** samt Index (produktiv ~350 MB Text plus ~150 MB Index). Gesucht wurde darauf nie: die einzige lesende Stelle ist `_search_filename()` (`web/main.py`) mit `filename:`-Spaltenfilter, die Volltextsuche läuft über `chunks_fts`. Die drei Trigger auf `document_content` entfielen ersatzlos. **Kein UPDATE-Trigger nötig:** `documents.filename` wird nirgends geändert (Identität über Hash, Umbenennung = neuer Pfad).
+  - **027 — Embeddings float32 → float16.** Grösster Einzelposten (produktiv ~2 GB von 6,5 GB). **KRITISCH: der Datentyp steht nirgends in der DB.** Ein doppelt konvertierter Blob wird zu Unsinn, und `embedder.py` baut aus allen Zeilen EINE Matrix → eine einzige falsche Zeile legt die semantische Suche lahm. Die Migration hält deshalb die **Quell-Blobgrösse vor der ersten Umwandlung** als eigene `_migrations`-Zeile (`027_quelllaenge_<n>`) fest — ohne diesen Merker wäre ein Abbruch zwischen „alles umgewandelt" und „in `_migrations` eingetragen" nicht von „noch nichts getan" unterscheidbar (`_apply()` legt keine Transaktion um die Migration).
+    **Qualität gemessen** (22'582 Chunks, 200 Anfragen): max. Score-Abweichung 5,3e-05; wo sich die Reihenfolge dreht, beträgt der Score-Abstand der getauschten Treffer ≤ 8,6e-06 — es sind also ausschliesslich Gleichstände. Top-10 als Menge in 186/200 Fällen identisch.
+  - **028 — `document_chunks.created_at` entfernt.** Wird nirgends gelesen; produktiv ~13 MB, bei 1 Mio. Dokumenten dreistellig. Braucht SQLite ≥ 3.35 (Bundle: 3.53) — schlägt es fehl, bleibt die Spalte stehen statt abzubrechen.
+  - **Nach der Migration ist ein `VACUUM` nötig**, damit die Datei tatsächlich schrumpft — gelöschte Seiten werden sonst nur als frei markiert.
 - **`queries.upsert_path` (Fix):** hängt Pfad per `ON CONFLICT(path) DO UPDATE` auf das aktuelle Dokument um + räumt verwaiste Alt-Version auf. Vorher (`INSERT OR IGNORE`) blieb der Pfad bei geänderten Dateien auf der alten Version → neues Dokument verwaist.
 - **Beim Projekt-Löschen:** `mail_scan_config` hat kein CASCADE → separat löschen. Deletion großer Projekte im Hintergrund-Thread (`_delete_project_bg`) mit Polling.
+
+### Sicherung & Umzug (`db/backup.py`, seit 3.3.0)
+
+Eine Mechanik für zwei Fälle: wöchentliche Sicherung gegen Rechnerausfall, und Umzug des Servers auf einen anderen Mac.
+
+- **`VACUUM INTO` statt Dateikopie.** WAL-Modus: ein blosses Kopieren von `archivio.db` bei laufendem Server verliert die letzten Transaktionen still. Läuft bei laufendem Server, ~229 MB/s gemessen.
+- **Lokal vacuumen, dann übertragen.** Direkt aufs Netzlaufwerk zu vacuumen ist vielfach langsamer (SQLite schreibt seitenweise über SMB) und bricht bei kurzem Mount-Verlust ab.
+- **Genau eine Sicherung, aber nie ohne gültige Kopie:** neuer Stand entsteht vollständig in `Archivio-Sicherung.neu`, dann zwei Umbenennungen (`→ .alt`, `.neu → final`, `.alt` löschen). `_recover_interrupted()` holt `.alt` zurück, falls dazwischen abgebrochen wurde. **`PRAGMA quick_check` vor dem Einwechseln** — ohne das überschreibt eine schleichend defekte DB irgendwann den letzten guten Stand.
+- **Nie Mail-Passwörter in der Sicherung** (`_sanitize_config`). Beim Import werden sie abgefragt; Konten ohne Passwort werden in den Einstellungen und in der Diagnose als „Passwort fehlt" markiert — sonst läuft der Mail-Scan nach einem Umzug wochenlang ins Leere.
+- **Reihenfolge der Prüfungen beim Import ist Absicht:** erst die billigen (Manifest, Version, Zielzustand, Pfade), **zuletzt** der `quick_check`. Der liest die ganze Datei und braucht bei 5,6 GB von einer externen Platte real **253 s** — lief er vorher, wartete man diese Zeit, bevor überhaupt nach einem fehlenden Ordner gefragt wurde, und nach der Antwort gleich nochmal. Vor jeder Veränderung läuft er weiterhin.
+- **Import läuft asynchron** (`_import_state` + `GET /api/backup/import-status`, Muster wie die Sicherung). Vorher hing er in der Antwort des POST: wer die Seite während des Einspielens wechselte, verlor den Fortschritt — die Arbeit lief im Thread weiter (ein Thread lässt sich nicht abbrechen), aber die Oberfläche zeigte wieder den alten Stand. Die Seite fragt den Zustand auch beim Laden ab und nimmt einen laufenden Import wieder auf.
+- **Der Server startet sich nach erfolgreichem Import selbst neu** (`_neustart_nach_import`, `os._exit(0)` nach 4 s). Nötig, weil der laufende Prozess die ALTE Datenbankdatei noch offen hat — ohne Neustart zeigt die Oberfläche weiter den Stand von vorher. Greift nur, wenn `ARCHIVIO_SUPERVISED=1` gesetzt ist (von `server_app.py::_env()`); ein handgestartetes uvicorn bliebe sonst weg. Der Watchdog startet binnen 15 s neu, die Oberfläche wartet darauf und lädt dann neu.
+- **Import ersetzt, führt nie zusammen.** Alle Prüfungen (Version, `quick_check`, Zielzustand, Pfade) laufen **vor** jeder Veränderung. Die bisherige DB wird umbenannt (`.vor-import-<zeitstempel>`), nie überschrieben — **inklusive `-wal`/`-shm`**, sonst ist die Sicherheitskopie mit „disk I/O error" unlesbar.
+- **Pfadumschreibung (`rewrite_paths`)** — vollständige Liste: `projects.path`, `document_paths.path`, `ignored_paths.path`, `norm_folders.path`, `block_rules.value` **nur** bei `type='folder'` (bei `file` steht ein SHA256, bei `pattern` ein Glob), dazu in der config `scanner.base_folders[].path`, `projects[].path`, `rubrica.db_path`. **Nicht** umschreiben: `scanner.excluded_folders` (Ordnernamen/Globs, portabel). Bleibt eine Stelle stehen, zeigt der Index ins Leere und ein späterer Scan löscht die verwaisten Einträge samt Foto-Tags (`_cleanup_missing_files`).
+- **Welche Pfade geprüft werden:** `manifest.base_folders`; ist die Liste leer (kommt vor), ersatzweise die Elternordner aus `projects.path` (`_paths_to_verify`).
+- **`database.path` und `server` bleiben lokal** — wo die DB liegt, ist Eigenschaft des Rechners, nicht der Sicherung.
+- Zeitplan in `web/main.py::_maybe_run_weekly_backup` (wöchentlich, 1 h nach dem Nachtscan, verschiebt sich bei laufendem Scan). Laufzeitzustand in `backup_state.json` im Datenverzeichnis — **bewusst nicht in der config.yaml**, weil `settings_save()` ganze Schlüssel neu schreibt.
+
+### Deinstallation (`scripts/deinstallieren.sh`, seit 3.3.1)
+
+Bedient wird sie über **„Archivio Deinstallieren.app"** (AppleScript-App, wird mit dem Server installiert) — die Kundenbüros haben keine IT-Abteilung, ein abzutippender Terminal-Befehl ist dort unbrauchbar. Der Knopf in den Einstellungen öffnet sie über den Helper-Endpunkt `/deinstallation-oeffnen`. Das Shell-Skript liegt als **Kopie in dieser App** (nicht nur im Server-Bundle): der Deinstallierer muss weiterlaufen, während er den Server entfernt.
+
+Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplett` (Testrechner/Ausmusterung — auch Helper, MCP-Eintrag und Quick Action weg) und `--arbeitsplatz` (nach einem Umzug — nur der Helper samt Einstellungen und MCP-Anbindung bleibt). `--simulation` zeigt den Ablauf, ohne etwas anzufassen; `--ohne-rueckfrage` überspringt die getippte Bestätigung (nur für die GUI, die zweimal nachgefragt hat).
+
+- **Zwei Rechtelagen, zwei Wege:** alles unter `~` per `mv` in den Papierkorb; die **`.app`-Bundles in `/Applications` gehören root** (vom pkg angelegt) — ein `mv` als Benutzer scheitert dort. Dafür übernimmt der Finder per AppleScript, der bei Bedarf selbst nach dem Passwort fragt. Genau dieser Fall wurde beim Sandbox-Test gefunden, nachdem die erste Fassung die Programme stillschweigend liegengelassen hätte.
+- **Nichts wird mit `rm` gelöscht** — alles landet im Papierkorb und bleibt bis zu dessen Leerung zurückholbar.
+- Zeigt vor dem Zugriff Grösse und Dokumentzahl der Datenbank sowie den Sicherungszustand aus `backup_state.json` und warnt ausdrücklich, wenn keine bestätigte Sicherung existiert.
+- Darf **nicht** mit `sudo` laufen (Anmeldeobjekte und Autostart gehören dem angemeldeten Benutzer) — das Skript bricht dann ab.
 
 ---
 
@@ -260,7 +316,9 @@ läuft** sauber neu.
 
 - `tests/` mit pytest. **`conftest.py`:** setzt `ARCHIVIO_DATA_DIR` (wird an spawn-Worker vererbt!) + eigene config.yaml, Datenverzeichnis GETRENNT von den gescannten Dateien. **Falle:** ohne das schreiben spawn-Worker in die echte Repo-`archivio.db` (Monkeypatch überquert Prozessgrenze nicht) → grüne, aber wertlose Tests.
 - `test_walker.py`, `test_mail_delete.py`, `test_hasher.py` grün. `test_search_recall.py` braucht Ollama + echte DB (`ORDER BY RANDOM()`) → flaky/skip, ist KEINE Regression.
-- Dev-venv braucht `psutil` für walker-Tests (`pip install psutil`).
+- Stand v3.4.0: **442 Tests** grün (`pytest tests/ -q --ignore=tests/test_search_recall.py`).
+- **Dev-`.venv` läuft seit v3.4.0 auf Python 3.14.5 mit SQLite 3.53.1 — derselben SQLite-Version wie das ausgelieferte Bundle** (vorher 3.9.2/SQLite 3.34). Nötig geworden mit den FTS5-Änderungen und `ALTER TABLE … DROP COLUMN` (braucht ≥ 3.35): vorher hätte lokal grün sein können, was beim Kunden bricht. Neu aufsetzen: `/opt/homebrew/bin/python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
+- **`requests` und `zeroconf` fehlten in `requirements.txt`** (standen nur in den `EXTRAS` des Build-Skripts) → eine frische Dev-venv konnte die Menubar-/Discovery-Tests nicht sammeln. Seit v3.4.0 dort eingetragen.
 
 ---
 

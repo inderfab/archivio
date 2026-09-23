@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import re
 import subprocess
 import sys
@@ -17,13 +18,20 @@ import menubar_bridge as bridge
 HELPER_PORT = bridge.HELPER_PORT
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+# Rotierend und auf INFO -- vorher DEBUG ohne Groessenbegrenzung. urllib3 schreibt
+# pro requests-Aufruf zwei Zeilen, und die Statusschleife fragt alle 30s den Server
+# ab; real gemessen waren das 24 MB in dieser Datei, unbegrenzt weiterwachsend.
 _log_dir = Path.home() / "Library" / "Logs"
 _log_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
-    filename=str(_log_dir / "ArchivioHelper.log"),
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.handlers.RotatingFileHandler(
+        str(_log_dir / "ArchivioHelper.log"), maxBytes=5 * 1024 * 1024, backupCount=3,
+        encoding="utf-8")],
 )
+for _noisy in ("urllib3", "zeroconf", "requests"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 log.info("Archivio Helper starting (Python %s)", sys.version)
 
@@ -63,9 +71,17 @@ def _load_config() -> dict:
 
 
 def _save_config(cfg: dict):
+    """Schreibt über eine Temp-Datei und benennt dann um.
+
+    Seit der automatischen Neusuche (_rediscover) kann diese Funktion aus einem
+    Hintergrund-Thread kommen, während das Menü gerade denselben Datensatz
+    schreibt. Ein direktes write_text() konnte dabei eine halb geschriebene Datei
+    hinterlassen oder Schlüssel wie link_action verlieren."""
     try:
         _CONFIG_DIR.mkdir(parents=True, exist_ok=True)
-        CONFIG_PATH.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        tmp = CONFIG_PATH.with_suffix(".json.tmp")
+        tmp.write_text(json.dumps(cfg, indent=2, ensure_ascii=False))
+        tmp.replace(CONFIG_PATH)
     except Exception as e:
         log.error("Config save failed: %s", e)
 
@@ -124,6 +140,11 @@ def _mark_update_notified(version: str):
 
 _DEFAULT_SERVER_URLS = {"http://localhost:8000", "http://127.0.0.1:8000"}
 
+# Nach wie vielen erfolglosen Statusabfragen in Folge (alle 30s) neu gesucht wird.
+# 6 = drei Minuten -- lang genug, dass ein Serverneustart oder ein kurzer
+# Netzaussetzer keinen Adresswechsel auslöst, kurz genug für einen Umzug.
+_REDISCOVER_AFTER_FAILS = 6
+
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
@@ -160,6 +181,9 @@ class ArchivioHelper(rumps.App):
         cfg = _load_config()
         self._server_url     = cfg.get("server_url", "http://localhost:8000")
         self._pending_update: tuple[str, str] | None = None
+        # Zähler für die automatische Neusuche (siehe _rediscover)
+        self._fail_count     = 0
+        self._discovering    = False
 
         self._title_item     = rumps.MenuItem("Archivio Helper")
         self._version_item   = rumps.MenuItem(f"Version {_local_version()}")
@@ -361,6 +385,52 @@ class ArchivioHelper(rumps.App):
         )
         # Kein Titeltext — Icon genügt
         self._mcp_item.title = self._mcp_item_title()
+
+        if ok:
+            self._fail_count = 0
+        else:
+            self._fail_count += 1
+            # Modulo statt Gleichheit: ist der neue Server beim ersten Versuch noch
+            # nicht erreichbar (zieht ja gerade um), wird alle drei Minuten erneut
+            # gesucht statt nie wieder.
+            if self._fail_count % _REDISCOVER_AFTER_FAILS == 0 and not self._discovering:
+                self._discovering = True
+                threading.Thread(target=self._rediscover, daemon=True).start()
+
+    def _rediscover(self):
+        """Sucht den Server neu, wenn die gespeicherte Adresse dauerhaft tot ist.
+
+        Genau der Umzugsfall: zieht der Server auf einen anderen Mac, zeigen alle
+        Arbeitsplätze weiter auf die alte Adresse. Die automatische Suche beim Start
+        greift dort nicht, weil sie nur läuft, solange die Adresse noch der
+        Auslieferungszustand ist (_DEFAULT_SERVER_URLS) -- eine einmal gesetzte
+        Adresse wird bewusst nie ungefragt überschrieben.
+
+        Deshalb hier eng gefasst: erst nach mehreren Fehlschlägen in Folge (nicht bei
+        einem kurzen Aussetzer, etwa während der Server selbst neu startet), nur wenn
+        GENAU EIN Server gefunden wird, und nur wenn dieser auch wirklich antwortet --
+        mDNS-Einträge können veraltet sein und einen längst abgeschalteten Server
+        melden.
+        """
+        try:
+            found = bridge.discover_servers(timeout=4, log=log)
+            url = bridge.pick_rediscovered_server(
+                found, self._server_url,
+                lambda u: requests.get(f"{u}/api/status", timeout=3).status_code == 200)
+            if not url:
+                log.info("Neusuche ohne verwendbares Ergebnis (%d Treffer)", len(found))
+                return
+
+            alt = self._server_url
+            self._apply_server_url(url)
+            self._fail_count = 0
+            log.info("Server-Adresse automatisch gewechselt: %s -> %s", alt, url)
+            rumps.notification("Archivio Helper", "Server hat gewechselt",
+                               f"Jetzt verbunden mit {url}")
+        except Exception as exc:
+            log.warning("Neusuche fehlgeschlagen: %s", exc)
+        finally:
+            self._discovering = False
 
     def _mcp_item_title(self) -> str:
         return ("✓ MCP-Schnittstelle eingerichtet" if bridge.is_mcp_installed()

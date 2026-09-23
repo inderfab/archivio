@@ -101,9 +101,52 @@ notarize_and_staple() {
             ;;
     esac
 
-    xcrun notarytool submit "$SUBMIT_PATH" --keychain-profile "$ARCHIVIO_NOTARY_PROFILE" --wait
+    # Einreichen und Warten sind bewusst getrennt: `submit --wait` bricht mit einem
+    # Fehler ab, wenn die Verbindung zum Notarisierungsdienst waehrend des Wartens
+    # abreisst -- und weil der Build mit `set -e` laeuft, war damit ein bereits
+    # erfolgreich eingereichtes, von Apple akzeptiertes Paket verloren und der
+    # komplette Build musste von vorn. Genau das ist bei v3.3.2 passiert
+    # (Submission akzeptiert, Abbruch mit NSURLErrorTimedOut).
+    local SUB_ID
+    SUB_ID=$(xcrun notarytool submit "$SUBMIT_PATH" \
+                 --keychain-profile "$ARCHIVIO_NOTARY_PROFILE" \
+                 --no-wait --output-format json \
+             | /usr/bin/python3 -c 'import sys,json; print(json.load(sys.stdin)["id"])')
+    if [ -z "$SUB_ID" ]; then
+        echo "  ❌ Einreichung fehlgeschlagen (keine Submission-ID)"
+        [ -n "$TMP_ZIP" ] && rm -f "$TMP_ZIP"
+        return 1
+    fi
+    echo "  Submission: $SUB_ID"
+
+    local VERSUCH=0
+    local STATUS=""
+    while [ "$VERSUCH" -lt 5 ]; do
+        VERSUCH=$((VERSUCH + 1))
+        xcrun notarytool wait "$SUB_ID" \
+              --keychain-profile "$ARCHIVIO_NOTARY_PROFILE" --timeout 30m >/dev/null 2>&1 || true
+        STATUS=$(xcrun notarytool info "$SUB_ID" \
+                     --keychain-profile "$ARCHIVIO_NOTARY_PROFILE" --output-format json 2>/dev/null \
+                 | /usr/bin/python3 -c 'import sys,json; print(json.load(sys.stdin).get("status",""))' 2>/dev/null || true)
+        case "$STATUS" in
+            Accepted) break ;;
+            Invalid|Rejected)
+                echo "  ❌ Apple hat die Notarisierung abgelehnt (Status: $STATUS)"
+                xcrun notarytool log "$SUB_ID" --keychain-profile "$ARCHIVIO_NOTARY_PROFILE" 2>/dev/null | head -40
+                [ -n "$TMP_ZIP" ] && rm -f "$TMP_ZIP"
+                return 1 ;;
+            *)
+                echo "  ⚠️  Status noch offen/Verbindung abgerissen (Versuch $VERSUCH/5) — warte 30s"
+                sleep 30 ;;
+        esac
+    done
 
     [ -n "$TMP_ZIP" ] && rm -f "$TMP_ZIP"
+
+    if [ "$STATUS" != "Accepted" ]; then
+        echo "  ❌ Notarisierung nicht bestaetigt (letzter Status: ${STATUS:-unbekannt})"
+        return 1
+    fi
 
     xcrun stapler staple "$TARGET"
     echo "  ✓ notarisiert + gestapelt: $TARGET"

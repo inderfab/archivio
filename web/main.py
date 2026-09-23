@@ -10,7 +10,7 @@ import sys
 import threading
 import time
 from contextlib import asynccontextmanager
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from urllib.parse import quote
 
@@ -54,6 +54,7 @@ def _scheduler_loop():
     triggered_today: str | None = None
     mcp_log_cleaned_today: str | None = None
     search_log_cleaned_today: str | None = None
+    backup_ran_today: str | None = None
     log.info("Scheduler-Loop gestartet")
     while True:
         try:
@@ -102,9 +103,54 @@ def _scheduler_loop():
                         log.info("Geplanter Scan gestartet: HTTP %s %s", r.status_code, r.text[:200])
                     except Exception as exc:
                         log.error("Geplanter Scan fehlgeschlagen: %s", exc)
+
+            backup_ran_today = _maybe_run_weekly_backup(log, backup_ran_today)
         except Exception as exc:
             log.error("Scheduler-Fehler: %s", exc)
         time.sleep(60)
+
+
+def _maybe_run_weekly_backup(log, ran_today: str | None) -> str | None:
+    """Wöchentliche Sicherung, eine Stunde nach dem Nachtscan.
+
+    Der Versatz ist Absicht: so ist der Scan durch und die Sicherung enthält den
+    frischen Stand. Läuft trotzdem noch einer (grosse Bestände dauern), wird auf den
+    nächsten Tick verschoben statt übersprungen — eine Sicherung parallel zum Scan
+    ist zwar möglich, kostet aber unnötig I/O auf derselben Platte."""
+    from config import settings
+    from db import backup as backup_mod
+    from web.api import _backup_state
+    from web.dashboard import _scans
+
+    target = (settings.get("backup.path") or "").strip()
+    if not target or not settings.get("backup.enabled", True):
+        return ran_today
+
+    now = datetime.now()
+    today = now.strftime("%Y-%m-%d")
+    if ran_today == today or now.weekday() != int(settings.get("backup.weekday", 6) or 0):
+        return ran_today
+
+    scan_time = (settings.get("scheduler.scan_time") or "22:00").strip() or "22:00"
+    h, m = map(int, scan_time.split(":"))
+    target_time = (now.replace(hour=h, minute=m, second=0, microsecond=0)
+                   + timedelta(hours=1))
+    # Bewusst kein enges Zeitfenster wie beim Scan: blockiert ein laufender Scan die
+    # Sicherung, soll sie danach nachgeholt werden und nicht eine Woche ausfallen.
+    if now < target_time:
+        return ran_today
+
+    if _backup_state.get("running"):
+        return ran_today
+    if any(s.get("status") == "running" for s in _scans.values()):
+        log.info("Sicherung verschoben — es läuft noch ein Scan")
+        return ran_today
+
+    log.info("Wöchentliche Sicherung wird gestartet: %s", target)
+    threading.Thread(
+        target=lambda: backup_mod.create_backup(target, _backup_state), daemon=True
+    ).start()
+    return today
 
 
 def _resume_embeddings_on_startup():
@@ -132,17 +178,56 @@ def _resume_embeddings_on_startup():
         logging.getLogger(__name__).debug("Startup-Embedding-Check: %s", exc)
 
 
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    # Migrations beim Start ausführen — auch bei bestehenden DBs
+# ── Startvorbereitung ─────────────────────────────────────────────────────────
+# Zustand der einmaligen Vorbereitung beim Serverstart (Schema + Migrationen).
+
+# "laeuft" startet bewusst auf False und wird erst im lifespan gesetzt: der Wert
+# bedeutet "die Vorbereitung laeuft gerade", nicht "sie steht noch aus". Andernfalls
+# antwortete die App ueberall dort mit der Warteseite, wo der lifespan gar nicht
+# ausgefuehrt wird -- etwa in den Tests, die die App direkt einbinden.
+_start_zustand: dict = {"laeuft": False, "seit": time.time(), "fehler": None}
+
+
+def _startvorbereitung() -> None:
+    """Schema und Migrationen — im Hintergrund, NICHT blockierend.
+
+    Lief das früher direkt im lifespan, nahm uvicorn erst danach Verbindungen an.
+    Bei einer grossen Migration (v3.4.0 braucht auf 240'000 Dokumenten rund drei
+    Minuten) bedeutete das:
+
+      * Der Nutzer sieht im Browser nur „Verbindung fehlgeschlagen" und weiss nicht,
+        ob überhaupt etwas passiert.
+      * Schlimmer: der Watchdog der Menüleisten-App prüft alle 15 s /api/status und
+        startet den Server nach vier Fehlversuchen (60 s) neu — eine Migration, die
+        länger dauert, wäre also mitten drin abgeschossen und von vorn begonnen
+        worden, womöglich endlos.
+
+    Jetzt startet der Server sofort, antwortet auf /api/status und zeigt allen
+    anderen Aufrufen eine Warteseite, bis die Vorbereitung durch ist.
+    """
     try:
         from db import migrations as _mig
         _conn = connection.get_connection()
         _mig.run(_conn)
         _conn.close()
     except Exception as _e:
-        import logging
+        _start_zustand["fehler"] = str(_e)
         logging.getLogger(__name__).warning("Migration fehlgeschlagen: %s", _e)
+    finally:
+        _start_zustand["laeuft"] = False
+        dauer = time.time() - _start_zustand["seit"]
+        logging.getLogger(__name__).info("Startvorbereitung abgeschlossen (%.0f s)", dauer)
+
+    # Erst jetzt die Dienste starten, die die Datenbank benutzen.
+    threading.Thread(target=_scheduler_loop, daemon=True).start()
+    threading.Thread(target=_resume_embeddings_on_startup, daemon=True).start()
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    _start_zustand.update({"laeuft": True, "seit": time.time(), "fehler": None})
+    threading.Thread(target=_startvorbereitung, daemon=True).start()
+
     # SIGTERM → alle Scanner-Worker sofort killen bevor Prozess endet
     def _sigterm(sig, frame):
         from scanner.walker import kill_all_workers
@@ -153,8 +238,6 @@ async def lifespan(app: FastAPI):
     except Exception:
         pass
 
-    threading.Thread(target=_scheduler_loop, daemon=True).start()
-    threading.Thread(target=_resume_embeddings_on_startup, daemon=True).start()
     yield
     # Shutdown: alle Worker killen
     from scanner.walker import kill_all_workers
@@ -162,6 +245,72 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(title="Archivio", lifespan=lifespan)
+
+
+_WARTESEITE = """<!doctype html>
+<html lang="de"><head><meta charset="utf-8">
+<title>Archivio wird vorbereitet</title>
+<meta http-equiv="refresh" content="4">
+<style>
+  body { font-family: -apple-system, BlinkMacSystemFont, "Helvetica Neue", sans-serif;
+         background:#fafafa; color:#111; display:flex; align-items:center;
+         justify-content:center; height:100vh; margin:0; }
+  .box { max-width:460px; text-align:center; padding:0 24px; }
+  h1 { font-size:20px; font-weight:700; margin:18px 0 10px; }
+  p  { font-size:14px; line-height:1.6; color:#4b5563; margin:0 0 10px; }
+  .klein { font-size:12px; color:#9ca3af; }
+  .kreis { width:34px; height:34px; margin:0 auto; border:3px solid #e5e7eb;
+           border-top-color:#111; border-radius:50%; animation:dreh 1s linear infinite; }
+  @keyframes dreh { to { transform:rotate(360deg); } }
+</style></head>
+<body><div class="box">
+  <div class="kreis"></div>
+  <h1>Archivio wird vorbereitet</h1>
+  <p>Die Datenbank wird einmalig für diese Version umgestellt. Das passiert nur nach
+     einem Update und kann bei grossen Archiven <strong>einige Minuten</strong> dauern.</p>
+  <p>Bitte das Fenster offen lassen — es wechselt von selbst, sobald alles bereit ist.</p>
+  <p class="klein">Läuft seit SEKUNDEN Sekunden</p>
+</div></body></html>"""
+
+_FEHLERSEITE = """<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Archivio</title>
+<style>body{font-family:-apple-system,sans-serif;background:#fafafa;color:#111;
+display:flex;align-items:center;justify-content:center;height:100vh;margin:0}
+.box{max-width:520px;padding:0 24px}h1{font-size:19px}p{font-size:14px;line-height:1.6;color:#4b5563}
+code{display:block;background:#f3f4f6;padding:8px 10px;border-radius:6px;font-size:12px;
+white-space:pre-wrap;margin-top:10px}</style></head>
+<body><div class="box"><h1>Archivio konnte nicht vorbereitet werden</h1>
+<p>Beim Umstellen der Datenbank ist ein Fehler aufgetreten. Der Server läuft, arbeitet
+aber mit einem unfertigen Stand. Bitte den Server einmal neu starten; hilft das nicht,
+die letzte Sicherung einspielen.</p><code>FEHLER</code></div></body></html>"""
+
+
+@app.middleware("http")
+async def _vorbereitung_abfangen(request: Request, call_next):
+    """Zeigt während der Startvorbereitung eine Warteseite statt einer toten Verbindung.
+
+    /api/status wird bewusst durchgelassen und OHNE Datenbankzugriff beantwortet:
+    daran erkennt der Watchdog der Menüleisten-App, dass der Server lebt. Eine
+    Abfrage gegen die gerade migrierende Datenbank würde dort bis zum Sperr-Timeout
+    hängen und den Server fälschlich als hängend erscheinen lassen.
+    """
+    if not _start_zustand["laeuft"]:
+        return await call_next(request)
+
+    pfad = request.url.path
+    if pfad.startswith("/static"):
+        return await call_next(request)
+    if pfad == "/api/status":
+        return JSONResponse({"server": True, "vorbereitung": True,
+                             "seit_s": round(time.time() - _start_zustand["seit"])})
+    if _start_zustand["fehler"]:
+        return HTMLResponse(_FEHLERSEITE.replace("FEHLER", str(_start_zustand["fehler"])),
+                            status_code=503)
+    return HTMLResponse(
+        _WARTESEITE.replace("SEKUNDEN", str(round(time.time() - _start_zustand["seit"]))),
+        status_code=503)
+
+
 app.mount("/static", StaticFiles(directory="web/static"), name="static")
 app.include_router(dashboard_router)
 app.include_router(api_router)
@@ -1210,8 +1359,10 @@ async def system_status_page(request: Request):
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
+    from db import backup as backup_mod
     return templates.TemplateResponse("system_status.html", {
         "request":          request,
+        "backup":           backup_mod.summary(),
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

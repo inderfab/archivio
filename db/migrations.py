@@ -39,6 +39,9 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "023_search_log_query_string", _m023)
     _apply(conn, "024_project_archive", _m024)
     _apply(conn, "025_mail_archive", _m025)
+    _apply(conn, "026_documents_fts_ohne_content", _m026)
+    _apply(conn, "027_embeddings_float16", _m027)
+    _apply(conn, "028_chunks_ohne_created_at", _m028)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -613,3 +616,151 @@ def _m025(conn: sqlite3.Connection):
             if "duplicate column" not in str(e).lower():
                 raise
     conn.commit()
+
+
+def _m026(conn: sqlite3.Connection):
+    """documents_fts ohne content-Spalte -- reiner Dateinamen-Index.
+
+    Die Tabelle indexierte Dateiname UND Volltext, aber die einzige lesende Abfrage
+    im ganzen Code ist _search_filename() (web/main.py), die mit einem
+    `filename:`-Spaltenfilter arbeitet und den Volltext ausdruecklich ausnimmt -- die
+    Volltextsuche laeuft ueber chunks_fts. Da documents_fts eigenstaendig ist (kein
+    content=), lag damit eine vollstaendige zweite Kopie aller Dokumenttexte in der
+    Datenbank, plus der dazugehoerige Index: auf der Produktivdatenbank rund
+    850 MB von 6,5 GB, ohne dass je darauf gesucht wurde.
+
+    Die drei Trigger auf document_content entfallen ersatzlos -- sie pflegten
+    ausschliesslich die content-Spalte. Der Dateiname bleibt aktuell, weil
+    documents.filename nirgends per UPDATE geaendert wird: eine umbenannte Datei
+    wird ueber ihren Hash als neues bzw. bestehendes Dokument mit neuem Pfad
+    gefuehrt.
+    """
+    conn.executescript("""
+        DROP TRIGGER IF EXISTS documents_fts_insert;
+        DROP TRIGGER IF EXISTS documents_fts_update;
+        DROP TRIGGER IF EXISTS documents_fts_delete;
+        DROP TRIGGER IF EXISTS documents_fts_filename_insert;
+        DROP TRIGGER IF EXISTS documents_fts_content_insert;
+        DROP TRIGGER IF EXISTS documents_fts_content_update;
+        DROP TRIGGER IF EXISTS documents_fts_content_delete;
+        -- Kam erst mit _m008 und fehlt deshalb in der DROP-Liste von _m001; ohne das
+        -- bliebe ein Trigger auf eine Tabelle zurueck, die es gleich nicht mehr gibt.
+        DROP TRIGGER IF EXISTS documents_fts_doc_delete;
+
+        DROP TABLE IF EXISTS documents_fts;
+
+        CREATE VIRTUAL TABLE documents_fts USING fts5(
+            filename,
+            tokenize='unicode61 remove_diacritics 2'
+        );
+
+        CREATE TRIGGER documents_fts_filename_insert
+        AFTER INSERT ON documents BEGIN
+            INSERT INTO documents_fts(rowid, filename) VALUES (new.id, new.filename);
+        END;
+
+        CREATE TRIGGER documents_fts_doc_delete
+        AFTER DELETE ON documents BEGIN
+            DELETE FROM documents_fts WHERE rowid = old.id;
+        END;
+    """)
+    n = conn.execute(
+        "INSERT INTO documents_fts(rowid, filename) SELECT id, filename FROM documents"
+    ).rowcount
+    conn.commit()
+    log.info("documents_fts ohne Volltext neu aufgebaut: %d Dateinamen indexiert", n)
+
+
+def _m027(conn: sqlite3.Connection):
+    """Embeddings von float32 auf float16 -- halbiert ihren Platzbedarf.
+
+    Auf der Produktivdatenbank sind die Embeddings mit rund 2 GB von 6,5 GB der
+    groesste Einzelposten. Fuer den Kosinusvergleich in embedder.py ist der
+    Genauigkeitsverlust von float16 praktisch nicht messbar, die Vektoren sind
+    ausserdem L2-normiert (Werte im Bereich -1..1, weit weg von den Grenzen des
+    Formats).
+
+    KRITISCH: der Datentyp steht nirgends in der Datenbank. np.frombuffer liest
+    einfach die Bytes, und embedder.py baut aus allen Zeilen EINE Matrix -- eine
+    einzige nicht konvertierte float32-Zeile wuerde als 1536-elementiger Unsinn
+    gelesen und die gesamte semantische Suche vergiften. Deshalb muessen ALLE
+    Zeilen umgestellt werden.
+
+    Die Migration ist ueber die Blob-Laenge wiederaufnehmbar (768 Dimensionen:
+    3072 Bytes = float32, 1536 = bereits float16). Das ist noetig, weil _apply()
+    keine Transaktion um die Migration legt: bricht sie ab, wird sie nicht
+    eingetragen und laeuft beim naechsten Start von vorn -- dann aber nur noch
+    ueber die verbliebenen float32-Zeilen.
+    """
+    try:
+        import numpy as np
+    except ImportError:
+        log.warning("numpy fehlt -- Embedding-Migration uebersprungen")
+        return
+
+    # Die Quell-Blobgroesse wird VOR der ersten Umwandlung festgehalten, als eigene
+    # Zeile in _migrations. Ohne diesen Merker waere die Migration nicht sicher
+    # wiederaufnehmbar: nach einem vollstaendigen Durchlauf, der vor dem Eintrag in
+    # _migrations abbricht, haetten alle Zeilen dieselbe (halbierte) Laenge -- ein
+    # zweiter Lauf wuerde sie dann fuer unkonvertierte float32-Blobs halten, als
+    # solche interpretieren und die Vektoren unwiederbringlich zerstoeren.
+    marker_prefix = "027_quelllaenge_"
+    row = conn.execute(
+        "SELECT id FROM _migrations WHERE id LIKE ?", (marker_prefix + "%",)
+    ).fetchone()
+    if row:
+        src_len = int(row[0].rsplit("_", 1)[1])
+    else:
+        lengths = [r[0] for r in conn.execute(
+            "SELECT DISTINCT length(embedding) FROM document_chunks "
+            "WHERE embedding IS NOT NULL")]
+        if not lengths:
+            return          # nichts vorhanden -- Neuinstallation schreibt direkt float16
+        src_len = max(lengths)
+        conn.execute("INSERT OR IGNORE INTO _migrations (id) VALUES (?)",
+                     (marker_prefix + str(src_len),))
+        conn.commit()
+
+    if src_len % 4 != 0:
+        log.warning("Unerwartete Embedding-Groesse %d Bytes -- nicht umgestellt", src_len)
+        return
+
+    total = 0
+    while True:
+        rows = conn.execute(
+            "SELECT id, embedding FROM document_chunks WHERE length(embedding) = ? LIMIT 2000",
+            (src_len,),
+        ).fetchall()
+        if not rows:
+            break
+        converted = [
+            (np.frombuffer(r[1], dtype=np.float32).astype(np.float16).tobytes(), r[0])
+            for r in rows
+        ]
+        with conn:
+            conn.executemany(
+                "UPDATE document_chunks SET embedding = ? WHERE id = ?", converted)
+        total += len(converted)
+    if total:
+        log.info("Embeddings auf float16 umgestellt: %d Chunks", total)
+
+
+def _m028(conn: sqlite3.Connection):
+    """document_chunks.created_at entfernen -- wird nirgends im Code gelesen.
+
+    Pro Chunk ein Zeitstempel als Text. Auf der Produktivdatenbank mit 652'295
+    Chunks sind das rund 13 MB; bei einer Million Dokumenten waere es ein
+    dreistelliger MB-Betrag fuer eine Angabe, die nie jemand abfragt.
+
+    DROP COLUMN braucht SQLite >= 3.35. Das Bundle bringt 3.53 mit; schlaegt es auf
+    einer aelteren Installation fehl, bleibt die Spalte einfach stehen -- ein
+    Abbruch waere hier unverhaeltnismaessig.
+    """
+    try:
+        conn.execute("ALTER TABLE document_chunks DROP COLUMN created_at")
+        conn.commit()
+        log.info("document_chunks.created_at entfernt")
+    except Exception as exc:
+        if "no such column" in str(exc).lower():
+            return
+        log.warning("created_at konnte nicht entfernt werden (SQLite zu alt?): %s", exc)

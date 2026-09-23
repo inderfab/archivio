@@ -28,3 +28,5 @@ pillow-heif>=0.19
 # System
 psutil>=5.9
 packaging>=23.0        # Versionsvergleich für den Server-Auto-Updater
+requests>=2.31         # Menubar-Apps, Helper, Scheduler-Aufrufe an den eigenen Server
+zeroconf>=0.130        # mDNS: Server meldet sich an, Helper findet ihn (auch nach Umzug)

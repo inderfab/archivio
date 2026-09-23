@@ -72,7 +72,9 @@ def test_vector_search_respects_mail_type_filter(tmp_db):
     for doc_id in (doc_pdf, doc_mail):
         tmp_db.execute(
             "UPDATE document_chunks SET embedding = ? WHERE document_id = ?",
-            (vec.tobytes(), doc_id),
+            # In der DB liegen Embeddings als float16 (Migration 027); der
+            # Anfragevektor bleibt float32.
+            (vec.astype(np.float16).tobytes(), doc_id),
         )
     tmp_db.commit()
 

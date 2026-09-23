@@ -116,7 +116,7 @@ def embed_document_chunks(conn: sqlite3.Connection, document_id: int) -> int:
             for row, vec in zip(batch, vecs):
                 conn.execute(
                     "UPDATE document_chunks SET embedding = ? WHERE id = ?",
-                    (vec.tobytes(), row["id"])
+                    (vec.astype(np.float16).tobytes(), row["id"])
                 )
         total += len(batch)
     return total
@@ -161,8 +161,17 @@ def vector_search(
     if not rows:
         return []
 
+    # Gespeichert wird float16 (halber Platz, siehe Migration 027) -- der Genauigkeits-
+    # verlust ist beim Kosinusvergleich L2-normierter Vektoren nicht messbar. Der
+    # Anfragevektor bleibt float32; numpy hebt die Matrix beim Skalarprodukt an, so
+    # dass auf der Anfrageseite nichts verlorengeht.
+    #
+    # WICHTIG: der Datentyp steht nicht in der Datenbank. np.array() unten baut aus
+    # allen Zeilen EINE Matrix -- eine einzige Zeile im falschen Format ergibt eine
+    # andere Vektorlänge und lässt die gesamte semantische Suche kippen. Migration 027
+    # stellt deshalb alle Zeilen in einem Zug um.
     embeddings = np.array(
-        [np.frombuffer(r["embedding"], dtype=np.float32) for r in rows]
+        [np.frombuffer(r["embedding"], dtype=np.float16) for r in rows]
     )
     scores   = embeddings @ query_vec          # cosine similarity (vecs already normalised)
     top_idx  = np.argsort(scores)[::-1][:limit]

@@ -1499,12 +1499,32 @@ async def settings_page(
         )
     except asyncio.TimeoutError:
         fda_missing = False
+    from db import backup as backup_mod
     return templates.TemplateResponse("settings.html", {
         "request":     request,
         "cfg":         cfg,
         "saved":       bool(saved),
         "fda_missing": fda_missing,
+        "backup":      backup_mod.summary(),
+        "missing_passwords": backup_mod.missing_password_accounts(cfg),
     })
+
+
+@router.post("/backup-settings")
+async def backup_settings_save(request: Request):
+    """Speicherort und Wochentag der Sicherung.
+
+    Bewusst eine eigene Route mit eigenem Formular: settings_save() schreibt ganze
+    Konfigurationsschlüssel neu, und Felder, die dort nicht im Formular stehen,
+    würden dabei überschrieben. Ein separates Formular hält beides auseinander."""
+    form = await request.form()
+    path = (form.get("backup_path") or "").strip().rstrip("/")
+    settings.save({"backup": {
+        "path":    path,
+        "enabled": form.get("backup_enabled") == "1",
+        "weekday": max(0, min(6, int(form.get("backup_weekday") or 6))),
+    }})
+    return RedirectResponse("/dashboard/settings?saved=1#sicherung", status_code=303)
 
 
 # ── Sperrliste (manuelle MCP-Regeln, ergänzt die Norm-Erkennung) ────────────────

@@ -750,6 +750,78 @@ def resolve_discovery(found: list[tuple[str, int]]) -> tuple[str, str | None]:
     return "none", None
 
 
+_single_instance_handles: dict[str, object] = {}
+
+
+def acquire_single_instance_lock(name: str, log=None) -> bool:
+    """Stellt sicher, dass von einer App nur EINE Instanz laeuft. False = laeuft schon.
+
+    Noetig, weil der Server ueber zwei Wege gestartet werden kann: den LaunchAgent
+    io.archivio.server und ein Anmeldeobjekt aus aelteren Installationen. Der
+    Postinstall versucht letzteres zu entfernen, scheitert dabei aber still an der
+    fehlenden Automation-Berechtigung. Liefen beide, startete jeder seinen eigenen
+    uvicorn, und _start_server() -> _kill_port_8000() schoss den jeweils anderen ab --
+    real beobachtet als rund 30 Sekunden Gerangel nach jeder Anmeldung.
+
+    Der Helper-Port 44380 taugt dafuer nicht: auf einem Mac mit Server UND Helper
+    binden ihn beide, einer verliert ohnehin (siehe start_local_server).
+
+    Die offene Datei wird absichtlich modulweit festgehalten -- wird sie geschlossen,
+    faellt die Sperre. Scheitert das Sperren aus einem anderen Grund als "schon
+    vergeben", wird durchgelassen: eine kaputte Sperre darf den Start nie verhindern.
+    """
+    import fcntl
+
+    lock_dir = Path.home() / ".archivio"
+    handle = None
+    try:
+        lock_dir.mkdir(parents=True, exist_ok=True)
+        handle = open(lock_dir / f"{name}.lock", "w")
+        fcntl.flock(handle, fcntl.LOCK_EX | fcntl.LOCK_NB)
+        handle.write(f"{os.getpid()}\n")
+        handle.flush()
+        _single_instance_handles[name] = handle
+        return True
+    except OSError:
+        # Schliessen ist hier PFLICHT: die wartende Bereitschaftsinstanz ruft alle
+        # 30s erneut auf -- ein offen gelassenes Handle pro Versuch waere ein
+        # Dateideskriptor-Leck, das nach rund einem Tag ans Limit stoesst.
+        if handle is not None:
+            handle.close()
+        return False
+    except Exception as exc:
+        if handle is not None:
+            handle.close()
+        if log:
+            log.warning("Einmal-Start-Sperre nicht moeglich (%s) -- fahre fort", exc)
+        return True
+
+
+def pick_rediscovered_server(found: list[tuple[str, int]], current_url: str,
+                             probe) -> str | None:
+    """Entscheidet, ob nach einem Serverumzug auf eine neu gefundene Adresse
+    gewechselt werden darf. Gibt die neue URL zurueck oder None.
+
+    Bewusst streng, weil hier eine vom Nutzer gesetzte Adresse ueberschrieben wird:
+    nur bei GENAU EINEM Fund, nur wenn er von der bisherigen abweicht, und nur wenn
+    `probe(url)` bestaetigt, dass dort wirklich ein Server antwortet -- mDNS-
+    Eintraege koennen veraltet sein und einen laengst abgeschalteten Rechner melden.
+
+    Als reine Funktion gehalten (kein rumps, kein requests), damit sie ohne die
+    Menubar-App testbar ist -- wie resolve_discovery() darueber."""
+    decision, url = resolve_discovery(found)
+    if decision != "one" or not url:
+        return None
+    if url.rstrip("/") == (current_url or "").rstrip("/"):
+        return None
+    try:
+        if not probe(url):
+            return None
+    except Exception:
+        return None
+    return url
+
+
 def thread_alert(title: str, message: str) -> None:
     msg = message.replace("\\", "\\\\").replace('"', '\\"').replace("\n", " ")
     subprocess.run(["osascript", "-e", f'display alert "{title}" message "{msg}"'], timeout=60)

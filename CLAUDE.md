@@ -5,7 +5,10 @@
 > Scanner/Embedding/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte).
 
 ## Stack
-- **Backend**: Python 3.12, FastAPI
+- **Backend**: Python 3.13 im ausgelieferten Bundle (`PYTHON_VERSION` in
+  `scripts/build_server_app.sh`); die Entwicklungs-`.venv` läuft auf 3.14 mit
+  **derselben SQLite-Version (3.53.x)** wie das Bundle — wichtig, weil FTS5-Optionen
+  und `ALTER TABLE … DROP COLUMN` versionsabhängig sind. FastAPI.
 - **Datenbank**: SQLite mit FTS5 (Volltextsuche)
 - **Frontend**: HTMX + Jinja2 Templates
 - **Paketmanagement**: pip + requirements.txt

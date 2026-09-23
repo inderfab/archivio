@@ -3,10 +3,12 @@ from __future__ import annotations
 
 import base64
 import io
+import logging
 import os
 import re
 import subprocess
 import threading
+import time
 import uuid
 import zipfile
 from datetime import datetime, timezone
@@ -21,6 +23,7 @@ from db import connection
 from web.dashboard import _mail_scan, _run_mail_scan, _run_scan, _scans, _cancel_flags, _now
 
 router = APIRouter(prefix="/api")
+log = logging.getLogger(__name__)
 
 
 # ── MCP-Whitelist ────────────────────────────────────────────────────────────────
@@ -2179,6 +2182,168 @@ async def pdf_metadata_backfill_status():
     return JSONResponse(_meta_backfill_state)
 
 
+# ── Sicherung & Umzug ─────────────────────────────────────────────────────────
+# Siehe db/backup.py für die Begründung der Abläufe (VACUUM INTO statt Dateikopie,
+# lokal vacuumen und erst dann übertragen, quick_check vor dem Einwechseln).
+
+_backup_state: dict = {"running": False, "phase": "", "error": None, "done": False}
+
+
+@router.post("/backup/run")
+async def backup_run():
+    """Sicherung sofort erstellen. Antwortet sofort, Fortschritt über /backup/status."""
+    from db import backup as backup_mod
+
+    if _backup_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Eine Sicherung läuft bereits"})
+    target = (settings.get("backup.path") or "").strip()
+    if not target:
+        return JSONResponse({"ok": False, "message": "Kein Speicherort festgelegt"}, 400)
+
+    threading.Thread(
+        target=lambda: backup_mod.create_backup(target, _backup_state), daemon=True
+    ).start()
+    return JSONResponse({"ok": True, "message": "Sicherung gestartet"})
+
+
+@router.get("/backup/status")
+async def backup_status():
+    from db import backup as backup_mod
+
+    return JSONResponse({"progress": _backup_state, "state": backup_mod.load_state()})
+
+
+@router.get("/backup/inspect")
+async def backup_inspect(path: str):
+    """Liest das Manifest einer Sicherung, damit die Oberfläche vor dem Einspielen
+    zeigen kann, was da eigentlich kommt (Datum, Version, Anzahl Dokumente)."""
+    from db import backup as backup_mod
+
+    manifest = backup_mod.read_manifest(path)
+    if manifest is None:
+        return JSONResponse(
+            {"ok": False, "message": "In diesem Ordner liegt keine Archivio-Sicherung"}, 400)
+    return JSONResponse({"ok": True, "manifest": manifest,
+                         "dir": str(backup_mod.resolve_backup_dir(path))})
+
+
+class BackupImportRequest(BaseModel):
+    path: str
+    confirm_replace: bool = False
+    path_map: dict[str, str] = {}
+
+
+_import_state: dict = {"running": False, "phase": "", "error": None, "done": False,
+                       "result": None}
+
+
+@router.post("/backup/import")
+async def backup_import(req: BackupImportRequest):
+    """Startet das Einspielen einer Sicherung und antwortet sofort.
+
+    Bewusst NICHT synchron: das Einspielen liest und kopiert mehrere GB und dauert
+    Minuten. Lief es in der Antwort des Aufrufs, war der Fortschritt verloren, sobald
+    jemand die Seite wechselte -- die Arbeit lief im Hintergrund weiter (ein Thread
+    laesst sich nicht abbrechen), aber die Oberflaeche wusste nichts mehr davon und
+    der abschliessende Serverneustart unterblieb. Der Zustand liegt deshalb hier,
+    nicht in der Antwort, und wird ueber /backup/import-status abgefragt.
+
+    Rueckfragen (Ersetzen bestaetigen, fehlende Ordner zuordnen) landen ebenfalls im
+    Zustand; die Oberflaeche ruft danach mit den ergaenzten Angaben erneut auf.
+    """
+    from db import backup as backup_mod
+
+    if _backup_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Eine Sicherung läuft gerade"}, 409)
+    if _import_state.get("running"):
+        return JSONResponse({"ok": False, "message": "Es wird bereits eingespielt"}, 409)
+
+    _import_state.update({"running": True, "phase": "Vorbereiten", "error": None,
+                          "done": False, "result": None})
+
+    def _lauf():
+        try:
+            ergebnis = backup_mod.import_backup(
+                req.path, confirm_replace=req.confirm_replace, path_map=req.path_map,
+                progress=_import_state)
+        except Exception as exc:   # _import_state wird sonst nie freigegeben
+            ergebnis = {"ok": False, "error": str(exc)}
+            _import_state.update({"error": str(exc), "result": ergebnis})
+        finally:
+            _import_state.update({"running": False, "done": True})
+        if ergebnis.get("ok"):
+            _neustart_nach_import()
+
+    threading.Thread(target=_lauf, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Einspielen gestartet"})
+
+
+def _neustart_nach_import() -> None:
+    """Beendet den Serverprozess, damit der Aufpasser ihn mit der neuen Datenbank
+    neu startet.
+
+    Noetig, weil dieser Prozess die ALTE Datenbankdatei noch geoeffnet hat -- ohne
+    Neustart zeigt die Oberflaeche weiter den Stand von vorher, obwohl das Einspielen
+    laengst fertig ist. Frueher stiess die Oberflaeche den Neustart an; das fiel aus,
+    sobald jemand waehrenddessen die Seite wechselte. Deshalb jetzt serverseitig.
+
+    Nur unter Aufsicht (_server_memory_watchdog in menubar/server_app.py startet
+    binnen 15s neu). Ein handgestartetes uvicorn bliebe sonst einfach weg.
+    """
+    if os.environ.get("ARCHIVIO_SUPERVISED") != "1":
+        log.info("Kein Aufpasser aktiv — Serverneustart muss von Hand erfolgen")
+        return
+
+    def _beenden():
+        # Kurz warten, damit die Oberflaeche das Ergebnis noch abholen kann.
+        time.sleep(4)
+        log.info("Sicherung eingespielt — Server beendet sich für den Neustart")
+        os._exit(0)
+
+    threading.Thread(target=_beenden, daemon=True).start()
+
+    threading.Thread(target=_lauf, daemon=True).start()
+    return JSONResponse({"ok": True, "message": "Einspielen gestartet"})
+
+
+@router.get("/backup/import-status")
+async def backup_import_status():
+    return JSONResponse(_import_state)
+
+
+_DEINST_APP = "/Applications/Archivio Deinstallieren.app"
+
+
+@router.post("/deinstallation/oeffnen")
+async def deinstallation_oeffnen():
+    """Öffnet das grafische Deinstallations-Programm.
+
+    Bewusst hier im Server und nicht über den lokalen Dienst auf Port 44380: den
+    teilen sich Server-App und Helper, und wer von beiden ihn bedient, entscheidet
+    ein Wettlauf beim Start. Antwortete dort ein älterer Helper, der diesen Aufruf
+    noch nicht kennt, meldete die Oberfläche irreführend „Helper läuft nicht" —
+    obwohl der Helper für die Deinstallation gar keine Rolle spielt.
+
+    Der Server läuft immer auf genau dem Mac, um den es geht, also gehört der
+    Aufruf hierher.
+    """
+    if not os.path.isdir(_DEINST_APP):
+        return JSONResponse({
+            "ok": False,
+            "error": "Das Deinstallations-Programm wurde nicht gefunden. Es wird mit "
+                     "dem Archivio Server installiert — bitte den Server neu "
+                     "installieren, oder Archivio über die Systemeinstellungen von "
+                     "Hand entfernen.",
+        })
+    try:
+        # Abgelöst starten: das Programm entfernt gleich unter anderem diesen Server.
+        subprocess.Popen(["/usr/bin/open", "-a", _DEINST_APP], start_new_session=True)
+        return JSONResponse({"ok": True})
+    except Exception as exc:
+        log.warning("Deinstallations-Programm konnte nicht geöffnet werden: %s", exc)
+        return JSONResponse({"ok": False, "error": str(exc)})
+
+
 # ── Diagnose ──────────────────────────────────────────────────────────────────
 
 @router.get("/debug/diagnostics", response_class=HTMLResponse)
@@ -2235,6 +2400,12 @@ async def diagnostics():
     db_ok   = db_path.exists()
     _chk("Datenbank", str(db_path), ok=db_ok,
          detail=f"{db_path.stat().st_size // 1024} KB" if db_ok else "Datei fehlt!")
+
+    # Sicherung — eine stillschweigend kaputte Sicherung ist schlimmer als keine,
+    # deshalb hier sichtbar und nicht nur in den Einstellungen.
+    from db import backup as backup_mod
+    bk = backup_mod.summary()
+    _chk("Letzte Sicherung", bk["text"], ok=bk["ok"], detail=bk["detail"])
 
     # /Volumes
     try:

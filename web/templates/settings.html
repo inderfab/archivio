@@ -42,6 +42,36 @@
     border-color: var(--accent); box-shadow: 0 0 0 3px rgba(55,65,81,.15);
   }
 
+  /* Sicherungs-Status: eine stillschweigend kaputte Sicherung ist schlimmer als
+     gar keine, deshalb wird der Zustand hier deutlich eingefärbt. */
+  .backup-status {
+    border: 1px solid var(--border); border-left-width: 3px;
+    border-radius: var(--radius); padding: 10px 14px; margin-bottom: 16px;
+    font-size: 13px;
+  }
+  .backup-status.backup-ok   { border-left-color: #15803d; }
+  .backup-status.backup-warn { border-left-color: #b45309; }
+  .backup-status.backup-err  { border-left-color: #b91c1c; }
+  .backup-detail { color: var(--text-3); font-size: 12px; margin-top: 3px; }
+
+  /* Laufende Sicherung: erscheint sofort beim Klick. Ohne sichtbaren Zustand
+     weiss man nach dem Klick nicht, ob überhaupt etwas passiert. */
+  .backup-laeuft {
+    display: flex; align-items: center; gap: 10px;
+    padding: 10px 14px; margin-bottom: 16px; font-size: 13px;
+    border: 1px solid #bfdbfe; border-radius: var(--radius);
+    background: #eff6ff; color: #1e40af;
+  }
+  .backup-spinner {
+    width: 13px; height: 13px; flex-shrink: 0;
+    border: 2px solid #bfdbfe; border-top-color: #1e40af; border-radius: 50%;
+    animation: backup-dreh .8s linear infinite;
+  }
+  @keyframes backup-dreh { to { transform: rotate(360deg); } }
+  .pw-missing {
+    color: #b91c1c; font-size: 12px; font-weight: 600; margin-left: 6px;
+  }
+
   /* Immer offene Sektionen (kein <details>/Einklappen mehr) */
   .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: visible; }
   .settings-section-header {
@@ -273,6 +303,11 @@
             <div class="mail-account-header">
               <input type="text" name="mail_label"
                 placeholder="Label (z.B. Büro)" value="{{ acc.get('label', '') }}">
+              {# Nach einem Import sind alle Passwörter leer — ohne sichtbaren Hinweis
+                 läuft der Mail-Scan sonst wochenlang ins Leere. #}
+              {% if not acc.get('password') %}
+              <span class="pw-missing" title="Ohne Passwort werden für dieses Konto keine Mails abgerufen">Passwort fehlt</span>
+              {% endif %}
               <button type="button" class="remove-btn"
                 onclick="this.closest('.mail-account').remove()">×</button>
             </div>
@@ -336,6 +371,92 @@
     </div>
 
   </form>
+
+  {# ── Sicherung & Umzug (ausserhalb Form — eigene Route, eigenes Formular) ── #}
+  <div class="settings-section" id="sicherung">
+    <div class="settings-section-header">
+      Sicherung &amp; Umzug
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Eine wöchentliche Kopie der Datenbank samt Einstellungen — damit ein Rechnerausfall keinen kompletten Neu-Scan bedeutet. Dieselbe Sicherung dient dem Umzug auf einen anderen Mac: dort einspielen statt alles neu zu indexieren.</p>
+        <p><strong>Speicherort:</strong> am besten der Datei-Server oder eine externe Platte — nicht derselbe Rechner. Es wird immer genau eine Sicherung aufbewahrt; am Zielort sollte kurzzeitig der doppelte Platz frei sein, weil die bisherige erhalten bleibt, bis die neue vollständig geschrieben ist.</p>
+        <p><strong>Wöchentlich sichern:</strong> läuft am gewählten Wochentag eine Stunde nach dem nächtlichen Scan, damit der frische Stand mitkommt. Läuft zu dem Zeitpunkt noch ein Scan, wird die Sicherung nachgeholt statt ausgelassen.</p>
+        <p><strong>Mail-Passwörter:</strong> die Sicherung enthält bewusst keine. Beim Einspielen auf einem anderen Mac werden sie einmalig neu abgefragt; bis dahin sind die betroffenen Konten oben als „Passwort fehlt" markiert.</p>
+        <p><strong>Sicherung einspielen:</strong> ersetzt Datenbank und Einstellungen vollständig. Vorher wird gefragt und eine Sicherheitskopie des bisherigen Standes angelegt. Heisst der Datei-Server auf diesem Mac anders, wird nach dem neuen Ort gefragt und der gesamte Index darauf umgeschrieben.</p>
+      </div>
+    </div>
+    <div class="settings-body">
+
+      <div class="backup-status backup-{{ 'ok' if backup.ok else ('warn' if backup.ok is none else 'err') }}"
+           id="backup-status-box">
+        <strong>Letzte Sicherung:</strong> {{ backup.text }}
+        {% if backup.detail %}<div class="backup-detail">{{ backup.detail }}</div>{% endif %}
+      </div>
+
+      <div class="backup-laeuft" id="backup-laeuft" style="display:none;">
+        <span class="backup-spinner"></span>
+        <span id="backup-phase">Sicherung läuft…</span>
+      </div>
+
+      <form method="POST" action="/dashboard/backup-settings" id="backup-form"
+            style="display:flex; flex-direction:column; gap:14px;">
+        <div class="list-item">
+          <div class="list-item-box">
+            <span class="field-prefix" style="min-width:168px;">Speicherort</span>
+            <input type="text" name="backup_path" id="backup-path" class="list-item-value"
+                   value="{{ cfg.get('backup', {}).get('path', '') }}"
+                   placeholder="/Volumes/Server/Archivio-Sicherung">
+          </div>
+          <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
+                  onclick="chooseBackupFolder()">📁</button>
+        </div>
+
+        <div class="field">
+          <span class="field-prefix">Wöchentlich sichern</span>
+          <select name="backup_weekday">
+            {% for i, tag in [(0,'Montag'),(1,'Dienstag'),(2,'Mittwoch'),(3,'Donnerstag'),
+                              (4,'Freitag'),(5,'Samstag'),(6,'Sonntag')] %}
+            <option value="{{ i }}" {% if cfg.get('backup', {}).get('weekday', 6) == i %}selected{% endif %}>{{ tag }}</option>
+            {% endfor %}
+          </select>
+        </div>
+
+        <label style="display:flex; align-items:center; gap:8px; cursor:pointer; font-size:13px;">
+          <input type="checkbox" name="backup_enabled" value="1"
+            {% if cfg.get('backup', {}).get('enabled', True) %}checked{% endif %}>
+          Automatische Sicherung aktiv
+        </label>
+
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
+          <button type="button" class="add-btn" id="btn-jetzt-sichern" onclick="runBackupNow()">Jetzt sichern</button>
+          <button type="button" class="add-btn" onclick="startImport()">Sicherung einspielen…</button>
+        </div>
+      </form>
+    </div>
+  </div>
+
+  {# ── Deinstallation ── #}
+  <div class="settings-section" id="deinstallation">
+    <div class="settings-section-header">
+      Deinstallation
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Entfernt Archivio von dem Mac, auf dem <strong>der Server</strong> läuft — auch wenn diese Seite gerade von einem anderen Rechner aus geöffnet ist. Andere Arbeitsplätze im Büro und eine bereits erstellte Sicherung bleiben unberührt.</p>
+        <p>Der Knopf öffnet ein eigenes Programm, das durch die Rückfragen führt. Es erscheint auf dem Bildschirm des Server-Macs.</p>
+        <p><strong>Zum Arbeitsplatz machen:</strong> für den Fall, dass der Server auf einen anderen Mac gezogen ist. Server und Datenbank werden entfernt, der Helper bleibt samt seinen Einstellungen und der Anbindung an Claude — dieser Mac arbeitet danach am neuen Server weiter.</p>
+        <p><strong>Komplett entfernen:</strong> zusätzlich wird auch der Helper entfernt. Für einen Testrechner oder einen Mac, der ausgemustert wird.</p>
+        <p>In beiden Fällen wird nichts endgültig gelöscht: alles landet im Papierkorb und bleibt zurückholbar, bis dieser geleert wird.</p>
+        <p>Vor dem Entfernen wird angezeigt, wie gross die Datenbank ist und wann zuletzt gesichert wurde — und ausdrücklich gewarnt, falls keine gültige Sicherung vorliegt.</p>
+      </div>
+    </div>
+    <div class="settings-body">
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+        <button type="button" class="add-btn" onclick="starteDeinstallation()">Archivio von diesem Mac entfernen…</button>
+        <span id="deinst-status" style="font-size:12px; color:var(--text-3);"></span>
+      </div>
+    </div>
+  </div>
 
   {# ── Diagnose (ausserhalb Form) ── #}
   <div class="settings-section">
@@ -518,6 +639,227 @@ function startMetaBackfill(link) {
 // verlassen wird. Reagiert auf das ganze Formular, nicht auf einzelne Felder --
 // neue Zeilen (addBaseFolder() etc.) und der Folder-Picker melden sich über
 // markSettingsDirty() mit, ohne dass hier pro Feld etwas verdrahtet werden muss.
+// ── Sicherung & Umzug ────────────────────────────────────────────────────────
+
+function chooseBackupFolder() {
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      document.getElementById('backup-path').value = d.path.replace(/\/+$/, '');
+    })
+    .catch(() => alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.'));
+}
+
+// Laufende Sicherung sichtbar machen: der Balken erscheint SOFORT beim Klick, nicht
+// erst wenn der Server geantwortet hat -- sonst wirkt der Knopf wirkungslos.
+function backupLaeuft(an, phase) {
+  var box  = document.getElementById('backup-laeuft');
+  var btn  = document.getElementById('btn-jetzt-sichern');
+  box.style.display = an ? 'flex' : 'none';
+  document.getElementById('backup-status-box').style.display = an ? 'none' : '';
+  if (an) document.getElementById('backup-phase').textContent = phase || 'Sicherung läuft…';
+  btn.disabled = an;
+  btn.style.opacity = an ? '.5' : '';
+  btn.style.cursor  = an ? 'default' : '';
+}
+
+function runBackupNow() {
+  var path = document.getElementById('backup-path').value.trim();
+  if (!path) { alert('Bitte zuerst einen Speicherort festlegen und speichern.'); return; }
+  backupLaeuft(true, 'Sicherung wird gestartet…');
+  fetch('/api/backup/run', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { backupLaeuft(false); alert(d.message || 'Sicherung konnte nicht gestartet werden'); return; }
+      var poll = setInterval(function() {
+        fetch('/api/backup/status').then(r => r.json()).then(s => {
+          backupLaeuft(true, s.progress.phase ? s.progress.phase + '…' : 'Sicherung läuft…');
+          if (s.progress.done || !s.progress.running) {
+            clearInterval(poll);
+            if (s.progress.error) { backupLaeuft(false); alert('Sicherung fehlgeschlagen:\n' + s.progress.error); }
+            else location.reload();
+          }
+        });
+      }, 1000);
+    });
+}
+
+// Beim Laden prüfen, ob gerade eine Sicherung läuft (z.B. die wöchentliche, oder
+// weil die Seite zwischendurch neu geladen wurde) -- sonst zeigt die Seite einen
+// ruhigen Zustand, während im Hintergrund gearbeitet wird.
+fetch('/api/backup/status').then(r => r.json()).then(s => {
+  if (s.progress && s.progress.running) {
+    backupLaeuft(true, (s.progress.phase || 'Sicherung läuft') + '…');
+    var poll = setInterval(function() {
+      fetch('/api/backup/status').then(r => r.json()).then(s2 => {
+        if (!s2.progress.running) { clearInterval(poll); location.reload(); }
+        else backupLaeuft(true, (s2.progress.phase || 'Sicherung läuft') + '…');
+      });
+    }, 2000);
+  }
+}).catch(() => {});
+
+// Dasselbe fürs Einspielen: wer die Seite während des Einspielens verlässt und
+// zurückkommt, soll den Fortschritt wiederfinden statt einen ruhigen, scheinbar
+// unveränderten Stand. Die Arbeit lief ja ohnehin weiter.
+fetch('/api/backup/import-status').then(r => r.json()).then(s => {
+  if (s.running) {
+    backupLaeuft(true, (s.phase || 'Sicherung wird eingespielt') + '…');
+    importVerfolgen(null, {});
+  }
+}).catch(() => {});
+
+// ── Deinstallation ───────────────────────────────────────────────────────────
+// Startet das Deinstallationsprogramm über den lokalen Helper. Bewusst kein
+// Terminal-Befehl zum Abtippen: das Programm führt selbst durch die Rückfragen.
+// Geht über den Server, nicht über den lokalen Dienst auf Port 44380: den teilen
+// sich Server-App und Helper, und der Helper hat mit der Deinstallation nichts zu
+// tun. Der Server läuft ohnehin auf genau dem Mac, um den es geht.
+function starteDeinstallation() {
+  var s = document.getElementById('deinst-status');
+  s.textContent = 'Programm wird geöffnet…';
+  fetch('/api/deinstallation/oeffnen', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.ok) {
+        s.textContent = 'Das Deinstallationsprogramm ist geöffnet — bitte dort weiter.';
+      } else {
+        s.textContent = '';
+        alert(d.error || 'Konnte nicht geöffnet werden.');
+      }
+    })
+    .catch(() => {
+      s.textContent = '';
+      alert('Der Archivio-Server hat nicht geantwortet. Bitte die Seite neu laden.');
+    });
+}
+
+// Einspielen läuft in mehreren Runden: der Server antwortet mit einer Rückfrage
+// (Ersetzen bestätigen bzw. fehlende Ordner zuordnen), die Oberfläche ergänzt die
+// Angabe und ruft erneut auf. So wird nie ungefragt etwas überschrieben.
+function startImport() {
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      return fetch('/api/backup/inspect?path=' + encodeURIComponent(d.path))
+        .then(r => r.json())
+        .then(info => {
+          if (!info.ok) { alert(info.message); return; }
+          var m = info.manifest, s = m.stats || {};
+          var ok = confirm(
+            'Gefundene Sicherung:\n\n' +
+            'Erstellt: ' + (m.created_at || '?').replace('T', ' ') + '\n' +
+            'Version: ' + (m.server_version || '?') + '\n' +
+            'Inhalt: ' + (s.projects || 0) + ' Projekte, ' + (s.documents || 0) + ' Dokumente\n\n' +
+            'Jetzt einspielen?');
+          if (ok) sendImport(info.dir, false, {});
+        });
+    })
+    .catch(() => alert('Archivio Helper läuft nicht. Bitte starten.'));
+}
+
+function sendImport(dir, confirmReplace, pathMap) {
+  backupLaeuft(true, confirmReplace ? 'Sicherung wird eingespielt…' : 'Sicherung wird geprüft…');
+  fetch('/api/backup/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ path: dir, confirm_replace: confirmReplace, path_map: pathMap })
+  })
+    .then(r => r.json())
+    .then(d => {
+      if (!d.ok) { backupLaeuft(false); alert(d.message || 'Konnte nicht gestartet werden'); return; }
+      importVerfolgen(dir, pathMap);
+    });
+}
+
+// Der Fortschritt liegt auf dem Server, nicht in der Antwort des Aufrufs: so geht er
+// nicht verloren, wenn zwischendurch die Seite gewechselt wird. Genau das passierte
+// vorher -- das Einspielen lief im Hintergrund weiter, aber die Oberfläche zeigte
+// wieder den alten Stand und der abschliessende Serverneustart unterblieb.
+function importVerfolgen(dir, pathMap) {
+  var poll = setInterval(function() {
+    fetch('/api/backup/import-status').then(r => r.json()).then(s => {
+      backupLaeuft(true, (s.phase || 'Sicherung wird eingespielt') + '…');
+      if (!s.done && s.running) return;
+      clearInterval(poll);
+      backupLaeuft(false);
+      importErgebnis(s.result || {}, dir, pathMap);
+    });
+  }, 1000);
+}
+
+function importErgebnis(res, dir, pathMap) {
+  if (res.needs_confirm) {
+    var t = res.target_stats, b = res.backup_stats;
+    if (confirm(
+      'Auf diesem Mac sind bereits Daten vorhanden:\n' +
+      '  ' + t.projects + ' Projekte, ' + t.documents + ' Dokumente\n\n' +
+      'Diese werden ERSETZT durch die Sicherung vom ' +
+      (res.backup_created_at || '?').replace('T', ' ') + ':\n' +
+      '  ' + b.projects + ' Projekte, ' + b.documents + ' Dokumente\n\n' +
+      'Eine Sicherheitskopie des bisherigen Standes wird angelegt. Fortfahren?')) {
+      sendImport(dir, true, pathMap);
+    }
+    return;
+  }
+  if (res.needs_path_mapping) {
+    askPathMapping(dir, res.needs_path_mapping.slice(), pathMap);
+    return;
+  }
+  if (!res.ok) { alert('Einspielen fehlgeschlagen:\n' + (res.error || 'unbekannt')); return; }
+
+  var msg = 'Sicherung eingespielt: ' + res.stats.projects + ' Projekte, ' +
+            res.stats.documents + ' Dokumente.';
+  if (res.missing_passwords && res.missing_passwords.length) {
+    msg += '\n\nDiese Mailkonten brauchen ein neues Passwort:\n  ' +
+           res.missing_passwords.join('\n  ');
+  }
+  msg += '\n\nDer Server startet sich jetzt selbst neu, damit der neue Bestand aktiv wird.';
+  alert(msg);
+  aufNeustartWarten();
+}
+
+// Der Server beendet sich nach dem Einspielen selbst; sein Aufpasser startet ihn
+// binnen ~15 s neu. Hier nur warten, bis er wieder antwortet, und dann die Seite
+// frisch laden — sonst zeigte sie weiter den Stand von vor dem Einspielen.
+function aufNeustartWarten() {
+  backupLaeuft(true, 'Server wird neu gestartet…');
+  var versuche = 0;
+  var poll = setInterval(function() {
+    versuche++;
+    fetch('/api/status', { cache: 'no-store' })
+      .then(r => { if (r.ok) { clearInterval(poll); location.reload(); } })
+      .catch(function() { /* noch unten, weiter warten */ });
+    if (versuche > 60) {               // 2 Minuten
+      clearInterval(poll);
+      backupLaeuft(false);
+      alert('Der Server ist nicht von selbst zurückgekommen.\n' +
+            'Bitte über das Menüleisten-Symbol beenden und wieder öffnen — ' +
+            'erst danach ist der eingespielte Bestand aktiv.');
+    }
+  }, 2000);
+}
+
+// Pro fehlendem Ordner nacheinander nachfragen. Ohne diese Zuordnung zeigt der
+// komplette Index ins Leere, wenn der Datei-Server auf dem neuen Mac anders heisst.
+function askPathMapping(dir, missing, pathMap) {
+  if (!missing.length) { sendImport(dir, true, pathMap); return; }
+  var old = missing.shift();
+  alert('Der Ordner\n\n  ' + old + '\n\ngibt es auf diesem Mac nicht.\n' +
+        'Bitte im nächsten Dialog auswählen, wo er jetzt liegt.');
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.cancelled || !d.ok) { backupLaeuft(false); return; }
+      pathMap[old] = d.path.replace(/\/+$/, '');
+      askPathMapping(dir, missing, pathMap);
+    });
+}
+
 var settingsDirty     = false;
 var settingsIdleTimer = null;
 var settingsForm      = document.getElementById('settings-form');

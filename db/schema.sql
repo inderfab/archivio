@@ -68,46 +68,26 @@ CREATE TABLE IF NOT EXISTS mail_scan_config (
     mail_count      INTEGER NOT NULL DEFAULT 0
 );
 
--- FTS5 Volltextsuche: eigenständige Tabelle (kein content=), speichert eigene Kopien.
--- Rowid = document.id — alle Dokumente werden indexiert, auch ohne Textinhalt.
+-- FTS5 Dateinamen-Index: eigenständige Tabelle (kein content=), Rowid = document.id.
+-- Alle Dokumente werden indexiert, auch ohne Textinhalt.
+--
+-- Bewusst OHNE content-Spalte (seit Migration 026): die einzige lesende Abfrage im
+-- Code ist _search_filename() (web/main.py) mit `filename:`-Spaltenfilter, die
+-- Volltextsuche läuft über chunks_fts. Da diese Tabelle eigenständig ist, lag hier
+-- vorher eine vollständige zweite Kopie aller Dokumenttexte samt Index -- auf der
+-- Produktivdatenbank rund 850 MB, auf die nie gesucht wurde.
 CREATE VIRTUAL TABLE IF NOT EXISTS documents_fts USING fts5(
     filename,
-    content,
     tokenize='unicode61 remove_diacritics 2'
 );
 
--- Trigger: Dateiname sofort beim Anlegen eines Dokuments indexieren
+-- Trigger: Dateiname beim Anlegen eines Dokuments indexieren.
+-- Ein Pendant für UPDATE gibt es nicht und braucht es nicht: documents.filename wird
+-- nirgends geändert -- eine umbenannte Datei wird über ihren Hash geführt und bekommt
+-- lediglich einen neuen Pfad in document_paths.
 CREATE TRIGGER IF NOT EXISTS documents_fts_filename_insert
 AFTER INSERT ON documents BEGIN
-    INSERT INTO documents_fts(rowid, filename, content)
-    VALUES (new.id, new.filename, '');
-END;
-
--- Trigger: Volltext beim Einfügen von Inhalt — Stub ersetzen
-CREATE TRIGGER IF NOT EXISTS documents_fts_content_insert
-AFTER INSERT ON document_content BEGIN
-    DELETE FROM documents_fts WHERE rowid = new.document_id;
-    INSERT INTO documents_fts(rowid, filename, content)
-    SELECT new.document_id, d.filename, new.content
-    FROM documents d WHERE d.id = new.document_id;
-END;
-
--- Trigger: Volltext bei Änderungen aktualisieren
-CREATE TRIGGER IF NOT EXISTS documents_fts_content_update
-AFTER UPDATE ON document_content BEGIN
-    DELETE FROM documents_fts WHERE rowid = old.document_id;
-    INSERT INTO documents_fts(rowid, filename, content)
-    SELECT new.document_id, d.filename, new.content
-    FROM documents d WHERE d.id = new.document_id;
-END;
-
--- Trigger: Volltext beim Löschen auf leeren Dateinamen-Stub zurücksetzen
-CREATE TRIGGER IF NOT EXISTS documents_fts_content_delete
-AFTER DELETE ON document_content BEGIN
-    DELETE FROM documents_fts WHERE rowid = old.document_id;
-    INSERT INTO documents_fts(rowid, filename, content)
-    SELECT old.document_id, d.filename, ''
-    FROM documents d WHERE d.id = old.document_id;
+    INSERT INTO documents_fts(rowid, filename) VALUES (new.id, new.filename);
 END;
 
 -- Trigger: FTS-Eintrag entfernen wenn das Dokument selbst gelöscht wird.

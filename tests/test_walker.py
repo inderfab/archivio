@@ -85,13 +85,13 @@ def test_modified_file_repoints_path(tmp_db, sample_files):
         "SELECT 1 FROM documents_fts WHERE rowid=?", (old_id,)
     ).fetchone() is None
 
-    # Neuer Inhalt ist auffindbar, alter nicht mehr
-    assert tmp_db.execute(
-        "SELECT 1 FROM documents_fts WHERE documents_fts MATCH 'Dachstuhl'"
-    ).fetchone() is not None
-    assert tmp_db.execute(
-        "SELECT 1 FROM documents_fts WHERE documents_fts MATCH 'Erdgeschoss'"
-    ).fetchone() is None
+    # Neuer Inhalt ist auffindbar, alter nicht mehr. Geprüft über chunks_fts --
+    # documents_fts führt seit Migration 026 nur noch Dateinamen.
+    treffer = lambda wort: tmp_db.execute(
+        "SELECT 1 FROM chunks_fts WHERE chunks_fts MATCH ?", (wort,)
+    ).fetchone()
+    assert treffer("Dachstuhl") is not None
+    assert treffer("Erdgeschoss") is None
 
 
 def test_excluded_folders_not_indexed(tmp_db, sample_files):
@@ -158,14 +158,38 @@ def test_duplicate_file_same_hash(tmp_db, sample_files):
 
 
 def test_fts_finds_content(tmp_db, sample_files):
+    """Volltext wird über chunks_fts gefunden, nicht über documents_fts -- letzteres
+    ist seit Migration 026 ein reiner Dateinamen-Index."""
     project_id = queries.insert_project(tmp_db, "Test", str(sample_files))
     tmp_db.commit()
     scan_project(project_id, sample_files)
 
-    rows = tmp_db.execute(
-        "SELECT rowid FROM documents_fts WHERE documents_fts MATCH 'Grundriss'"
-    ).fetchall()
+    rows = tmp_db.execute("""
+        SELECT DISTINCT dc.document_id FROM chunks_fts
+        JOIN document_chunks dc ON dc.id = chunks_fts.rowid
+        WHERE chunks_fts MATCH 'Grundriss'
+    """).fetchall()
     assert len(rows) == 1
+
+
+def test_documents_fts_holds_no_content(tmp_db, sample_files):
+    """Absicherung gegen einen Rückfall: die Tabelle darf den Volltext NICHT mehr
+    mitspeichern. Sie ist eigenständig (kein content=), eine content-Spalte würde
+    also sofort wieder eine vollständige zweite Kopie aller Dokumenttexte anlegen --
+    auf der Produktivdatenbank rund 850 MB, auf die nie gesucht wird."""
+    project_id = queries.insert_project(tmp_db, "Test", str(sample_files))
+    tmp_db.commit()
+    scan_project(project_id, sample_files)
+
+    spalten = [r[1] for r in tmp_db.execute("PRAGMA table_info(documents_fts)")]
+    assert spalten == ["filename"]
+    # Ein Inhaltswort darf hier keinen Treffer mehr liefern, der Dateiname schon
+    assert tmp_db.execute(
+        "SELECT 1 FROM documents_fts WHERE documents_fts MATCH 'Grundriss'"
+    ).fetchone() is None
+    assert tmp_db.execute(
+        "SELECT 1 FROM documents_fts WHERE documents_fts MATCH 'plan'"
+    ).fetchone() is not None
 
 
 def _insert_doc_with_status(conn, project_id, path, status):

@@ -62,6 +62,18 @@
   .searchlog-body { padding: 4px 14px 12px; font-size: 12px; color: var(--text-2); }
   .searchlog-detail-row { margin-bottom: 4px; }
   .searchlog-detail-row strong { color: var(--text); }
+
+  /* Sicherungszustand — gehört neben das Scan-Protokoll, weil beides dieselbe
+     Frage beantwortet: läuft der Unterbau noch so, wie er soll? */
+  .sysstat-backup {
+    border: 1px solid var(--border); border-left-width: 3px;
+    border-radius: var(--radius); padding: 10px 14px; margin: 0 0 18px;
+    font-size: 13px;
+  }
+  .sysstat-backup-ok   { border-left-color: #15803d; }
+  .sysstat-backup-warn { border-left-color: #b45309; }
+  .sysstat-backup-err  { border-left-color: #b91c1c; }
+  .sysstat-backup-detail { color: var(--text-3); }
 </style>
 <div class="sysstat-page">
   <h1>Systemstatus</h1>
@@ -71,6 +83,14 @@
     Damit lässt sich nachvollziehen, ob und wann ein Scan den Rechner spürbar
     belastet hat, statt nur zu vermuten.
   </p>
+
+  <div class="sysstat-backup sysstat-backup-{{ 'ok' if backup.ok else ('warn' if backup.ok is none else 'err') }}">
+    <strong>Letzte Sicherung:</strong> {{ backup.text }}
+    {% if backup.detail %}<span class="sysstat-backup-detail">— {{ backup.detail }}</span>{% endif %}
+    {% if not backup.configured %}
+    <a href="/dashboard/settings#sicherung" style="margin-left:8px;">einrichten</a>
+    {% endif %}
+  </div>
 
   {% macro render_scan(s) %}
   <details class="sysstat-row" style="display:block;">

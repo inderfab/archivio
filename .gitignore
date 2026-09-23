@@ -1,4 +1,5 @@
 .venv/
+.venv-py39-alt/
 __pycache__/
 *.py[cod]
 *.db
@@ -7,6 +8,7 @@ __pycache__/
 .claude/
 .DS_Store
 config.yaml
+backup_state.json
 dist/
 
 internal/

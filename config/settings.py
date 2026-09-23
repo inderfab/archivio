@@ -25,6 +25,12 @@ def _load() -> dict:
         return yaml.safe_load(f) or {}
 
 
+def config_path() -> Path:
+    """Pfad der aktiven config.yaml -- fuer Sicherung/Import, die die Datei als Ganzes
+    schreiben statt einzelne Schluessel zu mergen."""
+    return _CONFIG_PATH
+
+
 def get(key: str, default=None):
     global _settings
     if not _settings:

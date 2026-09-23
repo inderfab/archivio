@@ -122,6 +122,15 @@ mkdir -p "$APP/Contents/Resources/scripts"
 cp scripts/backfill_rubrica.py "$APP/Contents/Resources/scripts/"
 cp scripts/backfill_norms.py "$APP/Contents/Resources/scripts/"
 cp scripts/find_orphaned_projects.py "$APP/Contents/Resources/scripts/"
+# Deinstallation: liegt mit im Bundle, damit sie auf jeder Installation verfuegbar
+# ist -- gebraucht wird sie auf einem Testrechner und beim Umzug, wenn der alte
+# Server-Mac zum Arbeitsplatz wird.
+cp scripts/deinstallieren.sh "$APP/Contents/Resources/scripts/"
+chmod +x "$APP/Contents/Resources/scripts/deinstallieren.sh"
+# Prueft eine erstellte Sicherung auf Vollstaendigkeit und Lesbarkeit -- laeuft
+# unabhaengig vom Server, damit sie auch auf einem Rechner ohne Installation
+# benutzbar ist.
+cp scripts/sicherung_pruefen.py "$APP/Contents/Resources/scripts/"
 cp -r helper/ArchivioLink.workflow "$APP/Contents/Resources/"
 cp helper/archivio_mcp.py  "$APP/Contents/Resources/"
 cp shared/menubar_bridge.py "$APP/Contents/Resources/"
@@ -349,6 +358,22 @@ PKG_SCRIPTS=$(mktemp -d)
 
 mkdir -p "$PKG_ROOT/Applications"
 cp -r "$APP" "$PKG_ROOT/Applications/"
+
+# ── Deinstallations-Programm ──────────────────────────────────────────────────
+# Eine kleine AppleScript-App, die mit gewoehnlichen macOS-Dialogen durch die
+# Deinstallation fuehrt. Grund: die Kundenbueros haben keine IT-Abteilung, ein
+# abzutippender Terminal-Befehl ist dort nicht benutzbar.
+#
+# Das Shell-Skript liegt als KOPIE in dieser App und nicht (nur) im Server-Bundle --
+# der Deinstallierer muss weiterlaufen, waehrend er den Server entfernt.
+DEINST_APP="$PKG_ROOT/Applications/Archivio Deinstallieren.app"
+echo "→ Deinstallations-Programm bauen…"
+rm -rf "$DEINST_APP"
+osacompile -o "$DEINST_APP" scripts/deinstallieren.applescript
+cp scripts/deinstallieren.sh "$DEINST_APP/Contents/Resources/"
+chmod +x "$DEINST_APP/Contents/Resources/deinstallieren.sh"
+sign_bundle "$DEINST_APP"
+chmod -R a+rX "$DEINST_APP"
 # Weltweit lesbar/ausfuehrbar machen -- ohne das koennen andere (Nicht-Admin-)Accounts
 # auf demselben Mac die App zwar in /Applications SEHEN, aber nicht oeffnen, je
 # nachdem welche Rechte die Dateien auf dem Baurechner (eigener Dev-Account) hatten.
@@ -395,6 +420,12 @@ if [ -n "$CURRENT_USER" ] && [ "$CURRENT_USER" != "root" ]; then
   </array>
   <key>RunAtLoad</key>
   <true/>
+  <!-- KeepAlive MUSS true bleiben. SuccessfulExit:false war frueher gesetzt und hat
+       dazu gefuehrt, dass der Server nach einem sauberen Exit 0 (Logout, Ruhezustand,
+       Update ueber ein Wochenende) tagelang nicht mehr startete -- siehe
+       PROJEKT_STATUS.md Abschnitt 5. Die Einmal-Start-Sperre der App beendet eine
+       zweite Instanz deshalb NICHT, sondern laesst sie als Bereitschaft warten
+       (menubar/server_app.py), sonst wuerde launchd sie hier alle 30s neu starten. -->
   <key>KeepAlive</key>
   <true/>
   <key>ThrottleInterval</key>
@@ -422,9 +453,21 @@ PLISTEOF
   sed -i '' "s#LOGDIRPLACEHOLDER#$LOG_DIR#g" "$PLIST"
   chown "$CURRENT_USER" "$PLIST"
 
-  # Altes Login-Item entfernen — Autostart läuft jetzt über launchd
-  sudo -u "$CURRENT_USER" osascript -e \
-    'tell application "System Events" to delete (every login item whose name is "Archivio Server")' 2>/dev/null || true
+  # Altes Login-Item entfernen — Autostart läuft jetzt über launchd.
+  # Das schlägt in der Praxis oft fehl: aus einem Installer heraus fehlt die
+  # Automation-Berechtigung für System Events, und der Fehler wurde bisher still
+  # verschluckt. Ergebnis waren zwei Supervisor-Prozesse bei jeder Anmeldung. Die
+  # eigentliche Absicherung ist inzwischen die Einmal-Start-Sperre in
+  # menubar/server_app.py; hier wird der Versuch nur noch protokolliert, damit ein
+  # Fehlschlag im Installationslog sichtbar ist statt unsichtbar zu bleiben.
+  if sudo -u "$CURRENT_USER" osascript -e \
+       'tell application "System Events" to delete (every login item whose name is "Archivio Server")' 2>&1; then
+    echo "Login-Item 'Archivio Server' entfernt (Autostart laeuft ueber launchd)"
+  else
+    echo "WARNUNG: Login-Item konnte nicht entfernt werden (fehlende Automation-Berechtigung?)."
+    echo "         Die Einmal-Start-Sperre der App verhindert trotzdem einen Doppelstart."
+    echo "         Manuell: Systemeinstellungen -> Allgemein -> Anmeldeobjekte -> 'Archivio Server' entfernen."
+  fi
 
   # Alten Agent entladen
   sudo -u "$CURRENT_USER" launchctl bootout "gui/$USER_UID/io.archivio.server" 2>/dev/null || true

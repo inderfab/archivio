@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import json
 import logging
+import logging.handlers
 import os
 import shutil
 import subprocess
@@ -34,14 +35,22 @@ _EXAMPLE    = _CODE_ROOT / "config.yaml.example"
 _UPDATE_STATE = _DATA_DIR / "update_state.json"
 
 # ── Logging ───────────────────────────────────────────────────────────────────
+# Rotierend und auf INFO: vorher lief das hier auf DEBUG ohne Groessenbegrenzung.
+# urllib3 protokolliert jede einzelne requests-Anfrage, und Watchdog (alle 15s) plus
+# Status-Schleife (alle 30s) fragen dauernd /api/status und Ollama ab -- das ergab
+# rund 2,7 MB pro Tag, unbegrenzt wachsend (real gemessen: 321 MB).
 
 _log_dir = Path.home() / "Library" / "Logs"
 _log_dir.mkdir(parents=True, exist_ok=True)
 logging.basicConfig(
-    filename=str(_log_dir / "ArchivioServer.log"),
-    level=logging.DEBUG,
+    level=logging.INFO,
     format="%(asctime)s %(levelname)s %(message)s",
+    handlers=[logging.handlers.RotatingFileHandler(
+        str(_log_dir / "ArchivioServer.log"), maxBytes=5 * 1024 * 1024, backupCount=3,
+        encoding="utf-8")],
 )
+for _noisy in ("urllib3", "zeroconf", "requests"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUNDLE)
 
@@ -176,6 +185,11 @@ def _env() -> dict:
     # (evtl. leeren) Locale-Environment.
     env["PYTHONUTF8"] = "1"
     env["PYTHONIOENCODING"] = "utf-8"
+    # Markiert dem Serverprozess, dass ein Aufpasser ihn ueberwacht. Er darf sich
+    # dann selbst beenden, wenn ein Neustart noetig ist (nach dem Einspielen einer
+    # Sicherung) -- der Watchdog startet ihn binnen 15s neu. Ohne diese Markierung
+    # (z.B. handgestartetes uvicorn in der Entwicklung) bliebe er einfach weg.
+    env["ARCHIVIO_SUPERVISED"] = "1"
     return env
 
 
@@ -204,9 +218,24 @@ def _prepare_data_dir():
 
 
 def _kill_port_8000():
-    """Beendet alle Prozesse die Port 8000 belegen (Überbleibsel älterer Instanzen)."""
+    """Beendet Prozesse, die Port 8000 BELEGEN (Überbleibsel älterer Instanzen).
+
+    Zwei bewusste Einschränkungen gegenüber der früheren Fassung:
+
+    * `-sTCP:LISTEN` -- ohne das trifft `lsof -i :8000` auch ausgehende Verbindungen
+      mit Gegenport 8000. Ein Browser oder ein requests-Aufruf auf einen Archivio-
+      Server auf einem ANDEREN Mac wurde damit mitabgeschossen.
+    * Antwortet dort bereits ein gesunder Archivio, den wir nicht selbst gestartet
+      haben, wird er in Ruhe gelassen. Das war der Mechanismus, der aus einem
+      doppelten Start ein gegenseitiges Abschiessen machte.
+    """
+    if _server_responds(timeout=2):
+        log.info("Auf Port 8000 antwortet bereits ein gesunder Archivio-Server "
+                 "-- wird nicht beendet")
+        return False
     try:
-        r = subprocess.run(["lsof", "-ti", ":8000"], capture_output=True, text=True)
+        r = subprocess.run(["lsof", "-ti", "-sTCP:LISTEN", ":8000"],
+                           capture_output=True, text=True)
         for pid in r.stdout.strip().split():
             try:
                 subprocess.run(["kill", "-9", pid], capture_output=True)
@@ -215,6 +244,7 @@ def _kill_port_8000():
                 pass
     except Exception:
         pass
+    return True
 
 
 def _probe_permissions():
@@ -232,7 +262,12 @@ def _start_server():
     with _server_lock:
         if _server_proc and _server_proc.poll() is None:
             return
-        _kill_port_8000()
+        if not _kill_port_8000():
+            # Fremder, gesunder Server auf Port 8000 -- den uebernehmen wir, statt
+            # einen eigenen zu starten. Ohne diesen Zweig wuerde das folgende Popen
+            # am belegten Port scheitern und der Watchdog alle 15s neu starten.
+            log.info("Vorhandener Server auf Port 8000 wird uebernommen")
+            return
         if _IN_BUNDLE:
             _prepare_data_dir()
         python = sys.executable if _IN_BUNDLE else str(_VENV / "bin" / "python3")
@@ -370,6 +405,12 @@ def _server_memory_watchdog():
 
             # 1) Prozess tot → sofort neu starten (Resume gemäß letztem bekannten Stand)
             if not alive:
+                # Ausnahme: antwortet auf Port 8000 trotzdem ein gesunder Server, haben
+                # wir ihn übernommen (siehe _start_server) — dann wäre ein Neustart
+                # genau das gegenseitige Abschiessen, das wir vermeiden wollen.
+                if _server_responds():
+                    unresponsive = 0
+                    continue
                 log.warning("Server-Prozess nicht aktiv — Neustart")
                 _notify("Archivio-Server war nicht aktiv — wird neu gestartet")
                 _restart_server(resume_projects=last_proj, resume_mail=last_mail,
@@ -679,6 +720,25 @@ class ArchivioServer(rumps.App):
 
 
 if __name__ == "__main__":
+    # Vor allem anderen: laeuft bereits ein Supervisor, warten wir, statt uns zu
+    # beenden.
+    #
+    # Sich zu beenden waere naheliegender, geht hier aber nicht: der LaunchAgent
+    # laeuft mit KeepAlive=true, und das muss so bleiben (mit SuccessfulExit:false
+    # blieb der Server nach einem sauberen Exit 0 -- Logout, Ruhezustand, Update
+    # uebers Wochenende -- tagelang tot, siehe PROJEKT_STATUS.md Abschnitt 5). Ein
+    # Exit 0 wuerde launchd also alle 30s eine neue Instanz starten lassen, die sich
+    # sofort wieder beendet.
+    #
+    # Stattdessen wird diese Instanz zur Bereitschaft: sie belegt nichts, zeigt kein
+    # Menueleisten-Symbol und versucht die Sperre weiter zu bekommen. Faellt der
+    # aktive Supervisor aus, uebernimmt sie -- ein zusaetzliches Sicherheitsnetz
+    # gegenueber dem blossen Beenden.
+    if not bridge.acquire_single_instance_lock("archivio-server", log):
+        log.warning("Archivio Server laeuft bereits — diese Instanz wartet in Bereitschaft")
+        while not bridge.acquire_single_instance_lock("archivio-server", log):
+            time.sleep(30)
+        log.info("Aktiver Supervisor ist weg — Bereitschaft uebernimmt")
     try:
         ArchivioServer().run()
     except Exception as e:

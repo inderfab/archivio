@@ -31,6 +31,12 @@ def _resolve_path() -> Path:
     return _DB_PATH
 
 
+def db_path() -> Path:
+    """Pfad der aktiven Datenbankdatei -- fuer Sicherung und Diagnose, die die Datei
+    selbst brauchen (Groesse, VACUUM INTO, Ersetzen) und nicht nur eine Verbindung."""
+    return _resolve_path()
+
+
 def get_connection() -> sqlite3.Connection:
     # timeout=30: bei parallelen Schreibzugriffen bis 30s auf Lock warten
     conn = sqlite3.connect(_resolve_path(), check_same_thread=False, timeout=30)
