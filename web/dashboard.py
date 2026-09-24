@@ -317,6 +317,13 @@ async def toggle_project(
         # als Alternative anbieten statt direkt zum Löschen zu verleiten.
         folder_missing = _folder_genuinely_missing(path)
         conn.close()
+        # HX-Retarget: die auslösende Form zielt auf #project-list (der gesamte
+        # Projektbereich) -- bei einer langen Liste ersetzte das Löschen-Formular
+        # der Rückfrage bislang alles ausser sich selbst, wodurch die Rückfrage am
+        # Kopf des (jetzt winzigen) Bereichs landete und ausserhalb der aktuellen
+        # Scroll-Position unsichtbar blieb. Stattdessen gezielt nur die Zeile
+        # dieses einen Projekts ersetzen -- der Rest der Liste bleibt unverändert
+        # stehen, die Rückfrage erscheint exakt dort, wo geklickt wurde.
         return templates.TemplateResponse("_dashboard_project_confirm_remove.html", {
             "request":        request,
             "project_id":     row["id"],
@@ -324,7 +331,7 @@ async def toggle_project(
             "path":           path,
             "doc_count":      doc_count,
             "folder_missing": folder_missing,
-        })
+        }, headers={"HX-Retarget": f"#project-row-{row['id']}"})
     else:
         # Wieder aktivieren
         with conn:
@@ -775,16 +782,12 @@ async def mail_refresh(request: Request):
 
 
 async def _mail_section_response(request: Request, conn, context: str):
-    """Liefert je nach Kontext die aktualisierte Projektliste oder den Mail-Bereich."""
-    if context == "project":
-        groups  = _project_groups(conn)
-        stats   = _global_stats(conn)
-        orphans = _orphaned_projects(conn)
-        conn.close()
-        return templates.TemplateResponse("_dashboard_projects.html", {
-            "request": request, "groups": groups, "stats": stats,
-            "orphans": orphans,
-        })
+    """Liefert den aktualisierten Mail-Bereich. `context` kam früher zusätzlich mit
+    dem Wert 'project' vor -- als Postfächer auch unter ihrem zugeordneten Projekt
+    angezeigt wurden (_dashboard_projects.html) und von dort aus umschaltbar waren.
+    Das führte zur selben Zuordnung an zwei Orten gleichzeitig; seither ist die
+    Mail-Integration die einzige Stelle dafür, der Parameter bleibt nur noch für
+    'mail' vs. '' (siehe _dashboard_mail.html) bestehen."""
     conn.close()
     return await mail_dashboard(request)
 
@@ -1765,9 +1768,17 @@ def _active_folder_projects(conn) -> list:
     """Aktive Projekte mit echtem Ordnerpfad, für die Verschachtelungs-Suche in
     _project_groups(). Postfach-Projekte (path 'mailbox:…') haben gar keinen Ordner
     und würden hier ohnehin nie unter einem Basisordner landen -- ob sie noch mit
-    einem Postfach verknüpft sind, prüft stattdessen _orphaned_mail_projects()."""
+    einem Postfach verknüpft sind, prüft stattdessen _orphaned_mail_projects().
+
+    ORDER BY name: nur diese Reihenfolge entscheidet, in welcher Reihenfolge tiefer
+    verschachtelte Projekte unter ihrem Elternordner erscheinen (_project_groups()
+    hängt sie in exakt dieser Reihenfolge an) -- ohne sie kam die Reihenfolge der
+    Aufschaltung heraus (SQLite liefert ohne ORDER BY die rowid-Reihenfolge), nicht
+    alphanumerisch wie bei den obersten Projekten (dort sortiert bereits
+    _discovered_projects_for_base() per os.scandir()+sorted())."""
     return conn.execute(
-        "SELECT * FROM projects WHERE active=1 AND path NOT LIKE 'mailbox:%'"
+        "SELECT * FROM projects WHERE active=1 AND path NOT LIKE 'mailbox:%' "
+        "ORDER BY name COLLATE NOCASE"
     ).fetchall()
 
 
@@ -1890,9 +1901,6 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
     last_scan = conn.execute(
         "SELECT MAX(indexed_at) FROM documents WHERE project_id=?", (db["id"],)
     ).fetchone()[0]
-    mailboxes = conn.execute(
-        "SELECT * FROM mail_scan_config WHERE project_id=?", (db["id"],)
-    ).fetchall()
     _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
     _fresh_label, _fresh_class = _scan_freshness(_last_iso)
     _archive_tier = db["archive_tier"] if "archive_tier" in db.keys() else 0
@@ -1918,7 +1926,6 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "scan_fresh_label": _fresh_label,
         "scan_fresh_class": _fresh_class,
         "scan_status":      _scans.get(db["id"], {}).get("status"),
-        "mailboxes":        [dict(m) for m in mailboxes],
         "nested":           [],
     }
 
@@ -1948,7 +1955,6 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         "doc_count":   0,
                         "last_scan":   None,
                         "scan_status": None,
-                        "mailboxes":   [],
                         "nested":      [],
                     })
     except PermissionError:

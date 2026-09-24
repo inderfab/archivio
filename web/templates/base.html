@@ -81,7 +81,10 @@
 
     .search-input {
       width: 100%;
-      padding: 14px 160px 14px 18px;
+      /* 44px rechts: Platz für .search-clear-btn (22px) + Abstand -- bis 3.4.x
+         standen hier 160px für den seither entfernten Volltext/KI-Suche-Umschalter,
+         der als absolut positioniertes Element rechts im Suchfeld sass. */
+      padding: 14px 44px 14px 18px;
       font-size: 17px;
       font-family: inherit;
       border: 2px solid var(--border);
@@ -97,7 +100,18 @@
       box-shadow: 0 0 0 3px rgba(17,24,39,.08);
     }
     .search-input::placeholder { color: var(--text-3); }
-    #gallery-q { padding-right: 18px; }
+    /* Natives ×-Symbol von type="search" ausblenden -- dessen Farbe folgt in
+       manchen Browsern der System-Akzentfarbe (z.B. macOS-Standard: blau) statt
+       dem Textfarbschema der Seite. .search-clear-btn ersetzt es 1:1. */
+    .search-input::-webkit-search-cancel-button,
+    .search-input::-webkit-search-decoration { -webkit-appearance: none; appearance: none; margin: 0; }
+    .search-clear-btn {
+      position: absolute; top: 16px; bottom: 8px; right: 12px;
+      width: 22px; border: none; background: transparent; padding: 0;
+      display: none; align-items: center; justify-content: center;
+      color: var(--text); font-size: 20px; line-height: 1; cursor: pointer;
+    }
+    .search-clear-btn.visible { display: flex; }
 
     /* ── Basis-Filter ── */
     .filters-basic {
@@ -387,14 +401,6 @@
       color: var(--text-2);
       margin-bottom: 5px;
     }
-    .result-path {
-      font-family: "SF Mono", "Menlo", "Monaco", "Consolas", monospace;
-      font-size: 12px;
-      color: var(--text-3);
-      margin-bottom: 7px;
-      word-break: break-all;
-    }
-
     /* ── Textausschnitt ── */
     .result-excerpt {
       font-size: 13px;
@@ -546,19 +552,11 @@
     .archive-toggle {
       width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
       border: 1px solid var(--border); background: var(--bg);
-      font-size: 12px; cursor: pointer;
+      color: var(--text-3); font-size: 12px; cursor: pointer;
       display: flex; align-items: center; justify-content: center;
-      transition: background .15s, border-color .15s;
+      transition: background .15s, color .15s, border-color .15s;
     }
-    .archive-toggle.on { background: #374151; border-color: #374151; }
-    /* 📦 ist ein farbiges Emoji (bräunliche Kiste) und reagiert nicht auf
-       `color` wie die reinen Unicode-Symbole (☁ etc.) anderswo -- brightness(0)
-       auf einem eigenen inneren Span macht daraus eine flache schwarze
-       Silhouette, ohne Rahmen/Hintergrund des Buttons mit einzufärben;
-       invert(1) dreht sie im aktiven Zustand auf Weiss (dunkler Hintergrund),
-       passend zu den übrigen Schaltern. */
-    .archive-toggle .archive-emoji { filter: brightness(0); }
-    .archive-toggle.on .archive-emoji { filter: brightness(0) invert(1); }
+    .archive-toggle.on { background: #374151; border-color: #374151; color: #fff; }
 
     .project-name  { font-weight: 600; font-size: 14px; color: var(--accent); }
     .project-meta  { font-size: 12px; color: var(--text-2); margin-top: 2px; }

@@ -54,7 +54,7 @@
       autocomplete="off" autofocus
       hx-get="/search" hx-trigger="input changed delay:300ms, search"
       hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
-
+    <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('q')">×</button>
   </div>
 
   {# ── Typ-Filter + Filter-Button (Row 3 -- gleiche Struktur wie bei Fotos) ── #}
@@ -251,6 +251,7 @@
      <input class="search-input" id="gallery-q" type="search"
        placeholder="Foto Dateinamen durchsuchen…" autocomplete="off"
        oninput="scheduleGalleryReload()">
+     <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('gallery-q')">×</button>
    </div>
 
    <div class="search-scope-row">
@@ -789,7 +790,34 @@ function sucheErsetzen(neueAnfrage) {
   feld.value = neueAnfrage;
   feld.focus();
   htmx.trigger(feld, 'search');
+  updateSearchClear(feld);
 }
+
+// Eigener ×-Knopf statt des nativen type="search"-Symbols -- dessen Farbe folgt
+// in manchen Browsern der System-Akzentfarbe statt dem Farbschema der Seite (das
+// native Symbol wird in base.html per -webkit-appearance:none ausgeblendet).
+function updateSearchClear(feld) {
+  var btn = feld.parentElement.querySelector('.search-clear-btn');
+  if (btn) btn.classList.toggle('visible', feld.value.length > 0);
+}
+
+function clearSearchInput(inputId) {
+  var feld = document.getElementById(inputId);
+  if (!feld) return;
+  feld.value = '';
+  feld.focus();
+  updateSearchClear(feld);
+  feld.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  ['q', 'gallery-q'].forEach(function(id) {
+    var feld = document.getElementById(id);
+    if (!feld) return;
+    updateSearchClear(feld);
+    feld.addEventListener('input', function() { updateSearchClear(feld); });
+  });
+});
 
 function selectAllVisibleDocs() {
   document.querySelectorAll('#results .result[data-id]').forEach(function(row) {
@@ -1729,7 +1757,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
   if (hasDeepLink) {
     var q = params.get('q');
-    if (q) document.getElementById('q').value = q;
+    if (q) { document.getElementById('q').value = q; updateSearchClear(document.getElementById('q')); }
 
     var projectId = params.get('project_id');
     if (projectId) document.getElementById('project_id_select').value = projectId;

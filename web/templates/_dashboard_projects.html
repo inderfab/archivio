@@ -1,8 +1,13 @@
+{% from "_icons.html" import icon_archive, icon_cloud %}
+
 {# Eine Projektzeile. Rekursiv, damit tiefer verschachtelte Projekte (via
    "Unterordner ▸" angelegt) unter ihrem Elternordner eingerückt erscheinen --
    sie tauchen im os.scandir()-Durchlauf des Dashboards sonst nicht auf. #}
 {% macro project_entry(p, depth=0) %}
-<div class="project-entry"{% if depth %} style="margin-left:{{ depth * 26 }}px;"{% endif %}>
+{# id nur mit p.id (echte DB-Projekte) -- dient dem Löschen-Dialog als gezieltes
+   HX-Retarget-Ziel (siehe toggle_project() in web/dashboard.py), damit die
+   Rückfrage genau bei diesem Projekt erscheint statt am Kopf der ganzen Liste. #}
+<div class="project-entry"{% if p.id %} id="project-row-{{ p.id }}"{% endif %}{% if depth %} style="margin-left:{{ depth * 26 }}px;"{% endif %}>
 
   <div class="project-row">
 
@@ -26,7 +31,7 @@
           style="display:contents;">
       <button type="submit"
               class="mcp-toggle {{ 'on' if p.mcp_enabled else '' }}"
-              title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if p.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }}">☁</button>
+              title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if p.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }}">{{ icon_cloud(p.mcp_enabled) }}</button>
     </form>
     <form hx-post="/dashboard/projects/{{ p.id }}/archive-toggle"
           hx-target="#project-list"
@@ -34,7 +39,7 @@
           style="display:contents;">
       <button type="submit"
               class="archive-toggle {{ 'on' if p.archived else '' }}"
-              title="{{ 'Archiviert — wird seltener gescannt. Klicken zum Zurücksetzen auf normal.' if p.archived else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }}{% if p.archive_next_check %} · nächste Prüfung: {{ p.archive_next_check }}{% endif %}"><span class="archive-emoji">📦</span></button>
+              title="{{ 'Archiviert — wird seltener gescannt. Klicken zum Zurücksetzen auf normal.' if p.archived else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }}{% if p.archive_next_check %} · nächste Prüfung: {{ p.archive_next_check }}{% endif %}">{{ icon_archive(p.archived) }}</button>
     </form>
     {% endif %}
 
@@ -115,35 +120,6 @@
       <div id="browse-cols-{{ p.id }}" class="browse-cols"></div>
       <div id="detail-panel-{{ p.id }}" class="detail-panel" style="display:none;"></div>
     </div>
-  </div>
-  {% endif %}
-
-  {# Matched Postfächer #}
-  {% if p.mailboxes %}
-  <div style="padding:0 0 6px;">
-    {% for mb in p.mailboxes %}
-    <div style="display:flex; align-items:center; gap:10px; padding:2px 0;">
-      <form hx-post="/dashboard/mail/toggle"
-            hx-target="#project-list"
-            hx-swap="innerHTML"
-            style="display:contents;">
-        <input type="hidden" name="mailbox_name" value="{{ mb.mailbox_name }}">
-        <input type="hidden" name="context" value="project">
-        <button type="submit"
-                class="project-toggle {{ 'on' if mb.active else '' }}"
-                style="width:28px; height:16px;"
-                title="{{ 'Mail-Scan deaktivieren' if mb.active else 'Mail-Scan aktivieren' }}">
-        </button>
-      </form>
-      <span style="font-size:12px; color:var(--text-2);">✉ {{ mb.mailbox_name }}</span>
-      {% if mb.mail_count %}
-        <span style="font-size:11px; color:var(--text-3);">{{ mb.mail_count }} Mails</span>
-      {% endif %}
-      {% if mb.last_scanned_at %}
-        <span style="font-size:11px; color:var(--text-3);">· 🕐 {{ mb.last_scanned_at | fmt_datetime }}</span>
-      {% endif %}
-    </div>
-    {% endfor %}
   </div>
   {% endif %}
 

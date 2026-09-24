@@ -1,0 +1,10 @@
+{# Archiv- und Cloud-Symbol für die Umschalter bei Projekten/Postfächern
+   (mcp-toggle, archive-toggle in _dashboard_projects.html/_dashboard_mail.html).
+   Zwei Zustände als eigene Form statt Farb-Invertierung eines einzelnen Symbols
+   -- Kontur (weiss/leer) für "aus", volle Füllung für "an". Beide Varianten nutzen
+   currentColor, die tatsächliche Farbe kommt weiterhin aus der Button-CSS-Klasse
+   (.on ändert dort Hintergrund UND color), siehe base.html. #}
+
+{% macro icon_archive(active) %}{% if active %}<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><rect x="3" y="3" width="18" height="6.5" rx="2.2"/><path d="M5 10.5h14V18a2.3 2.3 0 0 1-2.3 2.3H7.3A2.3 2.3 0 0 1 5 18v-7.5z"/></svg>{% else %}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><rect x="3" y="3" width="18" height="6.5" rx="2.2" stroke="currentColor" stroke-width="2"/><path d="M5 9.5V18a2.3 2.3 0 0 0 2.3 2.3h9.4A2.3 2.3 0 0 0 19 18V9.5" stroke="currentColor" stroke-width="2" stroke-linejoin="round"/><line x1="10" y1="14.3" x2="14" y2="14.3" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>{% endif %}{% endmacro %}
+
+{% macro icon_cloud(active) %}{% if active %}<svg width="14" height="14" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M7.3 18a4.3 4.3 0 0 1-1.2-8.43A3.9 3.9 0 0 1 13 7.6 4.4 4.4 0 0 1 19.6 11a3.9 3.9 0 0 1-.9 7H7.3Z"/></svg>{% else %}<svg width="14" height="14" viewBox="0 0 24 24" fill="none" aria-hidden="true"><path d="M7.3 18a4.3 4.3 0 0 1-1.2-8.43A3.9 3.9 0 0 1 13 7.6 4.4 4.4 0 0 1 19.6 11a3.9 3.9 0 0 1-.9 7H7.3Z" stroke="currentColor" stroke-width="1.7" stroke-linejoin="round" stroke-linecap="round"/></svg>{% endif %}{% endmacro %}
