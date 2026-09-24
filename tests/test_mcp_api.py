@@ -204,16 +204,3 @@ def test_mcp_base_folders_empty_when_no_project_enabled(tmp_db):
     r = c.get("/api/mcp/base-folders")
     assert r.status_code == 200
     assert r.json() == {"folders": []}
-
-
-def test_mcp_semantic_search_is_graceful_without_ollama(tmp_db):
-    """Ohne (erreichbares) Ollama darf der Endpoint nicht crashen, sondern muss einen
-    sauberen Fehlerzustand liefern (wie /search/ai)."""
-    from fastapi.testclient import TestClient
-    from web.main import app
-
-    c = TestClient(app)
-    r = c.get("/api/mcp/semantic-search", params={"q": "Grundriss"})
-    assert r.status_code == 200
-    data = r.json()
-    assert isinstance(data.get("sources"), list)

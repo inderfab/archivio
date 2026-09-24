@@ -54,13 +54,7 @@
       autocomplete="off" autofocus
       hx-get="/search" hx-trigger="input changed delay:300ms, search"
       hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
-
-    <div class="ai-toggle-wrap" role="group" aria-label="Suchmodus">
-      <button type="button" class="ai-toggle-btn active" id="mode-volltext-btn"
-        onclick="switchSearchMode(false)">Volltext</button>
-      <button type="button" class="ai-toggle-btn" id="mode-ki-btn"
-        title="Experimentell" onclick="switchSearchMode(true)">KI-Suche</button>
-    </div>
+    <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('q')">×</button>
   </div>
 
   {# ── Typ-Filter + Filter-Button (Row 3 -- gleiche Struktur wie bei Fotos) ── #}
@@ -257,6 +251,7 @@
      <input class="search-input" id="gallery-q" type="search"
        placeholder="Foto Dateinamen durchsuchen…" autocomplete="off"
        oninput="scheduleGalleryReload()">
+     <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('gallery-q')">×</button>
    </div>
 
    <div class="search-scope-row">
@@ -400,7 +395,7 @@
     {% if total_docs == 0 %}
     <p>Noch keine Dokumente in der Datenbank.</p>
     <p style="font-size:12px;color:var(--text-2);margin-top:6px;">
-      <a href="https://inderfab.github.io/archivio/docs.html" target="_blank">Zur Einrichtungsanleitung →</a>
+      <a href="https://bauchat.ch/docs.html" target="_blank">Zur Einrichtungsanleitung →</a>
     </p>
     {% else %}
     <p>Suchbegriff eingeben um Dokumente zu finden.</p>
@@ -631,73 +626,6 @@ function togglePreview(btn, docId, q) {
   }
 }
 
-var _aiTimer = null;
-var _aiStep  = 0;
-var AI_STEPS = [
-  'Durchsucht Dokumente…',
-  'Analysiert relevante Abschnitte…',
-  'Generiert Antwort…',
-];
-
-function _renderAiLoading() {
-  var html = '<div class="ai-thinking">';
-  AI_STEPS.forEach(function(label, i) {
-    var cls = i < _aiStep ? 'done' : (i === _aiStep ? 'active' : '');
-    html += '<div class="ai-thinking-step ' + cls + '">'
-          + '<span class="ai-thinking-dot"></span>'
-          + '<span>' + label + '</span></div>';
-  });
-  html += '</div>';
-  document.getElementById('results').innerHTML = html;
-}
-
-function _showAiLoading() {
-  _aiStep = 0;
-  _renderAiLoading();
-  clearInterval(_aiTimer);
-  _aiTimer = setInterval(function() {
-    if (_aiStep < AI_STEPS.length - 1) { _aiStep++; _renderAiLoading(); }
-  }, 4000);
-}
-
-function _clearAiLoading() {
-  clearInterval(_aiTimer);
-  _aiTimer = null;
-}
-
-document.body.addEventListener('htmx:beforeRequest', function(evt) {
-  if (evt.detail.elt.id !== 'q') return;
-  // Früher hing das an einer Checkbox #ai-toggle. Die wurde durch die beiden
-  // Modus-Knöpfe ersetzt, dieser Handler aber nie nachgezogen: seither warf JEDE
-  // Suche einen TypeError (getElementById(...) war null) und die Ladeanimation
-  // der KI-Suche erschien nie.
-  var kiBtn = document.getElementById('mode-ki-btn');
-  if (!kiBtn || !kiBtn.classList.contains('active')) return;
-  _showAiLoading();
-});
-document.body.addEventListener('htmx:afterRequest', function(evt) {
-  if (evt.detail.elt.id !== 'q') return;
-  _clearAiLoading();
-});
-
-function switchSearchMode(aiOn) {
-  var input  = document.getElementById('q');
-  document.getElementById('mode-volltext-btn').classList.toggle('active', !aiOn);
-  document.getElementById('mode-ki-btn').classList.toggle('active', aiOn);
-  if (aiOn) {
-    input.setAttribute('hx-get', '/search/ai');
-    input.setAttribute('hx-trigger', 'search');
-    input.placeholder = 'Frage stellen und Enter drücken…';
-  } else {
-    input.setAttribute('hx-get', '/search');
-    input.setAttribute('hx-trigger', 'input changed delay:300ms, search');
-    input.placeholder = 'Dokumente und Mails durchsuchen…';
-  }
-  htmx.process(input);
-  // Ergebnisse leeren beim Wechsel
-  document.getElementById('results').innerHTML = '';
-}
-
 function copyPath(btn, text) {
   navigator.clipboard.writeText(text).then(function() {
     var orig = btn.textContent;
@@ -862,7 +790,34 @@ function sucheErsetzen(neueAnfrage) {
   feld.value = neueAnfrage;
   feld.focus();
   htmx.trigger(feld, 'search');
+  updateSearchClear(feld);
 }
+
+// Eigener ×-Knopf statt des nativen type="search"-Symbols -- dessen Farbe folgt
+// in manchen Browsern der System-Akzentfarbe statt dem Farbschema der Seite (das
+// native Symbol wird in base.html per -webkit-appearance:none ausgeblendet).
+function updateSearchClear(feld) {
+  var btn = feld.parentElement.querySelector('.search-clear-btn');
+  if (btn) btn.classList.toggle('visible', feld.value.length > 0);
+}
+
+function clearSearchInput(inputId) {
+  var feld = document.getElementById(inputId);
+  if (!feld) return;
+  feld.value = '';
+  feld.focus();
+  updateSearchClear(feld);
+  feld.dispatchEvent(new Event('input', { bubbles: true }));
+}
+
+document.addEventListener('DOMContentLoaded', function() {
+  ['q', 'gallery-q'].forEach(function(id) {
+    var feld = document.getElementById(id);
+    if (!feld) return;
+    updateSearchClear(feld);
+    feld.addEventListener('input', function() { updateSearchClear(feld); });
+  });
+});
 
 function selectAllVisibleDocs() {
   document.querySelectorAll('#results .result[data-id]').forEach(function(row) {
@@ -1801,10 +1756,8 @@ document.addEventListener('DOMContentLoaded', function() {
   var hasDeepLink = _DEEP_LINK_PARAMS.some(function(name) { return !!params.get(name); });
 
   if (hasDeepLink) {
-    if (params.get('mode') === 'ki') switchSearchMode(true);
-
     var q = params.get('q');
-    if (q) document.getElementById('q').value = q;
+    if (q) { document.getElementById('q').value = q; updateSearchClear(document.getElementById('q')); }
 
     var projectId = params.get('project_id');
     if (projectId) document.getElementById('project_id_select').value = projectId;

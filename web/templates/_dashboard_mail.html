@@ -1,3 +1,4 @@
+{% from "_icons.html" import icon_archive, icon_cloud %}
 <div id="mail-section"
      {% if scan_status == 'running' %}hx-get="/dashboard/mail/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
 
@@ -65,9 +66,9 @@
 
         {% if c.active and c.project_id %}
         <span class="mcp-toggle {{ 'on' if c.project_mcp_enabled else '' }}"
-              title="{{ 'Für KI-Anwendungen freigegeben' if c.project_mcp_enabled else 'Nicht für KI-Anwendungen freigegeben' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar.">☁</span>
+              title="{{ 'Für KI-Anwendungen freigegeben' if c.project_mcp_enabled else 'Nicht für KI-Anwendungen freigegeben' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar.">{{ icon_cloud(c.project_mcp_enabled) }}</span>
         <span class="archive-toggle {{ 'on' if c.project_archive_tier else '' }}"
-              title="{{ 'Archiviert' if c.project_archive_tier else 'Nicht archiviert' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar."><span class="archive-emoji">📦</span></span>
+              title="{{ 'Archiviert' if c.project_archive_tier else 'Nicht archiviert' }} — übernimmt den Status von Projekt „{{ c.project_name }}“, hier nicht separat einstellbar.">{{ icon_archive(c.project_archive_tier) }}</span>
         {% elif c.active %}
         <form hx-post="/dashboard/mail/mcp-toggle"
               hx-target="#mail-section" hx-swap="outerHTML"
@@ -75,7 +76,7 @@
           <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
           <button type="submit"
                   class="mcp-toggle {{ 'on' if c.mcp_enabled else '' }}"
-                  title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if c.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }} (noch keinem Projekt zugeordnet)">☁</button>
+                  title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if c.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }} (noch keinem Projekt zugeordnet)">{{ icon_cloud(c.mcp_enabled) }}</button>
         </form>
         <form hx-post="/dashboard/mail/archive-toggle"
               hx-target="#mail-section" hx-swap="outerHTML"
@@ -83,7 +84,7 @@
           <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
           <button type="submit"
                   class="archive-toggle {{ 'on' if c.archive_tier else '' }}"
-                  title="{{ 'Archiviert — klicken zum Zurücksetzen auf normal' if c.archive_tier else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }} (noch keinem Projekt zugeordnet)"><span class="archive-emoji">📦</span></button>
+                  title="{{ 'Archiviert — klicken zum Zurücksetzen auf normal' if c.archive_tier else 'Nicht archiviert — auf Archiv setzen (wird seltener gescannt)' }} (noch keinem Projekt zugeordnet)">{{ icon_archive(c.archive_tier) }}</button>
         </form>
         {% endif %}
 

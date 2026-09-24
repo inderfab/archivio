@@ -1,0 +1,8 @@
+# Nur für die Entwicklung und die Testsuite -- wird bewusst NICHT ins App-Bundle
+# installiert (scripts/build_server_app.sh liest ausschliesslich requirements.txt).
+# httpx zieht httpcore und h11 nach und wird allein vom FastAPI-TestClient gebraucht.
+-r requirements.txt
+
+httpx==0.28.0          # für FastAPI TestClient
+pytest==8.3.4
+pytest-asyncio==0.24.0

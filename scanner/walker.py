@@ -300,8 +300,9 @@ def _kill_workers(pool) -> None:
 def _worker_status(pid: int) -> str:
     """'ours' | 'foreign' | 'dead' | 'unknown'.
     Schützt vor PID-Wiederverwendung: nur Prozesse, deren Parent DIESER Prozess
-    ist, sind echte Scanner-Worker. Eine wiederverwendete PID (z.B. Ollama, das
-    12 GB belegt) wird sonst faelschlich als Worker gezaehlt/gekillt."""
+    ist, sind echte Scanner-Worker. Eine wiederverwendete PID (etwa die eines
+    fremden, sehr grossen Prozesses) wird sonst faelschlich als Worker
+    gezaehlt/gekillt."""
     try:
         import psutil
     except Exception:
@@ -321,7 +322,7 @@ def _total_workers_rss_gb() -> float:
 
     Tote und fremde (PID-wiederverwendete) Prozesse werden aus dem Register
     entfernt. Ohne den Herkunfts-Check zaehlte eine wiederverwendete PID den RSS
-    eines fremden Prozesses (z.B. Ollama) → falsche 12-GB-Messung → jeder Worker
+    eines fremden Prozesses → falsche 12-GB-Messung → jeder Worker
     wurde sofort gekillt (Dauerschleife statt Fortschritt).
     """
     try:
@@ -363,7 +364,7 @@ def _first_level_dirs(root: Path, excluded_exact: set[str], excluded_patterns: l
 def scan_project(project_id: int, root: Path,
                  progress: dict | None = None,
                  cancel_flag: dict | None = None):
-    """Walk root, extract text, embed, persist to DB.
+    """Walk root, extract text, persist to DB.
 
     Jede Datei läuft in einem oder mehreren Pool-Workern (konfigurierbar via scanner.num_workers).
     Der Hauptprozess überwacht alle _POLL_INTERVAL Sekunden den RSS des Workers.
@@ -1023,8 +1024,6 @@ def _extract_and_store(conn, doc_id: int, path: Path) -> str:
                     queries.update_metadata(conn, doc_id, meta)
         except Exception:
             pass
-    # Kein Embedding im Worker — läuft nach dem Scan als separater Schritt
-    # (verhindert dass ein langsamer Ollama-Call den ganzen Scan blockiert)
     return status
 
 

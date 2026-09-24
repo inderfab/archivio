@@ -1,5 +1,5 @@
 """Tests für das MCP-Protokoll (scanner/mcp_log.py) -- jeder Aufruf von
-/api/mcp/search, /semantic-search und /document muss eine Zeile in mcp_log
+/api/mcp/search und /document muss eine Zeile in mcp_log
 hinterlassen, blockierte Treffer mit ihrem Grund."""
 import json
 

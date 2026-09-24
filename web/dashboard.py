@@ -34,30 +34,7 @@ _mail_scan: dict = {}
 _deletions: dict[int, str] = {}
 # Globale Scan-Sperre: max. 1 Worker-Prozess gleichzeitig
 _scan_lock        = threading.Semaphore(1)
-_embed_thread_lock = threading.Lock()   # max. 1 Embedding-Thread gleichzeitig
 _fts_opt_lock      = threading.Lock()   # max. 1 FTS-Optimize-Thread gleichzeitig
-
-_EMBED_BATCH_DOCS  = 5    # Dokumente pro Batch, dann GC + Pause
-_EMBED_BATCH_PAUSE = 3.0  # Sekunden Pause zwischen Batches (normal)
-_EMBED_RAM_PAUSE   = 90   # Sekunden Pause wenn RAM-Grenze erreicht
-# Prozess-RSS-Obergrenze fuer das Embedding — MUSS unter der Watchdog-Grenze
-# (server_app.py _SERVER_RAM_LIMIT_GB = 20 GB) liegen, sonst treibt das Embedding
-# den Server in den Neustart, bevor es sich selbst drosselt (frueherer Neustart-Loop).
-_EMBED_MAX_RSS_GB  = 15.0
-
-
-def _embedding_ram_ok() -> bool:
-    """False wenn das Embedding pausieren soll — misst den EIGENEN Prozess-RSS
-    (nicht system-weites RAM%, das die 20-GB-Prozessgrenze nie rechtzeitig sieht)."""
-    try:
-        import psutil, os as _os
-        rss_gb = psutil.Process(_os.getpid()).memory_info().rss / (1024 ** 3)
-        if rss_gb > _EMBED_MAX_RSS_GB:
-            return False
-        return psutil.virtual_memory().percent < 85
-    except Exception:
-        return True
-
 
 # ── Dashboard-Hauptseite ──────────────────────────────────────────────────────
 
@@ -121,7 +98,6 @@ def _server_info() -> tuple[bool, str]:
 
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
-    from scanner.embedder import is_ollama_installed
     conn = connection.get_connection()
     connection.init_schema()
     groups   = _project_groups(conn)
@@ -150,7 +126,6 @@ async def dashboard(request: Request):
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
         "scan_warning": _mail_scan.get("warning"),
-        "ollama_missing": not is_ollama_installed(),
     })
 
 
@@ -259,19 +234,6 @@ async def extract_now(request: Request, doc_id: int):
     })
 
 
-@router.post("/run-embeddings-now", response_class=HTMLResponse)
-async def run_embeddings_now():
-    """Holt fehlende Embeddings ausserhalb des normalen Nach-Scan-Laufs nach --
-    nützlich wenn Ollama während des letzten Scans nicht lief und sich seither
-    ein Rückstand angesammelt hat. _run_post_scan_embedding() ist bereits gegen
-    Mehrfachstart abgesichert (siehe _embed_thread_lock)."""
-    threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
-    return HTMLResponse(
-        '<span style="color:var(--text-3); font-size:12px;">'
-        'Embeddings werden im Hintergrund nachgeholt…</span>'
-    )
-
-
 @router.get("/download/helper")
 async def download_helper():
     """Liefert bevorzugt das Helper-PKG aus (installiert systemweit nach /Applications,
@@ -355,6 +317,13 @@ async def toggle_project(
         # als Alternative anbieten statt direkt zum Löschen zu verleiten.
         folder_missing = _folder_genuinely_missing(path)
         conn.close()
+        # HX-Retarget: die auslösende Form zielt auf #project-list (der gesamte
+        # Projektbereich) -- bei einer langen Liste ersetzte das Löschen-Formular
+        # der Rückfrage bislang alles ausser sich selbst, wodurch die Rückfrage am
+        # Kopf des (jetzt winzigen) Bereichs landete und ausserhalb der aktuellen
+        # Scroll-Position unsichtbar blieb. Stattdessen gezielt nur die Zeile
+        # dieses einen Projekts ersetzen -- der Rest der Liste bleibt unverändert
+        # stehen, die Rückfrage erscheint exakt dort, wo geklickt wurde.
         return templates.TemplateResponse("_dashboard_project_confirm_remove.html", {
             "request":        request,
             "project_id":     row["id"],
@@ -362,7 +331,7 @@ async def toggle_project(
             "path":           path,
             "doc_count":      doc_count,
             "folder_missing": folder_missing,
-        })
+        }, headers={"HX-Retarget": f"#project-row-{row['id']}"})
     else:
         # Wieder aktivieren
         with conn:
@@ -813,16 +782,12 @@ async def mail_refresh(request: Request):
 
 
 async def _mail_section_response(request: Request, conn, context: str):
-    """Liefert je nach Kontext die aktualisierte Projektliste oder den Mail-Bereich."""
-    if context == "project":
-        groups  = _project_groups(conn)
-        stats   = _global_stats(conn)
-        orphans = _orphaned_projects(conn)
-        conn.close()
-        return templates.TemplateResponse("_dashboard_projects.html", {
-            "request": request, "groups": groups, "stats": stats,
-            "orphans": orphans,
-        })
+    """Liefert den aktualisierten Mail-Bereich. `context` kam früher zusätzlich mit
+    dem Wert 'project' vor -- als Postfächer auch unter ihrem zugeordneten Projekt
+    angezeigt wurden (_dashboard_projects.html) und von dort aus umschaltbar waren.
+    Das führte zur selben Zuordnung an zwei Orten gleichzeitig; seither ist die
+    Mail-Integration die einzige Stelle dafür, der Parameter bleibt nur noch für
+    'mail' vs. '' (siehe _dashboard_mail.html) bestehen."""
     conn.close()
     return await mail_dashboard(request)
 
@@ -1803,9 +1768,17 @@ def _active_folder_projects(conn) -> list:
     """Aktive Projekte mit echtem Ordnerpfad, für die Verschachtelungs-Suche in
     _project_groups(). Postfach-Projekte (path 'mailbox:…') haben gar keinen Ordner
     und würden hier ohnehin nie unter einem Basisordner landen -- ob sie noch mit
-    einem Postfach verknüpft sind, prüft stattdessen _orphaned_mail_projects()."""
+    einem Postfach verknüpft sind, prüft stattdessen _orphaned_mail_projects().
+
+    ORDER BY name: nur diese Reihenfolge entscheidet, in welcher Reihenfolge tiefer
+    verschachtelte Projekte unter ihrem Elternordner erscheinen (_project_groups()
+    hängt sie in exakt dieser Reihenfolge an) -- ohne sie kam die Reihenfolge der
+    Aufschaltung heraus (SQLite liefert ohne ORDER BY die rowid-Reihenfolge), nicht
+    alphanumerisch wie bei den obersten Projekten (dort sortiert bereits
+    _discovered_projects_for_base() per os.scandir()+sorted())."""
     return conn.execute(
-        "SELECT * FROM projects WHERE active=1 AND path NOT LIKE 'mailbox:%'"
+        "SELECT * FROM projects WHERE active=1 AND path NOT LIKE 'mailbox:%' "
+        "ORDER BY name COLLATE NOCASE"
     ).fetchall()
 
 
@@ -1928,9 +1901,6 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
     last_scan = conn.execute(
         "SELECT MAX(indexed_at) FROM documents WHERE project_id=?", (db["id"],)
     ).fetchone()[0]
-    mailboxes = conn.execute(
-        "SELECT * FROM mail_scan_config WHERE project_id=?", (db["id"],)
-    ).fetchall()
     _last_iso = db["last_scanned_at"] if "last_scanned_at" in db.keys() else None
     _fresh_label, _fresh_class = _scan_freshness(_last_iso)
     _archive_tier = db["archive_tier"] if "archive_tier" in db.keys() else 0
@@ -1956,7 +1926,6 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "scan_fresh_label": _fresh_label,
         "scan_fresh_class": _fresh_class,
         "scan_status":      _scans.get(db["id"], {}).get("status"),
-        "mailboxes":        [dict(m) for m in mailboxes],
         "nested":           [],
     }
 
@@ -1986,7 +1955,6 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
                         "doc_count":   0,
                         "last_scan":   None,
                         "scan_status": None,
-                        "mailboxes":   [],
                         "nested":      [],
                     })
     except PermissionError:
@@ -2031,8 +1999,6 @@ def _extraction_overview(conn) -> dict:
       die heutige OCR-Stufe gab. Ein normaler Scan überspringt 'ok' für immer,
       deshalb eigener Retry (retry_no_text()) statt automatisch erneut zu versuchen.
     - pending: wartet auf den nächsten Scan -- normal, kein Handlungsbedarf.
-    - missing_embedding: Text vorhanden, aber noch keine Embeddings für die
-      KI-Suche (nur relevant wenn Ollama zwischenzeitlich nicht lief).
     """
     from scanner import extractors as _extractors
     from scanner.walker import _LIST_ONLY_EXTENSIONS, _supported_extensions
@@ -2122,10 +2088,6 @@ def _extraction_overview(conn) -> dict:
         "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
     ).fetchone()[0]
 
-    missing_embedding = conn.execute(
-        "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
-    ).fetchone()[0]
-
     return {
         "unsupported_total":   sum(unsupported_by_ext.values()),
         "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
@@ -2138,7 +2100,6 @@ def _extraction_overview(conn) -> dict:
         "no_text_by_ext":      dict(sorted(no_text_by_ext.items(), key=lambda kv: -kv[1])),
         "no_text_sample":      no_text_sample,
         "pending_total":       pending_total,
-        "missing_embedding":   missing_embedding,
     }
 
 
@@ -2363,8 +2324,6 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
             pass
         # FTS-Optimize koordiniert anstoßen (läuft erst wenn kein Scan mehr aktiv)
         threading.Thread(target=_run_fts_optimize, daemon=True).start()
-        # Embedding nach dem Scan automatisch starten (falls Ollama läuft)
-        threading.Thread(target=_run_post_scan_embedding, daemon=True).start()
     except Exception as exc:
         progress.update({"status": "error", "error": str(exc), "finished_at": _now()})
     finally:
@@ -2421,76 +2380,13 @@ def _run_fts_optimize():
 
 def _any_scan_active() -> bool:
     """True wenn irgendein Projekt-Scan (laufend ODER in der Warteschlange) oder
-    ein Mail-Scan aktiv ist. Damit wartet das Embedding, bis der GANZE
+    ein Mail-Scan aktiv ist. Damit wartet das FTS-Optimize, bis der GANZE
     'Alle scannen'-Batch durch ist — nicht nur der aktuell laufende Scan."""
     if any(s.get("status") == "running" for s in _scans.values()):
         return True
     if _mail_scan.get("status") == "running":
         return True
     return False
-
-
-def _run_post_scan_embedding():
-    """Embeddings in kleinen Batches berechnen.
-    Nur ein Thread gleichzeitig — bei scan_all startet jedes Projekt einen Thread,
-    aber alle ausser dem ersten kehren sofort zurück. Der laufende Thread holt
-    automatisch alle offenen Chunks, egal von welchem Projekt."""
-    if not _embed_thread_lock.acquire(blocking=False):
-        return  # bereits aktiv — laufende Instanz verarbeitet alle Chunks
-    try:
-        from scanner.embedder import is_ollama_running, embed_document_chunks
-
-        while True:
-            # Erst wenn der GANZE Scan-Batch (inkl. Warteschlange + Mails) fertig
-            # ist — Embedding ist RAM-intensiv und darf den Scan nicht ausbremsen.
-            if _any_scan_active():
-                log.debug("Embedding wartet — Scan-Batch aktiv")
-                time.sleep(30)
-                continue
-
-            if not is_ollama_running():
-                break
-
-            # Nächste N Dokumente ohne Embedding holen (frisch jedes Mal)
-            conn = connection.get_connection()
-            try:
-                doc_ids = [r[0] for r in conn.execute(
-                    "SELECT DISTINCT document_id FROM document_chunks "
-                    "WHERE embedding IS NULL LIMIT ?",
-                    (_EMBED_BATCH_DOCS,)
-                ).fetchall()]
-            finally:
-                conn.close()
-
-            if not doc_ids:
-                log.debug("Embedding abgeschlossen — keine offenen Chunks mehr")
-                break
-
-            # Batch einbetten
-            conn = connection.get_connection()
-            try:
-                for doc_id in doc_ids:
-                    try:
-                        embed_document_chunks(conn, doc_id)
-                    except Exception as e:
-                        log.debug("Embedding doc %s: %s", doc_id, e)
-            finally:
-                conn.close()
-
-            # Speicher explizit freigeben
-            gc.collect()
-
-            # RAM-Check: bei > 80% Auslastung Pause einlegen
-            if not _embedding_ram_ok():
-                log.info("Embedding-Pause: RAM > 80%% — warte %ds", _EMBED_RAM_PAUSE)
-                time.sleep(_EMBED_RAM_PAUSE)
-            else:
-                time.sleep(_EMBED_BATCH_PAUSE)
-
-    except Exception as e:
-        log.debug("Post-scan Embedding fehlgeschlagen: %s", e)
-    finally:
-        _embed_thread_lock.release()
 
 
 def _fmt_iso_date(iso: str | None) -> str | None:

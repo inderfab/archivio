@@ -2,7 +2,7 @@
 
 > 📌 **Vor der Arbeit lesen:** [`PROJEKT_STATUS.md`](PROJEKT_STATUS.md) — vollständiger
 > Übergabe-Kontext (aktuelle Version, Infrastruktur, Build/Release, Zuverlässigkeit,
-> Scanner/Embedding/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte).
+> Scanner/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte).
 
 ## Stack
 - **Backend**: Python 3.13 im ausgelieferten Bundle (`PYTHON_VERSION` in

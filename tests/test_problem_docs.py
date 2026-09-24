@@ -137,7 +137,7 @@ def test_extraction_overview_ok_with_chunks_not_counted_anywhere(tmp_db):
     assert overview["oversized_total"] == 0
 
 
-def test_extraction_overview_pending_and_missing_embedding_counts(tmp_db):
+def test_extraction_overview_pending_count(tmp_db):
     p = queries.insert_project(tmp_db, "P", "/scan")
     _make_doc(tmp_db, p, "wartet.pdf", ".pdf", "pending")
     doc_id = _make_doc(tmp_db, p, "gut.pdf", ".pdf", "ok")
@@ -147,7 +147,6 @@ def test_extraction_overview_pending_and_missing_embedding_counts(tmp_db):
     from web.dashboard import _extraction_overview
     overview = _extraction_overview(tmp_db)
     assert overview["pending_total"] == 1
-    assert overview["missing_embedding"] == 1  # der frisch gespeicherte Chunk hat noch kein Embedding
 
 
 def test_extraction_overview_error_files_include_id_and_path_for_actions(tmp_db):
@@ -343,25 +342,3 @@ def test_extract_now_runs_extraction_in_background_thread(tmp_db, monkeypatch, t
     row = tmp_db.execute("SELECT extraction_status FROM documents WHERE id=?", (doc_id,)).fetchone()
     assert row["extraction_status"] == "ok"
     assert "Wird im Hintergrund verarbeitet" in r.text
-
-
-def test_run_embeddings_now_starts_background_thread(monkeypatch):
-    from fastapi.testclient import TestClient
-    import web.dashboard as dash
-    from web.main import app
-
-    called = []
-    monkeypatch.setattr(dash, "_run_post_scan_embedding", lambda: called.append(True))
-
-    class SyncThread:
-        def __init__(self, target=None, args=(), kwargs=None, daemon=None):
-            self._target = target
-        def start(self):
-            self._target()
-
-    monkeypatch.setattr(dash.threading, "Thread", SyncThread)
-
-    c = TestClient(app)
-    r = c.post("/dashboard/run-embeddings-now")
-    assert r.status_code == 200
-    assert called == [True]

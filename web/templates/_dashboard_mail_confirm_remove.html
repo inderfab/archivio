@@ -1,8 +1,8 @@
-{% if context == 'project' %}
-  {% set tgt = '#project-list' %}{% set sw = 'innerHTML' %}{% set cancel_url = '/dashboard/projects/list' %}
-{% else %}
-  {% set tgt = 'closest .mail-confirm-wrap' %}{% set sw = 'outerHTML' %}{% set cancel_url = '/dashboard/mail' %}
-{% endif %}
+{# context == 'project' gab es nur, solange Postfächer auch unter ihrem Projekt
+   angezeigt wurden (_dashboard_projects.html) -- seit die Zuordnung nur noch in
+   der Mail-Integration selbst umschaltbar ist, bleibt ausschliesslich dieser
+   Weg: die Rückfrage ersetzt gezielt sich selbst, nicht den ganzen Bereich. #}
+{% set tgt = 'closest .mail-confirm-wrap' %}{% set sw = 'outerHTML' %}{% set cancel_url = '/dashboard/mail' %}
 <div class="mail-confirm-wrap" style="
     padding: 14px 16px;
     background: var(--bg-2, #f5f5f5);

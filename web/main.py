@@ -8,6 +8,7 @@ import signal
 import subprocess
 import sys
 import threading
+import shutil
 import time
 from contextlib import asynccontextmanager
 from datetime import datetime, timedelta
@@ -153,31 +154,6 @@ def _maybe_run_weekly_backup(log, ran_today: str | None) -> str | None:
     return today
 
 
-def _resume_embeddings_on_startup():
-    """Beim Start: fehlende Embeddings nachholen falls Ollama läuft.
-    Sicherheitsnetz falls der Server während eines Embedding-Laufs abgestürzt ist."""
-    time.sleep(8)  # Server erst vollständig hochfahren lassen
-    try:
-        from scanner.embedder import is_ollama_running
-        if not is_ollama_running():
-            return
-        conn = connection.get_connection()
-        try:
-            pending = conn.execute(
-                "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
-            ).fetchone()[0]
-        finally:
-            conn.close()
-        if pending > 0:
-            logging.getLogger(__name__).info(
-                "Startup: %d Chunks ohne Embedding — Backfill startet", pending
-            )
-            from web.dashboard import _run_post_scan_embedding
-            _run_post_scan_embedding()
-    except Exception as exc:
-        logging.getLogger(__name__).debug("Startup-Embedding-Check: %s", exc)
-
-
 # ── Startvorbereitung ─────────────────────────────────────────────────────────
 # Zustand der einmaligen Vorbereitung beim Serverstart (Schema + Migrationen).
 
@@ -186,6 +162,46 @@ def _resume_embeddings_on_startup():
 # antwortete die App ueberall dort mit der Warteseite, wo der lifespan gar nicht
 # ausgefuehrt wird -- etwa in den Tests, die die App direkt einbinden.
 _start_zustand: dict = {"laeuft": False, "seit": time.time(), "fehler": None}
+
+
+def _aufraeumen_nach_migration(conn) -> None:
+    """Einmaliges VACUUM, wenn eine Migration Platz freigegeben hat.
+
+    `ALTER TABLE ... DROP COLUMN` loescht die Daten aus der Tabelle, gibt die Seiten
+    aber nicht an das Dateisystem zurueck -- ohne VACUUM bleibt die Datei gleich gross.
+    Bei Migration 029 sind das auf einer Buero-Datenbank rund 1 GB.
+
+    Laeuft hier und nicht in der Migration selbst, weil VACUUM die Datenbank waehrend
+    des Laufs ein zweites Mal auf die Platte schreibt: der Platz muss vorher geprueft
+    werden, und der Vorgang gehoert hinter die Warteseite. /api/status bleibt dabei
+    erreichbar, der Watchdog schlaegt also nicht zu.
+    """
+    log = logging.getLogger(__name__)
+    marke = conn.execute(
+        "SELECT 1 FROM _migrations WHERE id = '029_vacuum_offen'").fetchone()
+    if not marke:
+        return
+
+    db_pfad = connection.db_path()
+    groesse = db_pfad.stat().st_size if db_pfad.exists() else 0
+    frei    = shutil.disk_usage(db_pfad.parent).free
+    if frei < groesse * 1.2:
+        log.warning("VACUUM uebersprungen: %.1f GB frei, noetig waeren %.1f GB",
+                    frei / 1e9, groesse * 1.2 / 1e9)
+        return
+
+    t0 = time.time()
+    try:
+        conn.execute("VACUUM")
+        conn.commit()
+    except Exception as exc:
+        log.warning("VACUUM fehlgeschlagen: %s", exc)
+        return
+    conn.execute("DELETE FROM _migrations WHERE id = '029_vacuum_offen'")
+    conn.commit()
+    nachher = db_pfad.stat().st_size if db_pfad.exists() else 0
+    log.info("VACUUM abgeschlossen (%.0f s): %.2f GB -> %.2f GB",
+             time.time() - t0, groesse / 1e9, nachher / 1e9)
 
 
 def _startvorbereitung() -> None:
@@ -209,6 +225,7 @@ def _startvorbereitung() -> None:
         from db import migrations as _mig
         _conn = connection.get_connection()
         _mig.run(_conn)
+        _aufraeumen_nach_migration(_conn)
         _conn.close()
     except Exception as _e:
         _start_zustand["fehler"] = str(_e)
@@ -220,7 +237,6 @@ def _startvorbereitung() -> None:
 
     # Erst jetzt die Dienste starten, die die Datenbank benutzen.
     threading.Thread(target=_scheduler_loop, daemon=True).start()
-    threading.Thread(target=_resume_embeddings_on_startup, daemon=True).start()
 
 
 @asynccontextmanager
@@ -311,181 +327,26 @@ async def _vorbereitung_abfangen(request: Request, call_next):
         status_code=503)
 
 
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
+# Absoluter Pfad statt "web/static" -- Starlettes StaticFiles löst eine relative
+# Angabe bei JEDER Anfrage neu über os.getcwd() auf (siehe lookup_path() in
+# starlette/staticfiles.py), statt sie einmal beim Start festzuhalten. Läuft ein
+# Update über eine noch laufende alte Instanz drüber (das .pkg ersetzt den
+# gesamten "Contents/Resources"-Ordner, bevor das postinstall-Skript den alten
+# Prozess beendet), verschwindet dessen Arbeitsverzeichnis für die Dauer der
+# Installation unter ihm weg -- os.getcwd() wirft dann ENOENT, und JEDE
+# /static/…-Anfrage (inkl. htmx.min.js, logo.svg) endet in einem echten
+# "Internal Server Error" statt einem sauberen 404. Andere Routen bemerken das
+# nicht, weil sie über ARCHIVIO_DATA_DIR (absolut) statt über das
+# Arbeitsverzeichnis auf ihre Dateien zugreifen. templates in web/shared.py
+# macht es mit Path(__file__)... bereits richtig -- hier nachgezogen.
+app.mount(
+    "/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "static")),
+    name="static",
+)
 app.include_router(dashboard_router)
 app.include_router(api_router)
 app.include_router(gallery_router)
-
-# ── KI-Suche ──────────────────────────────────────────────────────────────────
-
-def _ai_type_filter_sql(doc_type: str) -> tuple[str, list]:
-    """Typ-Filter ("Mail", Formatkategorien, einzelne Extension) für die KI-Suche --
-    dieselbe Logik wie _build_filters() für die normale Suche. Ohne das ignorierte die
-    KI-Suche einen in der UI gesetzten Typ-Filter stillschweigend (Bug: Nutzer filterte
-    auf "Mail", KI-Suche durchsuchte trotzdem alle Dokumenttypen)."""
-    if not doc_type:
-        return "", []
-    if doc_type == "mail":
-        return " AND d.source_type = 'email'", []
-    if doc_type in _TYPE_CATEGORIES:
-        exts = _TYPE_CATEGORIES[doc_type]
-        placeholders = ",".join("?" * len(exts))
-        return f" AND d.extension IN ({placeholders})", list(exts)
-    ext = doc_type if doc_type.startswith(".") else f".{doc_type}"
-    return " AND d.extension = ?", [ext]
-
-
-def _ai_vector_search(q: str, project_id: str, doc_type: str = ""):
-    """Gemeinsame Logik: Embeddings + Vektorsuche. Gibt (sources, error, ollama_missing) zurück.
-    Läuft synchron — immer via run_in_executor aufrufen, nicht direkt aus async-Handler!
-    """
-    from scanner.embedder import ai_status, embed_query, vector_search, keyword_search_chunks
-
-    status = ai_status()
-    if not status["ok"]:
-        return None, status["reason"], status.get("ollama_missing", False)
-
-    type_sql, type_params = _ai_type_filter_sql(doc_type)
-
-    conn = connection.get_connection()
-    try:
-        qvec = embed_query(q)
-        if qvec is None:
-            return None, "Fehler beim Einbetten der Frage. Ist Ollama erreichbar?", False
-
-        kw_sources  = keyword_search_chunks(conn, q, project_id=project_id, limit=10,
-                                             extra_filter_sql=type_sql, extra_filter_params=type_params)
-        vec_sources = vector_search(conn, qvec, project_id=project_id, limit=20,
-                                     extra_filter_sql=type_sql, extra_filter_params=type_params)
-        # Hybrid-Merge: Keyword zuerst (präziser), Vektor ergänzt
-        seen_ids = {s["id"] for s in kw_sources}
-        sources  = kw_sources + [s for s in vec_sources if s["id"] not in seen_ids]
-        # De-duplizieren auf Dokument-Ebene: pro Dokument nur besten Chunk
-        seen_docs: dict = {}
-        deduped = []
-        for s in sources:
-            doc_id = s["document_id"]
-            if doc_id not in seen_docs:
-                seen_docs[doc_id] = s
-                deduped.append(s)
-        sources = deduped[:12]
-
-        error = None
-        if not sources:
-            if project_id:
-                try:
-                    has_project_emb = conn.execute(
-                        """SELECT 1 FROM document_chunks dc
-                           JOIN documents d ON d.id = dc.document_id
-                           WHERE dc.embedding IS NOT NULL AND d.project_id = ? LIMIT 1""",
-                        (int(project_id),)
-                    ).fetchone()
-                except (ValueError, TypeError):
-                    has_project_emb = None
-                if not has_project_emb:
-                    proj_name = conn.execute(
-                        "SELECT name FROM projects WHERE id = ?", (project_id,)
-                    ).fetchone()
-                    name = proj_name["name"] if proj_name else f"Projekt {project_id}"
-                    error = f"Keine Embeddings für «{name}». Embeddings generieren und nochmals versuchen."
-                else:
-                    error = "Keine relevanten Dokumente für diese Frage gefunden."
-            else:
-                has_embeddings = conn.execute(
-                    "SELECT 1 FROM document_chunks WHERE embedding IS NOT NULL LIMIT 1"
-                ).fetchone()
-                error = (
-                    "Keine eingebetteten Dokumente gefunden. Bitte zuerst Embeddings generieren."
-                    if not has_embeddings else
-                    "Keine relevanten Dokumente für diese Frage gefunden."
-                )
-
-        return sources, error, False
-    finally:
-        conn.close()
-
-
-@app.get("/search/ai", response_class=HTMLResponse)
-async def search_ai(
-    request:    Request,
-    q:          str = Query(default=""),
-    project_id: str = Query(default=""),
-    type:       str = Query(default=""),
-):
-    """Schritt 1 (schnell): Vektorsuche → Quellen sofort anzeigen. Antwort lädt separat nach."""
-    if not q.strip():
-        return HTMLResponse("")
-
-    import asyncio
-    loop = asyncio.get_event_loop()
-    t0 = time.perf_counter()
-    sources, error, ollama_missing = await loop.run_in_executor(
-        None, _ai_vector_search, q, project_id, type
-    )
-    duration_ms = int((time.perf_counter() - t0) * 1000)
-
-    if error and sources is None:
-        return templates.TemplateResponse("_ai_answer.html", {
-            "request": request, "question": q, "answer": None, "sources": [],
-            "error": error, "ollama_missing": ollama_missing,
-        })
-
-    from scanner.search_log import log_search
-    log_conn = connection.get_connection()
-    try:
-        search_log_id = log_search(
-            log_conn, "ki-suche", q.strip(),
-            project_id=int(project_id) if project_id.isdigit() else None,
-            filters=(f"Typ: {type}" if type else ""),
-            result_count=len(sources or []),
-            duration_ms=duration_ms,
-            query_string=str(request.query_params),
-        )
-    finally:
-        log_conn.close()
-
-    return templates.TemplateResponse("_ai_sources.html", {
-        "request":       request,
-        "question":      q,
-        "project_id":    project_id,
-        "type":          type,
-        "sources":       sources or [],
-        "error":         error,
-        "search_log_id": search_log_id,
-    })
-
-
-@app.get("/search/ai/answer", response_class=HTMLResponse)
-async def search_ai_answer(
-    request:    Request,
-    q:          str = Query(default=""),
-    project_id: str = Query(default=""),
-    type:       str = Query(default=""),
-):
-    """Schritt 2 (langsam): LLM-Antwort generieren."""
-    if not q.strip():
-        return HTMLResponse("")
-
-    import asyncio
-    from scanner.embedder import llm_answer
-
-    loop = asyncio.get_event_loop()
-    sources, error, _ = await loop.run_in_executor(
-        None, _ai_vector_search, q, project_id, type
-    )
-    if not sources:
-        return HTMLResponse('<div class="ai-no-answer">Keine Antwort generiert — keine relevanten Quellen gefunden.</div>')
-
-    answer = await loop.run_in_executor(None, llm_answer, q, sources)
-    if answer and sources:
-        sources = _rerank_by_answer(sources, answer)
-
-    return templates.TemplateResponse("_ai_answer_only.html", {
-        "request":  request,
-        "question": q,
-        "answer":   answer,
-        "sources":  sources[:3],   # Top-3 nach Reranking — als Quellenangabe
-    })
 
 # ── Routen ────────────────────────────────────────────────────────────────────
 
@@ -1312,7 +1173,7 @@ async def search_log_export():
                       "Treffer", "Dauer (ms)", "Klicks"])
     for r in rows:
         writer.writerow([
-            r["ts"], "KI-Suche" if r["kind"] == "ki-suche" else "Suche",
+            r["ts"], "Suche",
             r["query"] or "", proj_names.get(r["project_id"], ""),
             r["filters"] or "", r["result_count"], r["duration_ms"], r["clicks"],
         ])
@@ -1490,19 +1351,6 @@ async def toggle_norm(request: Request, document_id: int, q: str = Query(default
 
 
 # ── Such-Logik ────────────────────────────────────────────────────────────────
-
-def _rerank_by_answer(sources: list, answer: str) -> list:
-    """Sortiert Quellen: der Chunk mit den meisten Antwort-Wörtern kommt zuerst."""
-    answer_words = {w for w in re.findall(r'\b\w{4,}\b', answer.lower()) if w}
-    if not answer_words:
-        return sources
-
-    def score(s):
-        content = (s.get("content") or "").lower()
-        return sum(1 for w in answer_words if w in content)
-
-    return sorted(sources, key=score, reverse=True)
-
 
 def _filename_score(filename: str, q: str) -> int:
     """Höherer Score = bessere Übereinstimmung mit Dateiname.

@@ -48,7 +48,7 @@ def log_search(
     beides zusammen genügt, ohne dass der Client explizit "fertig getippt"
     signalisieren müsste.
 
-    query_string (der rohe Query-String der /search- bzw. /search/ai-Anfrage):
+    query_string (der rohe Query-String der /search-Anfrage):
     erlaubt der "Resultate anzeigen"-Schaltfläche im Suche-Protokoll, Suchfrage
     UND alle aktiven Filter exakt zu reproduzieren -- siehe index.html, liest ihn
     beim Laden aus der URL und stellt Suchfeld/Filter entsprechend wieder her.

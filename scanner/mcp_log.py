@@ -1,10 +1,10 @@
 """Protokoll aller Datenübermittlungen über die MCP-Schnittstelle.
 
-Deckt nur die drei Tools ab, die tatsächlich Dokumentinhalt an Claude senden
-(search, semantic_search, document) -- open_file/reveal_file/list_folder öffnen
+Deckt nur die beiden Tools ab, die tatsächlich Dokumentinhalt an Claude senden
+(search, document) -- open_file/reveal_file/list_folder öffnen
 nur lokal eine Datei bzw. listen Ordnernamen, ohne dass Inhalt das Büro verlässt.
 
-Wird ausschliesslich von web/api.py (mcp_search/mcp_semantic_search/mcp_document)
+Wird ausschliesslich von web/api.py (mcp_search/mcp_document)
 aufgerufen, direkt im Anschluss an scanner.norms.redact_hits()/guard_read() (und ab
 der Sperrliste auch scanner.block_list) -- diese Aufrufer wissen bereits, was
 tatsächlich übermittelt bzw. blockiert wurde, hier wird nur noch geschrieben.

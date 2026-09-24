@@ -85,7 +85,7 @@ def test_scoped_search_on_enabled_project_works(tmp_db):
 
 
 def test_scoped_search_by_project_name_resolves_to_real_id(tmp_db):
-    """search()/semantic_search() zeigen dem LLM nur den Projekt-NAMEN an, nie die
+    """search() zeigt dem LLM nur den Projekt-NAMEN an, nie die
     interne DB-ID (siehe helper/archivio_mcp.py) -- ein späterer scope-Aufruf schickt
     deshalb den Namen oder eine daraus geratene Zahl, keine echte ID. Vorher wurde
     z.B. project_id="211" (aus "211 Emmenhof Derendingen" geraten) via int() direkt
@@ -125,20 +125,6 @@ def test_scoped_search_with_unknown_project_ref_is_not_logged_as_blocked(tmp_db)
     row = tmp_db.execute("SELECT * FROM mcp_log ORDER BY id DESC LIMIT 1").fetchone()
     assert "nicht gefunden" in row["blocked_json"]
     assert "Nicht für Claude freigegeben" not in row["blocked_json"]
-
-
-def test_semantic_search_scoped_on_disabled_project_returns_error(tmp_db):
-    from fastapi.testclient import TestClient
-    from web.main import app
-
-    enabled, disabled = _two_projects(tmp_db)
-
-    c = TestClient(app)
-    r = c.get("/api/mcp/semantic-search", params={"q": "Fassade", "project_id": disabled})
-    assert r.status_code == 200
-    data = r.json()
-    assert data["sources"] == []
-    assert "nicht für Claude freigegeben" in data["error"]
 
 
 def test_document_in_disabled_project_is_refused(tmp_db):
