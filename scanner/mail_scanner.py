@@ -337,11 +337,10 @@ def mail_exists(conn, message_id: str) -> bool:
 
 def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: str = "",
                     project_name: str = "") -> bool:
-    """Schreibt Mail in DB inkl. Chunks + Embeddings.
+    """Schreibt Mail in DB inkl. Chunks.
     Jede Stufe hat eigenes try/except — Fehler werden geloggt, Mail wird nicht übersprungen.
     True = neu gespeichert, False = bereits vorhanden.
     """
-    import threading as _threading
     message_id = record["message_id"]
     if not message_id or mail_exists(conn, message_id):
         return False
@@ -401,27 +400,6 @@ def save_mail_to_db(conn, record: dict, project_id: int | None, mailbox_name: st
     except Exception as e:
         log.warning("Chunking fehlgeschlagen doc %d (%s): %s", doc_id, subject[:60], e)
         return True  # Mail gespeichert, nur ohne Chunks
-
-    # Stufe 3: Embeddings — eigene Connection, 30s Timeout
-    try:
-        from scanner.embedder import embed_document_chunks, is_ollama_running
-        if is_ollama_running():
-            done_flag = []
-            def _do_embed():
-                try:
-                    ec = connection.get_connection()
-                    embed_document_chunks(ec, doc_id)
-                    ec.close()
-                    done_flag.append(True)
-                except Exception as ee:
-                    log.warning("Embedding fehlgeschlagen doc %d: %s", doc_id, ee)
-            t = _threading.Thread(target=_do_embed, daemon=True)
-            t.start()
-            t.join(timeout=30)
-            if not done_flag:
-                log.warning("Embedding Timeout doc %d (%s) — übersprungen", doc_id, subject[:60])
-    except Exception as e:
-        log.warning("Embedding-Start fehlgeschlagen doc %d: %s", doc_id, e)
 
     return True
 
@@ -496,7 +474,7 @@ def scan_mailbox(client: imaplib.IMAP4_SSL, mailbox: str, project_id: int,
                 full_msg = _fetch_full(client, uid)
                 record   = build_email_record(full_msg, mailbox)
 
-                # save_mail_to_db inkl. Chunking + Embedding in eigenem Thread (60s Timeout)
+                # save_mail_to_db inkl. Chunking in eigenem Thread (60s Timeout)
                 result_box: list = []
                 def _save(rec=record, mb=mailbox):
                     try:

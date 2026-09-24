@@ -160,7 +160,7 @@
       <span>Suche-Protokoll</span>
       <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
       <div class="section-help-panel">
-        <p>Jede Suche (normale Suche und KI-Suche): Anfrage, Trefferzahl, Dauer, und ob danach tatsächlich ein Treffer geöffnet wurde.</p>
+        <p>Jede Suche: Anfrage, Trefferzahl, Dauer, und ob danach tatsächlich ein Treffer geöffnet wurde.</p>
         <p>Ohne Bezug zu Person oder Gerät — dient ausschliesslich dazu, die Suche selbst zu verbessern, z. B. häufige Anfragen ohne Treffer oder ohne Klick zu erkennen.</p>
       </div>
     </h2>
@@ -184,7 +184,7 @@
       <details class="searchlog-entry">
         <summary>
           <span class="sysstat-ts">{{ e.ts|fmt_ts }}</span>
-          <span class="searchlog-kind">{{ 'KI' if e.kind == 'ki-suche' else 'Suche' }}</span>
+          <span class="searchlog-kind">Suche</span>
           <span class="searchlog-query">{{ e.query or '—' }}{% if e.project_name %} · {{ e.project_name }}{% endif %}</span>
           <span class="sysstat-metric">{{ e.result_count }} Treffer</span>
           <span class="sysstat-metric">{{ e.duration_ms|fmt_ms }}</span>
@@ -200,7 +200,7 @@
           <div class="searchlog-detail-row"><strong>Dauer:</strong> {{ e.duration_ms|fmt_ms }}</div>
           {% if e.query_string %}
           <a class="btn btn-sm" style="margin-top:6px;"
-             href="/?{{ e.query_string }}{{ '&mode=ki' if e.kind == 'ki-suche' else '' }}">
+             href="/?{{ e.query_string }}">
             Resultate anzeigen →
           </a>
           {% endif %}

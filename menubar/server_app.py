@@ -18,8 +18,6 @@ import rumps
 import menubar_bridge as bridge
 import updater
 
-OLLAMA_EMBED_MODEL = "nomic-embed-text"
-OLLAMA_LLM_MODEL   = "llama3.2:3b"
 HELPER_PORT        = bridge.HELPER_PORT
 
 # ── Pfade ────────────────────────────────────────────────────────────────────
@@ -37,7 +35,7 @@ _UPDATE_STATE = _DATA_DIR / "update_state.json"
 # ── Logging ───────────────────────────────────────────────────────────────────
 # Rotierend und auf INFO: vorher lief das hier auf DEBUG ohne Groessenbegrenzung.
 # urllib3 protokolliert jede einzelne requests-Anfrage, und Watchdog (alle 15s) plus
-# Status-Schleife (alle 30s) fragen dauernd /api/status und Ollama ab -- das ergab
+# Status-Schleife (alle 30s) fragen dauernd /api/status ab -- das ergab
 # rund 2,7 MB pro Tag, unbegrenzt wachsend (real gemessen: 321 MB).
 
 _log_dir = Path.home() / "Library" / "Logs"
@@ -53,119 +51,6 @@ for _noisy in ("urllib3", "zeroconf", "requests"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 log = logging.getLogger(__name__)
 log.info("Archivio Server starting (Python %s, bundle=%s)", sys.version, _IN_BUNDLE)
-
-# ── Ollama-Verwaltung ─────────────────────────────────────────────────────────
-
-_ollama_proc: subprocess.Popen | None = None
-_ollama_lock = threading.Lock()
-_OLLAMA_APP  = Path("/Applications/Ollama.app")
-_OLLAMA_BIN  = (
-    shutil.which("ollama") or
-    next((str(p) for p in [
-        Path("/opt/homebrew/bin/ollama"),                        # Apple Silicon + Homebrew
-        Path("/usr/local/bin/ollama"),                           # Intel + Homebrew
-        Path("/Applications/Ollama.app/Contents/MacOS/ollama"), # curl-Install / Ollama.app
-    ] if p.exists()), None)
-)
-
-
-def _is_ollama_running() -> bool:
-    try:
-        requests.get("http://localhost:11434/", timeout=2)
-        return True
-    except Exception:
-        return False
-
-
-def _ollama_available() -> bool:
-    """Gibt True zurück wenn Ollama installiert ist (App oder CLI)."""
-    return bool(_OLLAMA_BIN) or _OLLAMA_APP.exists()
-
-
-def _start_ollama():
-    global _ollama_proc
-    with _ollama_lock:
-        if _is_ollama_running():
-            return
-        # CLI-Binary bevorzugen (headless); Fallback: Ollama.app öffnen
-        bin_is_standalone = (
-            _OLLAMA_BIN and
-            "/Applications/Ollama.app" not in _OLLAMA_BIN and
-            Path(_OLLAMA_BIN).exists()
-        )
-        try:
-            if bin_is_standalone:
-                _ollama_proc = subprocess.Popen(
-                    [_OLLAMA_BIN, "serve"],
-                    stdout=subprocess.DEVNULL,
-                    stderr=subprocess.DEVNULL,
-                )
-                log.info("ollama serve gestartet (pid %s)", _ollama_proc.pid)
-            elif _OLLAMA_APP.exists():
-                subprocess.Popen(["open", "-a", "Ollama"])
-                log.info("Ollama.app gestartet via 'open -a Ollama'")
-            else:
-                log.warning("Ollama nicht gefunden")
-                return
-            for _ in range(20):
-                time.sleep(0.5)
-                if _is_ollama_running():
-                    break
-        except Exception as e:
-            log.error("Ollama start fehlgeschlagen: %s", e)
-
-
-def _stop_ollama():
-    global _ollama_proc
-    with _ollama_lock:
-        if _ollama_proc:
-            try:
-                _ollama_proc.terminate()
-                _ollama_proc.wait(timeout=5)
-            except Exception:
-                _ollama_proc.kill()
-            _ollama_proc = None
-
-
-def _pull_model_if_missing(model: str):
-    """Lädt Ollama-Modell herunter falls noch nicht vorhanden."""
-    try:
-        resp   = requests.get("http://localhost:11434/api/tags", timeout=5)
-        models = [m["name"].split(":")[0] for m in resp.json().get("models", [])]
-        if model.split(":")[0] in models:
-            return
-        log.info("Ziehe Ollama-Modell: %s", model)
-        requests.post(
-            "http://localhost:11434/api/pull",
-            json={"name": model, "stream": False},
-            timeout=600,
-        )
-        log.info("Modell %s geladen", model)
-    except Exception as e:
-        log.warning("Modell-Pull %s fehlgeschlagen: %s", model, e)
-
-
-def _ensure_ollama_models():
-    _start_ollama()
-    if _is_ollama_running():
-        _pull_model_if_missing(OLLAMA_EMBED_MODEL)
-        _pull_model_if_missing(OLLAMA_LLM_MODEL)
-
-
-def _ollama_status_label() -> str:
-    if not _ollama_available():
-        return "🔴  KI-Suche (Ollama fehlt)"
-    if not _is_ollama_running():
-        return "🔴  KI-Suche offline"
-    try:
-        resp   = requests.get("http://localhost:11434/api/tags", timeout=3)
-        models = [m["name"].split(":")[0] for m in resp.json().get("models", [])]
-        both   = (OLLAMA_EMBED_MODEL.split(":")[0] in models and
-                  OLLAMA_LLM_MODEL.split(":")[0] in models)
-        return "🟢  KI-Suche bereit" if both else "🟡  KI-Modelle laden…"
-    except Exception:
-        return "🔴  KI-Suche offline"
-
 
 # ── Server-Prozess ────────────────────────────────────────────────────────────
 
@@ -499,7 +384,6 @@ class ArchivioServer(rumps.App):
         self._version_item  = rumps.MenuItem(f"Version {_local_version()}")
         self._server_item   = rumps.MenuItem("⬤  Server …")
         self._nas_item      = rumps.MenuItem("⬤  NAS …")
-        self._ki_item       = rumps.MenuItem("⬤  KI-Suche …", callback=self._ki_action)
         self._autostart_item = rumps.MenuItem(
             "Autostart beim Login", callback=self.toggle_autostart)
         self._link_action_item = rumps.MenuItem(
@@ -517,7 +401,6 @@ class ArchivioServer(rumps.App):
             self._version_item,
             self._server_item,
             self._nas_item,
-            self._ki_item,
             rumps.separator,
             self._autostart_item,
             self._link_action_item,
@@ -555,7 +438,6 @@ class ArchivioServer(rumps.App):
     def _boot(self):
         bridge.startseite_an(8000, log)
         _start_server()
-        threading.Thread(target=_ensure_ollama_models, daemon=True).start()
         threading.Thread(target=_server_memory_watchdog, daemon=True).start()
         threading.Thread(target=_probe_permissions, daemon=True).start()
         threading.Thread(target=_update_watchdog, args=(self,), daemon=True).start()
@@ -601,11 +483,7 @@ class ArchivioServer(rumps.App):
             f"{'🟢' if server_ok else '🔴'}  Server {'läuft' if server_ok else 'offline'}")
         self._nas_item.title = (
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
-        self._ki_item.title = _ollama_status_label()
         self._mcp_item.title = self._mcp_item_title()
-        # Ollama neu starten falls es unerwartet gestoppt ist
-        if _ollama_available() and not _is_ollama_running():
-            threading.Thread(target=_start_ollama, daemon=True).start()
 
     def _mcp_item_title(self) -> str:
         return ("✓ MCP-Schnittstelle eingerichtet" if bridge.is_mcp_installed()
@@ -651,13 +529,6 @@ class ArchivioServer(rumps.App):
         except Exception as e:
             log.warning("Link-Verhalten konnte nicht gespeichert werden: %s", e)
         sender.title = self._link_action_title()
-
-    def _ki_action(self, _):
-        if not _ollama_available():
-            subprocess.run(["open", "https://ollama.com/download"])
-        elif not _is_ollama_running():
-            rumps.notification("Archivio", "KI-Suche", "Ollama wird gestartet…")
-            threading.Thread(target=_start_ollama, daemon=True).start()
 
     def check_update(self, _):
         current = _local_version()
@@ -711,7 +582,6 @@ class ArchivioServer(rumps.App):
     def quit_app(self, _):
         bridge.stop_advertising(self._zc, self._zc_info, log)
         _stop_server()
-        _stop_ollama()
         # Agent entladen, sonst startet KeepAlive=true die App sofort neu.
         # bootout beendet zugleich diesen Prozess.
         try:

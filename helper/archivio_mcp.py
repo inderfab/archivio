@@ -1,4 +1,4 @@
-"""Archivio MCP-Server – read-only Zugriff auf die Volltext-/KI-Suche für Claude Desktop.
+"""Archivio MCP-Server – read-only Zugriff auf die Volltextsuche für Claude Desktop.
 
 Läuft als stdio-Subprozess von Claude Desktop, mit dem im Archivio-Helper eingebetteten
 Python. Ruft den zentralen Archivio-Server über HTTP im LAN auf (Server-URL aus derselben
@@ -186,8 +186,8 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     IMMER dieses Tool zuerst versuchen, wenn ein Dateiname, Ordnername, Aktenzeichen,
     BKP-Nummer oder ein exakter Fachbegriff bekannt/vermutet wird — auch wenn der Begriff
     nur im Datei- oder Ordnernamen steht (nicht im Dokumentinhalt), findet dieses Tool ihn.
-    semantic_search() nur nachschieben, wenn hier nichts Passendes dabei ist oder die Frage
-    inhaltlich/sinngemäss ist statt nach einem bekannten Namen zu suchen.
+    Bei einer inhaltlichen Frage ohne bekannten Namen mit den wahrscheinlichen
+    Fachbegriffen suchen und die Anfrage bei Bedarf mit anderen Begriffen wiederholen.
 
     query: Suchbegriff(e).
     project: optional, zum Einschränken auf ein Projekt -- den Projektnamen genau so
@@ -255,74 +255,6 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
             f"\n  {_archivio_link_markdown(f['path'])}"
         )
 
-    output = "\n".join(lines)
-    if notice:
-        output += f"\n\n---\n{notice}"
-    return output
-
-
-@mcp.tool(annotations=_READ_ONLY)
-def semantic_search(query: str, project: str = "") -> str:
-    """Semantische Suche (KI-Suche) über Dokument-Inhalte — findet auch sinngemäße Treffer,
-    die die Volltextsuche verpasst (z.B. Umschreibungen, Synonyme, "worum geht es in..."-
-    Fragen). Für bekannte Datei-/Ordnernamen oder exakte Fachbegriffe stattdessen zuerst
-    search() nutzen, das ist dafür zuverlässiger. Gibt Text-Auszüge zurück; die Antwort
-    formuliert Claude selbst.
-
-    query: Frage oder Suchbegriff.
-    project: optional, zum Einschränken auf ein Projekt -- den Projektnamen genau so
-    übernehmen, wie er in eckigen Klammern [...] bei einem vorherigen Treffer stand
-    (z.B. "211 Emmenhof Derendingen" oder auch nur "Emmenhof"), keine ID erfinden.
-
-    Jeder Treffer hat eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)" --
-    diese UNVERÄNDERT übernehmen, nicht in einen Codeblock setzen und nicht selbst
-    einen Link aus dem Pfad bauen.
-    """
-    base = _server_url()
-    try:
-        resp = requests.get(
-            f"{base}/api/mcp/semantic-search",
-            params={"q": query, "project_id": project, "limit": 12, "session_id": _SESSION_ID},
-            timeout=60,
-        )
-        resp.raise_for_status()
-    except Exception as e:
-        return f"Fehler beim Zugriff auf Archivio ({base}): {e}"
-
-    data = resp.json()
-    if data.get("ollama_missing"):
-        return "Semantische Suche nicht verfügbar — Ollama läuft nicht auf dem Archivio-Server."
-    sources = data.get("sources", [])
-    # notice: siehe search() -- der Norm-Fundort-Hinweis muss auch bei vorhandenen
-    # Treffern angehängt werden, nicht nur wenn die Suche sonst leer ausgeht.
-    notice = data.get("notice")
-    if not sources:
-        return data.get("error") or notice or f"Keine relevanten Inhalte für «{query}» gefunden."
-
-    # match_type erklärt, WIE der Treffer gefunden wurde — wichtig, damit der Score
-    # nicht als exakte, über alle Treffer hinweg vergleichbare Zahl missverstanden wird
-    # (Volltext-Treffer bekommen einen plausiblen Näherungswert, kein echtes Embedding-Mass).
-    _MATCH_LABELS = {
-        "heading":  "Überschrift/Norm-Definition, Volltext-Treffer",
-        "fts":      "Volltext-Treffer",
-        "like_and": "Volltext-Treffer (unscharf)",
-        "like_or":  "Volltext-Treffer (unscharf, Teilbegriff)",
-        "semantic": "semantischer Treffer",
-    }
-    lines = []
-    for s in sources:
-        proj  = s.get("project_name") or "—"
-        page  = f", Seite {s['page_number']}" if s.get("page_number") else ""
-        label = _MATCH_LABELS.get(s.get("match_type"), "")
-        score_str = f"Score {s.get('score', 0):.2f}" + (f", {label}" if label else "")
-        filepath = s.get("filepath")
-        link_line = f"\n  {_archivio_link_markdown(filepath)}" if filepath else ""
-        meta_line = _norm_meta_line(s)
-        lines.append(
-            f"- [ID {s.get('document_id')}] {s['filename']} [{proj}{page}] ({score_str})\n"
-            f"  Pfad: {filepath or '—'}{meta_line}{link_line}\n"
-            f"  Inhalt: {(s.get('content') or '').strip()[:500]}"
-        )
     output = "\n".join(lines)
     if notice:
         output += f"\n\n---\n{notice}"
@@ -407,14 +339,14 @@ def read_document(document_id: int, offset: int = 0) -> str:
 
 @mcp.tool(annotations=_WRITES_NEW_FILE)
 def merge_documents_to_pdf(document_ids: str, title: str = "Zusammengeführte Dokumente") -> str:
-    """Führt mehrere über search()/semantic_search() gefundene PDF-Dokumente zu EINER
+    """Führt mehrere über search() gefundene PDF-Dokumente zu EINER
     neuen PDF-Datei zusammen -- z.B. wenn alle Materialblätter aus mehreren Projekten
     gesucht und danach als eine gemeinsame Datei gewünscht wurden. Claude kann PDFs
     nicht selbst zusammenführen (kein Dateizugriff über MCP); Archivio erledigt das
     serverseitig, das Ergebnis landet lokal im Downloads-Ordner dieses Rechners.
 
     document_ids: kommagetrennte Liste der [ID nnn]-Werte aus vorherigen
-    search()/semantic_search()-Treffern, z.B. "142,891,203". Dokumente ohne
+    search()-Treffern, z.B. "142,891,203". Dokumente ohne
     Leserecht (nicht freigegebenes Projekt, erkannte Norm, Sperrliste) oder die
     kein PDF sind, werden übersprungen und im Ergebnis einzeln mit Grund gemeldet,
     nicht stillschweigend weggelassen.

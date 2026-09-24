@@ -1,35 +1,18 @@
-"""Tests für die Migrationen 026–028 (Datenbank-Verkleinerung).
+"""Tests für die Migrationen 026, 028 und 029 (Datenbank-Verkleinerung).
 
-Gemessen an der Entwicklungsdatenbank: 272,9 MB → 183,6 MB (−32,7 %).
+026 nahm den Volltext aus `documents_fts` (dort wurde er nie gesucht), 028 den nie
+gelesenen Zeitstempel aus `document_chunks`, 029 die Embedding-Spalte -- mit dem Ausbau
+der lokalen KI-Suche hat sie keinen Leser mehr. Auf der Produktivdatenbank sind das
+652'684 Vektoren zu je 1536 Bytes, rund 1,0 GB.
 
-Der heikle Teil ist Migration 027: der Datentyp der Embeddings steht nirgends in der
-Datenbank. Wird ein bereits umgewandelter float16-Blob versehentlich ein zweites Mal
-als float32 gelesen, entsteht unwiederbringlicher Unsinn -- und weil embedder.py aus
-allen Zeilen EINE Matrix baut, fällt danach die gesamte semantische Suche aus.
-Deshalb hier vor allem die Wiederaufnahme- und Wiederholungsfälle."""
-import numpy as np
+Die frühere Migration 027 (float32 → float16) hatte hier eigene Tests. Sie sind mit 029
+gegenstandslos geworden: in einer frisch migrierten Datenbank existiert die Spalte nicht
+mehr, die Tests liessen sich gar nicht mehr aufsetzen. 027 bleibt in der Kette, damit
+Datenbanken, die zwischen 3.4.0 und 3.4.4 entstanden sind, dieselbe Reihenfolge sehen.
 
-from db import migrations, queries
-
-
-def _chunk_mit_embedding(conn, dtype, dims=8, wert=0.5):
-    pid = queries.insert_project(conn, f"P{wert}", f"/scan/{wert}")
-    doc = queries.upsert_document(conn, {
-        "project_id": pid, "hash": f"h{wert}", "filename": "a.pdf", "extension": ".pdf",
-        "filesize": 1, "modified_at": None, "source_type": "filesystem"})
-    vec = (np.ones(dims, dtype=np.float32) * wert)
-    vec = (vec / np.linalg.norm(vec)).astype(dtype)
-    conn.execute(
-        "INSERT INTO document_chunks (document_id, chunk_index, content, embedding) "
-        "VALUES (?, 0, 'text', ?)", (doc, vec.tobytes()))
-    conn.commit()
-    return conn.execute("SELECT id FROM document_chunks ORDER BY id DESC LIMIT 1").fetchone()[0]
-
-
-def _migration_zuruecksetzen(conn, *ids):
-    for mid in ids:
-        conn.execute("DELETE FROM _migrations WHERE id = ? OR id LIKE ?", (mid, mid + "%"))
-    conn.commit()
+Das Entscheidende an 029 ist, was NICHT verschwinden darf: `document_chunks.content`,
+die FTS-Tabelle `chunks_fts` und ihre Trigger tragen die gesamte Volltextsuche."""
+from db import queries
 
 
 # ── 026: documents_fts ohne Volltext ─────────────────────────────────────────
@@ -56,71 +39,50 @@ def test_dateiname_wird_weiter_indexiert_und_geloescht(tmp_db):
         "SELECT 1 FROM documents_fts WHERE rowid = ?", (doc,)).fetchone() is None
 
 
-# ── 027: Embeddings float16 ──────────────────────────────────────────────────
+# ── 028/029: document_chunks abgespeckt ──────────────────────────────────────
 
-def test_wandelt_float32_nach_float16(tmp_db):
-    cid = _chunk_mit_embedding(tmp_db, np.float32, wert=0.5)
-    assert len(tmp_db.execute(
-        "SELECT embedding FROM document_chunks WHERE id=?", (cid,)).fetchone()[0]) == 32
-
-    _migration_zuruecksetzen(tmp_db, "027_embeddings_float16", "027_quelllaenge_")
-    migrations.run(tmp_db)
-
-    blob = tmp_db.execute("SELECT embedding FROM document_chunks WHERE id=?", (cid,)).fetchone()[0]
-    assert len(blob) == 16
-    vec = np.frombuffer(blob, dtype=np.float16).astype(np.float32)
-    assert np.allclose(vec, np.ones(8) / np.sqrt(8), atol=1e-3)
-
-
-def test_zweiter_lauf_zerstoert_die_vektoren_nicht(tmp_db):
-    """Der gefährlichste Fall: die Migration läuft komplett durch, bricht aber vor dem
-    Eintrag in _migrations ab. Beim Neustart sehen alle Zeilen gleich aus -- ohne
-    Merker würde ein zweiter Lauf sie für float32 halten und zerschiessen."""
-    cid = _chunk_mit_embedding(tmp_db, np.float32, wert=0.5)
-    _migration_zuruecksetzen(tmp_db, "027_embeddings_float16", "027_quelllaenge_")
-    migrations.run(tmp_db)
-    nach_erstem = tmp_db.execute(
-        "SELECT embedding FROM document_chunks WHERE id=?", (cid,)).fetchone()[0]
-
-    # Nur den Abschluss-Eintrag entfernen, den Längen-Merker bewusst stehen lassen --
-    # genau der Zustand nach einem Absturz zwischen Umwandlung und Eintrag.
-    tmp_db.execute("DELETE FROM _migrations WHERE id = '027_embeddings_float16'")
-    tmp_db.commit()
-    migrations.run(tmp_db)
-
-    assert tmp_db.execute(
-        "SELECT embedding FROM document_chunks WHERE id=?", (cid,)).fetchone()[0] == nach_erstem
-
-
-def test_teilweise_umgewandelte_datenbank_wird_fertig_migriert(tmp_db):
-    """Abbruch mittendrin: beide Formate liegen nebeneinander."""
-    alt = _chunk_mit_embedding(tmp_db, np.float32, wert=0.5)
-    neu = _chunk_mit_embedding(tmp_db, np.float16, wert=0.25)
-    _migration_zuruecksetzen(tmp_db, "027_embeddings_float16", "027_quelllaenge_")
-
-    migrations.run(tmp_db)
-
-    laengen = {r[0] for r in tmp_db.execute(
-        "SELECT DISTINCT length(embedding) FROM document_chunks WHERE embedding IS NOT NULL")}
-    assert laengen == {16}
-    # Der bereits umgewandelte Vektor muss unverändert geblieben sein
-    vec = np.frombuffer(tmp_db.execute(
-        "SELECT embedding FROM document_chunks WHERE id=?", (neu,)).fetchone()[0],
-        dtype=np.float16).astype(np.float32)
-    assert np.allclose(vec, np.ones(8) / np.sqrt(8), atol=1e-3)
-    assert alt is not None
-
-
-def test_leere_datenbank_ist_kein_fehler(tmp_db):
-    _migration_zuruecksetzen(tmp_db, "027_embeddings_float16", "027_quelllaenge_")
-    migrations.run(tmp_db)   # darf nicht werfen
-    assert tmp_db.execute(
-        "SELECT 1 FROM _migrations WHERE id='027_embeddings_float16'").fetchone() is not None
-
-
-# ── 028: created_at ──────────────────────────────────────────────────────────
-
-def test_chunks_ohne_created_at(tmp_db):
+def test_chunks_ohne_created_at_und_ohne_embedding(tmp_db):
     spalten = [r[1] for r in tmp_db.execute("PRAGMA table_info(document_chunks)")]
     assert "created_at" not in spalten
-    assert "embedding" in spalten and "content" in spalten
+    assert "embedding"  not in spalten
+    assert "content"    in spalten
+
+
+def test_volltextsuche_ueberlebt_den_spaltenabbau(tmp_db):
+    """Der Ernstfall: 029 fasst dieselbe Tabelle an, auf der `chunks_fts` sitzt. Fielen
+    dabei die Trigger, würde neuer Text stillschweigend nicht mehr indexiert -- die
+    Suche wäre kaputt, ohne dass irgendetwas eine Fehlermeldung wirft."""
+    pid = queries.insert_project(tmp_db, "P", "/scan")
+    doc = queries.upsert_document(tmp_db, {
+        "project_id": pid, "hash": "h2", "filename": "statik.pdf", "extension": ".pdf",
+        "filesize": 1, "modified_at": None, "source_type": "filesystem"})
+    queries.save_chunks(tmp_db, doc, [
+        {"page_number": 1, "chunk_index": 0, "content": "Bewehrung nach SIA 262"}])
+    tmp_db.commit()
+
+    treffer = tmp_db.execute(
+        "SELECT rowid FROM chunks_fts WHERE chunks_fts MATCH 'Bewehrung'").fetchall()
+    assert len(treffer) == 1
+
+    tmp_db.execute("DELETE FROM documents WHERE id = ?", (doc,))
+    tmp_db.commit()
+    assert tmp_db.execute(
+        "SELECT COUNT(*) FROM chunks_fts WHERE chunks_fts MATCH 'Bewehrung'"
+    ).fetchone()[0] == 0
+
+
+def test_vacuum_marke_wird_nur_bei_echtem_abbau_gesetzt(tmp_db):
+    """029 hinterlässt eine Marke, an der die Startvorbereitung ein einmaliges VACUUM
+    festmacht -- DROP COLUMN allein gibt den Platz nicht ans Dateisystem zurück. Eine
+    frisch angelegte Datenbank hatte die Spalte nie befüllt; dort ist die Marke bereits
+    abgearbeitet oder gar nicht nötig, jedenfalls darf sie nicht dauerhaft stehen
+    bleiben und bei jedem Start ein VACUUM auslösen."""
+    from web.main import _aufraeumen_nach_migration
+
+    tmp_db.execute("INSERT OR IGNORE INTO _migrations (id) VALUES ('029_vacuum_offen')")
+    tmp_db.commit()
+
+    _aufraeumen_nach_migration(tmp_db)
+
+    assert tmp_db.execute(
+        "SELECT 1 FROM _migrations WHERE id = '029_vacuum_offen'").fetchone() is None

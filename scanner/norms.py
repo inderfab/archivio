@@ -12,8 +12,7 @@ zulässiger Eigengebrauch der lizenzierten Norm.
 Architekturprinzip (analog is_path_allowed()): Prüfung pro Tool/Route IST die
 Fehlerklasse -- ein Aufrufer wird vergessen und die Sperre ist offen. redact_hits()/
 guard_read() sind deshalb die EINZIGEN Stellen, die MCP-Antworten vor dem
-Verlassen des Prozesses sehen (siehe web/api.py mcp_search/mcp_semantic_search/
-mcp_document) -- ein zentrales Gate statt Prüfung in jeder Route einzeln.
+Verlassen des Prozesses sehen (siehe web/api.py mcp_search/mcp_document) -- ein zentrales Gate statt Prüfung in jeder Route einzeln.
 
 Portabilität (Ziel: funktioniert bei einem fremden Büro ohne Konfiguration):
 config/norms.yaml enthält nur portable Regeln (Herausgeber-/Lizenzmarker,
@@ -313,8 +312,7 @@ def is_norm_doc(conn: sqlite3.Connection, doc_id: int | None, path: str | None) 
 def redact_hits(conn: sqlite3.Connection, hits: list[dict]) -> list[dict]:
     """Redaktion auf Record-Ebene, VOR dem Formatieren der Trefferzeile -- nicht per
     Regex auf dem fertigen Ausgabestring. Erwartet Keys 'id'/'document_id' und
-    'path'/'filepath' (beide Varianten kommen in diesem Codebase vor, siehe
-    web/api.py::mcp_search vs. mcp_semantic_search)."""
+    'path'/'filepath' (beide Varianten kommen in diesem Codebase vor)."""
     for h in hits:
         doc_id = h.get("id", h.get("document_id"))
         path = h.get("path", h.get("filepath"))

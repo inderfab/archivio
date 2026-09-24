@@ -45,7 +45,7 @@ def _project_mcp_enabled(conn, project_id: int) -> bool:
 
 def _resolve_mcp_project_ref(conn, raw: str) -> tuple[str, str | None]:
     """Löst eine vom MCP-Client (Claude) übergebene Projekt-Referenz auf eine echte
-    project_id auf. Grund: search()/semantic_search() zeigen dem LLM in den Treffern
+    project_id auf. Grund: search() zeigt dem LLM in den Treffern
     nur den Projekt-NAMEN an (nie die interne DB-ID, siehe helper/archivio_mcp.py)
     -- ein späterer scope-Aufruf schickt deshalb fast immer den Namen oder eine aus
     dem Namen geratene Zahl (z.B. "211" aus "211 Emmenhof Derendingen"), keine echte
@@ -346,117 +346,6 @@ async def mcp_search(
     return JSONResponse(payload)
 
 
-@router.get("/mcp/semantic-search")
-async def mcp_semantic_search(
-    q: str = "",
-    project_id: str = "",
-    limit: int = 12,
-    session_id: str = "",
-):
-    """Hybrid keyword+vector Suche (wie /search/ai), liefert Chunk-Inhalte statt HTML —
-    Claude formuliert die Antwort selbst aus den Quellen, kein lokaler LLM-Aufruf nötig.
-    """
-    import asyncio
-
-    from web.main import _ai_vector_search
-
-    q = q.strip()
-    if not q:
-        return JSONResponse({"sources": [], "error": None, "ollama_missing": False})
-
-    if project_id and not project_id.startswith("mailbox:"):
-        _wl_conn = connection.get_connection()
-        try:
-            project_id, _resolve_err = _resolve_mcp_project_ref(_wl_conn, project_id)
-            if _resolve_err:
-                from scanner.mcp_log import log_access
-                log_access(_wl_conn, "semantic_search", q, project_id, [],
-                           [{"path": None, "reason": _resolve_err}], session_id=session_id)
-                return JSONResponse({"sources": [], "ollama_missing": False, "error": _resolve_err})
-            if not _project_mcp_enabled(_wl_conn, int(project_id)):
-                from scanner.mcp_log import log_access
-                log_access(_wl_conn, "semantic_search", q, project_id, [],
-                           [{"path": f"Projekt {project_id}", "reason": "Nicht für Claude freigegeben"}],
-                           session_id=session_id)
-                return JSONResponse({
-                    "sources": [], "ollama_missing": False,
-                    "error": "Dieses Projekt ist nicht für Claude freigegeben.",
-                })
-        finally:
-            _wl_conn.close()
-
-    loop = asyncio.get_event_loop()
-    sources, error, ollama_missing = await loop.run_in_executor(
-        None, _ai_vector_search, q, project_id
-    )
-
-    cleaned = [
-        {
-            "document_id":  s.get("document_id"),
-            "project_id":   s.get("project_id"),
-            "filename":     s.get("filename"),
-            "project_name": s.get("project_name"),
-            "filepath":     s.get("filepath"),
-            "page_number":  s.get("page_number"),
-            "content":      s.get("content"),
-            "score":        s.get("score"),
-            "match_type":   s.get("match_type"),
-        }
-        for s in (sources or [])[:limit]
-    ]
-
-    from scanner.block_list import assert_no_blocked_text
-    from scanner.block_list import redact_hits as block_redact_hits
-    from scanner.mcp_log import log_access
-    from scanner.norms import assert_no_norm_text, redact_hits
-
-    _norms_conn = connection.get_connection()
-    try:
-        # Whitelist (unscoped Fall) -- siehe mcp_search für die Begründung.
-        enabled = _mcp_enabled_project_ids(_norms_conn)
-        cleaned = [f for f in cleaned if f.get("project_id") in enabled]
-
-        cleaned = redact_hits(_norms_conn, cleaned)
-        assert_no_norm_text(cleaned)
-        cleaned = block_redact_hits(_norms_conn, cleaned)
-        assert_no_blocked_text(cleaned)
-        sent = [
-            {"id": f.get("document_id"), "path": f.get("filepath"), "filename": f.get("filename"),
-             "project": f.get("project_name")}
-            for f in cleaned if not f.get("is_norm") and not f.get("is_blocked")
-        ]
-        blocked = [
-            {"path": f.get("filepath"), "filename": f.get("filename"),
-             "reason": "Norm erkannt" if f.get("is_norm") else f.get("block_reason")}
-            for f in cleaned if f.get("is_norm") or f.get("is_blocked")
-        ]
-        chars_sent = sum(
-            len(f.get("content") or "") for f in cleaned
-            if not f.get("is_norm") and not f.get("is_blocked")
-        )
-
-        # Siehe mcp_search für die Begründung, warum das IMMER geprüft wird, nicht nur
-        # wenn die Suche sonst leer ausgeht -- eigenes "notice"-Feld statt "error"
-        # wiederzuverwenden, damit ein echter Ollama-/Suchfehler nicht mit dem
-        # Norm-Hinweis vermischt wird.
-        notice = None
-        from scanner.norms import looks_like_norm_query
-        norm_hit = looks_like_norm_query(_norms_conn, q)
-        if norm_hit:
-            notice = _norm_notice_text(_norms_conn, norm_hit)
-            blocked = blocked + [{"path": None, "filename": None, "reason": notice}]
-
-        log_access(_norms_conn, "semantic_search", q, project_id, sent, blocked, chars_sent,
-                   session_id=session_id)
-    finally:
-        _norms_conn.close()
-
-    payload = {"sources": cleaned, "error": error, "ollama_missing": ollama_missing}
-    if notice:
-        payload["notice"] = notice
-    return JSONResponse(payload)
-
-
 @router.get("/mcp/document")
 async def mcp_document(document_id: int, session_id: str = ""):
     """Volltext + Metadaten eines Dokuments — damit der MCP-Server (read_document) den
@@ -541,7 +430,7 @@ async def mcp_document(document_id: int, session_id: str = ""):
 
 @router.get("/mcp/merge-pdf")
 async def mcp_merge_pdf(document_ids: str, session_id: str = ""):
-    """Führt mehrere über search()/semantic_search() gefundene PDF-Dokumente zu
+    """Führt mehrere über search() gefundene PDF-Dokumente zu
     einer neuen Datei zusammen (z.B. alle Materialblätter mehrerer Projekte) --
     Claude kann PDFs nicht selbst zusammenführen (kein Dateizugriff über MCP),
     Archivio übernimmt das serverseitig.
@@ -905,7 +794,7 @@ async def scan_state():
 
 @router.post("/reset-and-rescan")
 async def reset_and_rescan():
-    """Löscht alle Chunks/Embeddings, setzt alle Dokumente auf 'pending' und startet Scan.
+    """Löscht alle Chunks, setzt alle Dokumente auf 'pending' und startet Scan.
     Der Scanner extrahiert, chunked und embeddet alles neu — korrekt von Anfang an.
     """
     def _reset():
@@ -1059,12 +948,9 @@ async def db_quality():
             ).fetchall()
         }
 
-        # 3. Chunks ohne Embedding
-        no_emb = conn.execute(
-            "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL"
-        ).fetchone()[0]
+        # 3. Chunks gesamt
         total_chunks = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
-        r["chunks"] = {"total": total_chunks, "missing_embedding": no_emb}
+        r["chunks"] = {"total": total_chunks}
 
         # 4. Dokumente ok aber keine Chunks — nach Extension aufschlüsseln
         r["ok_without_chunks"] = conn.execute("""
@@ -1249,59 +1135,13 @@ async def fix_garbage_docs():
     })
 
 
-@router.get("/ai/status")
-async def ai_status():
-    from scanner.embedder import ai_status as _status
-    return JSONResponse(_status())
-
-
-_backfill_state: dict = {"running": False, "done": 0, "total": 0, "error": ""}
-
-
-@router.post("/ai/backfill")
-async def ai_backfill():
-    """Berechnet fehlende Embeddings für alle vorhandenen Chunks im Hintergrund."""
-    if _backfill_state.get("running"):
-        return JSONResponse({"ok": False, "message": "Läuft bereits"})
-
-    def _run():
-        from scanner.embedder import is_ollama_running, embed_document_chunks
-        _backfill_state.update({"running": True, "done": 0, "total": 0, "error": ""})
-        conn = connection.get_connection()
-        try:
-            if not is_ollama_running():
-                _backfill_state["error"] = "Ollama nicht erreichbar"
-                return
-            doc_ids = conn.execute("""
-                SELECT DISTINCT document_id FROM document_chunks
-                WHERE embedding IS NULL
-            """).fetchall()
-            _backfill_state["total"] = len(doc_ids)
-            for row in doc_ids:
-                embed_document_chunks(conn, row["document_id"])
-                _backfill_state["done"] += 1
-        except Exception as e:
-            _backfill_state["error"] = str(e)
-        finally:
-            _backfill_state["running"] = False
-            conn.close()
-
-    threading.Thread(target=_run, daemon=True).start()
-    return JSONResponse({"ok": True, "message": "Backfill gestartet"})
-
-
-@router.get("/ai/backfill/status")
-async def ai_backfill_status():
-    return JSONResponse(_backfill_state)
-
-
 _filter_lang_state: dict = {"running": False, "done": 0, "total": 0, "deleted": 0, "error": ""}
 
 
-@router.post("/ai/filter-german")
-async def ai_filter_german():
+@router.post("/chunks/filter-german")
+async def chunks_filter_german():
     """Löscht nicht-deutsche Chunks (FR/IT) und Müll-Chunks (nur Punkte/Zahlen)
-    aus Dokumenten die noch fehlende Embeddings haben."""
+    aus dem Volltextindex."""
     if _filter_lang_state.get("running"):
         return JSONResponse({"ok": False, "message": "Läuft bereits"})
 
@@ -1347,12 +1187,10 @@ async def ai_filter_german():
         try:
             conn = connection.get_connection()
             conn.execute("PRAGMA busy_timeout = 15000")
-            # Nur Chunks aus Dokumenten mit fehlenden Embeddings
             rows = conn.execute("""
                 SELECT dc.id, dc.document_id, dc.content
                 FROM document_chunks dc
-                WHERE dc.embedding IS NULL
-                AND dc.content IS NOT NULL
+                WHERE dc.content IS NOT NULL
             """).fetchall()
             conn.close()
 
@@ -1385,13 +1223,13 @@ async def ai_filter_german():
     return JSONResponse({"ok": True, "message": "Sprachfilter gestartet"})
 
 
-@router.get("/ai/filter-german/status")
-async def ai_filter_german_status():
+@router.get("/chunks/filter-german/status")
+async def chunks_filter_german_status():
     return JSONResponse(_filter_lang_state)
 
 
-@router.post("/ai/reset-oversized")
-async def ai_reset_oversized():
+@router.post("/chunks/reset-oversized")
+async def chunks_reset_oversized():
     """Löscht Chunks von Nicht-PDF Docs die einen einzigen zu-grossen Chunk haben
     und setzt extraction_status auf 'pending' damit der Scanner sie neu verarbeitet."""
     def _run():
@@ -1439,8 +1277,8 @@ _rechunk_state: dict = {
 DOC_TIMEOUT = 60  # Sekunden pro Dokument
 
 
-@router.post("/ai/rechunk")
-async def ai_rechunk():
+@router.post("/chunks/rechunk")
+async def chunks_rechunk():
     """Re-chunked Nicht-PDF-Dokumente die einen einzigen zu-grossen Chunk haben."""
     if _rechunk_state.get("running"):
         return JSONResponse({"ok": False, "message": "Läuft bereits"})
@@ -1549,71 +1387,18 @@ async def ai_rechunk():
     return JSONResponse({"ok": True, "message": "Re-chunk gestartet"})
 
 
-@router.get("/ai/rechunk/status")
-async def ai_rechunk_status():
+@router.get("/chunks/rechunk/status")
+async def chunks_rechunk_status():
     return JSONResponse(_rechunk_state)
-
-
-@router.get("/ai/embed-test")
-async def ai_embed_test():
-    """Testet Ollama-Embedding — versucht 3 Chunks aus failing docs, Batch-1 und Batch-20."""
-    import asyncio, httpx
-
-    def _run():
-        conn = connection.get_connection()
-        try:
-            # 3 chunks aus Dokumenten die komplett ohne Embedding sind
-            rows = conn.execute("""
-                SELECT dc.id, dc.content, d.filename, length(dc.content) as clen
-                FROM document_chunks dc
-                JOIN documents d ON d.id = dc.document_id
-                WHERE dc.embedding IS NULL
-                ORDER BY clen DESC
-                LIMIT 3
-            """).fetchall()
-            if not rows:
-                return {"status": "Alle Chunks haben Embeddings — fertig!"}
-
-            results = []
-            for row in rows:
-                text = row["content"] or ""
-                # Test 1: Einzelner Chunk
-                try:
-                    resp = httpx.post("http://localhost:11434/api/embed",
-                        json={"model": "nomic-embed-text", "input": [text]},
-                        timeout=60)
-                    data = resp.json()
-                    vecs = data.get("embeddings", [])
-                    results.append({
-                        "filename": row["filename"],
-                        "chunk_id": row["id"],
-                        "text_len": row["clen"],
-                        "http_status": resp.status_code,
-                        "ok": len(vecs) > 0 and len(vecs[0]) > 0,
-                        "error": data.get("error"),
-                    })
-                except Exception as e:
-                    results.append({
-                        "filename": row["filename"],
-                        "chunk_id": row["id"],
-                        "text_len": row["clen"],
-                        "exception": str(e),
-                    })
-            return {"tests": results}
-        finally:
-            conn.close()
-
-    result = await asyncio.get_event_loop().run_in_executor(None, _run)
-    return JSONResponse(result)
 
 
 _normalize_state: dict = {"running": False, "done": 0, "total": 0, "changed": 0, "error": ""}
 
 
-@router.post("/ai/normalize-ligatures")
-async def ai_normalize_ligatures():
-    """Normalisiert Ligaturen (ﬂ→fl) + OCR-Leerzeichen in Chunk-Inhalten,
-    löscht Embeddings ALLER Chunks (vollständige Neuberechnung), baut FTS neu."""
+@router.post("/chunks/normalize-ligatures")
+async def chunks_normalize_ligatures():
+    """Normalisiert Ligaturen (ﬂ→fl) + OCR-Leerzeichen in Chunk-Inhalten
+    und baut den Volltextindex neu auf."""
     if _normalize_state.get("running"):
         return JSONResponse({"ok": False, "message": "Läuft bereits"})
 
@@ -1637,9 +1422,6 @@ async def ai_normalize_ligatures():
                 _normalize_state["done"] += 1
             conn.commit()
             _normalize_state["changed"] = changed
-            # Alle Embeddings löschen → Backfill muss danach laufen
-            conn.execute("UPDATE document_chunks SET embedding = NULL")
-            conn.commit()
             # FTS-Index neu aufbauen
             try:
                 conn.execute("INSERT INTO chunks_fts(chunks_fts) VALUES('rebuild')")
@@ -1654,17 +1436,17 @@ async def ai_normalize_ligatures():
             conn.close()
 
     threading.Thread(target=_run, daemon=True).start()
-    return JSONResponse({"ok": True, "message": "Normalisierung gestartet — danach Embeddings neu generieren!"})
+    return JSONResponse({"ok": True, "message": "Normalisierung gestartet."})
 
 
-@router.get("/ai/normalize-ligatures/status")
-async def ai_normalize_status():
+@router.get("/chunks/normalize-ligatures/status")
+async def chunks_normalize_status():
     return JSONResponse(_normalize_state)
 
 
-@router.get("/ai/diagnostics")
-async def ai_diagnostics():
-    """Gibt den Embedding-Zustand als JSON zurück (läuft im Thread-Pool)."""
+@router.get("/chunks/diagnostics")
+async def chunks_diagnostics():
+    """Gibt den Zustand der Textabschnitte als JSON zurück (läuft im Thread-Pool)."""
     import asyncio
     loop = asyncio.get_event_loop()
 
@@ -1672,9 +1454,6 @@ async def ai_diagnostics():
         conn = connection.get_connection()
         try:
             total_chunks = conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
-            with_emb     = conn.execute(
-                "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NOT NULL"
-            ).fetchone()[0]
             oversized = conn.execute("""
                 SELECT COUNT(*) FROM (
                     SELECT dc.document_id
@@ -1686,66 +1465,26 @@ async def ai_diagnostics():
                     HAVING COUNT(*) = 1
                 )
             """).fetchone()[0]
-            # Chunks ohne Embedding nach Grösse aufschlüsseln
-            missing_by_size = {}
+            # Chunks nach Grösse aufschlüsseln — sehr lange Abschnitte verwässern die
+            # Volltextsuche, sehr kurze deuten auf eine kaputte Extraktion hin.
+            nach_groesse = {}
             for label, lo, hi in [("≤500", 0, 500), ("501-2000", 500, 2000),
                                    ("2001-5000", 2000, 5000), (">5000", 5000, 10**9)]:
                 cnt = conn.execute(
-                    "SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL "
-                    "AND length(content) > ? AND length(content) <= ?", (lo, hi)
+                    "SELECT COUNT(*) FROM document_chunks "
+                    "WHERE length(content) > ? AND length(content) <= ?", (lo, hi)
                 ).fetchone()[0]
-                missing_by_size[label] = cnt
+                nach_groesse[label] = cnt
             return {
                 "total_chunks":            total_chunks,
-                "with_embedding":          with_emb,
-                "missing_embedding":       total_chunks - with_emb,
-                "missing_by_size":         missing_by_size,
+                "nach_groesse":            nach_groesse,
                 "oversized_single_chunks": oversized,
-                "embedding_coverage_pct":  round(with_emb / total_chunks * 100, 1) if total_chunks else 0,
             }
         finally:
             conn.close()
 
     data = await loop.run_in_executor(None, _query)
     return JSONResponse(data)
-
-
-_ollama_install_state: dict = {"running": False, "done": False, "error": "", "log": []}
-
-
-@router.post("/ai/install-ollama")
-async def install_ollama():
-    if _ollama_install_state.get("running"):
-        return JSONResponse({"ok": False, "message": "Installation läuft bereits"})
-
-    def _run():
-        _ollama_install_state.update({"running": True, "done": False, "error": "", "log": []})
-        try:
-            proc = subprocess.Popen(
-                "curl -fsSL https://ollama.com/install.sh | sh",
-                shell=True,
-                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True
-            )
-            for line in proc.stdout:
-                _ollama_install_state["log"].append(line.rstrip())
-            proc.wait()
-            from scanner.embedder import is_ollama_installed
-            if is_ollama_installed():
-                _ollama_install_state.update({"running": False, "done": True})
-            else:
-                # Der curl-Installer beendet sich bevor der macOS-Passwortdialog
-                # erscheint — die Installation läuft danach im Hintergrund weiter.
-                _ollama_install_state.update({"running": False, "needs_reload": True})
-        except Exception as e:
-            _ollama_install_state.update({"running": False, "error": str(e)})
-
-    threading.Thread(target=_run, daemon=True).start()
-    return JSONResponse({"ok": True})
-
-
-@router.get("/ai/install-ollama/status")
-async def install_ollama_status():
-    return JSONResponse(_ollama_install_state)
 
 
 _GITHUB_REPO = "inderfab/archivio"
@@ -1796,7 +1535,6 @@ async def debug_chunks(filename: str = "", q: str = ""):
                     SELECT dc.id, dc.chunk_index, dc.page_number,
                            length(dc.content) AS len,
                            substr(dc.content, 1, 300) AS preview,
-                           dc.embedding IS NOT NULL AS has_emb,
                            d.filename
                     FROM document_chunks dc
                     JOIN documents d ON d.id = dc.document_id
@@ -1809,7 +1547,6 @@ async def debug_chunks(filename: str = "", q: str = ""):
                     SELECT dc.id, dc.chunk_index, dc.page_number,
                            length(dc.content) AS len,
                            substr(dc.content, 1, 300) AS preview,
-                           dc.embedding IS NOT NULL AS has_emb,
                            d.filename
                     FROM document_chunks dc
                     JOIN documents d ON d.id = dc.document_id
@@ -1833,24 +1570,19 @@ async def debug_dist():
 
 # ── Recall-Tests ──────────────────────────────────────────────────────────────
 
-@router.get("/test/recall")
-async def test_recall(n: int = 10, seed: int = 42):
-    """
-    Recall-Test: Zufällige Chunks aus der DB → Suche mit Textausschnitt → Dokument gefunden?
-    Läuft direkt auf dem Server wo die DB liegt.
-    ?n=10   Anzahl Chunks (default 10)
-    ?seed=  Zufalls-Seed für Reproduzierbarkeit
-    """
+async def _recall_lauf(n: int, seed: int) -> dict:
+    """Ein Recall-Durchlauf. Eigene Funktion, damit /test/recall/multi sie direkt
+    aufrufen kann, statt den eigenen Server über HTTP nochmals anzufragen."""
     import asyncio, random, time
     loop = asyncio.get_event_loop()
 
     def _run():
         import random as _rnd
-        from scanner.embedder import keyword_search_chunks, embed_query, vector_search, is_ollama_running
+        from web.main import _run_scoped_search
 
         _rnd.seed(seed)
         conn = connection.get_connection()
-        results = {"keyword": [], "vector": [], "summary": {}}
+        results = {"treffer": [], "summary": {}}
 
         try:
             # Mehr Kandidaten holen, dann Python-seitig filtern
@@ -1859,8 +1591,7 @@ async def test_recall(n: int = 10, seed: int = 42):
                        dc.page_number, d.filename, d.extension
                 FROM document_chunks dc
                 JOIN documents d ON d.id = dc.document_id
-                WHERE dc.embedding IS NOT NULL
-                  AND length(dc.content) >= 200
+                WHERE length(dc.content) >= 200
                   AND d.extraction_status = 'ok'
                   AND d.extension IN ('.pdf', '.docx', '.txt', '.doc')
                 ORDER BY RANDOM()
@@ -1917,53 +1648,36 @@ async def test_recall(n: int = 10, seed: int = 42):
                 best_line = good[mid_idx][0]
                 return best_line[:length].strip()
 
-            # ── Keyword-Recall ────────────────────────────────────────────────
-            kw_hits = 0
+            # ── Recall der produktiven Volltextsuche ──────────────────────────
+            # Bewusst derselbe Weg, den die /search-Route und /api/mcp/search gehen:
+            # ein Test, der eine eigene Suchimplementierung misst, sagt nichts darüber
+            # aus, was die Büros tatsächlich erleben.
+            hits_total = 0
             for row in rows:
-                query   = _excerpt(row["content"], length=70)
-                hits    = keyword_search_chunks(conn, query, limit=10)
-                found   = any(h["document_id"] == row["document_id"] for h in hits)
-                kw_hits += int(found)
-                results["keyword"].append({
-                    "filename":  row["filename"],
-                    "page":      row["page_number"],
-                    "query":     query[:60] + ("…" if len(query) > 60 else ""),
-                    "found":     found,
-                    "top3":      [h["filename"] for h in hits[:3]],
+                query = _excerpt(row["content"], length=70)
+                t0    = time.time()
+                treffer, fehler = _run_scoped_search(conn, query, "", [], {"docs"})
+                gefunden = any(h["id"] == row["document_id"] for h in treffer[:10])
+                hits_total += int(gefunden)
+                results["treffer"].append({
+                    "filename": row["filename"],
+                    "page":     row["page_number"],
+                    "query":    query[:60] + ("…" if len(query) > 60 else ""),
+                    "found":    gefunden,
+                    "rang":     next((i + 1 for i, h in enumerate(treffer[:10])
+                                      if h["id"] == row["document_id"]), None),
+                    "dauer_ms": round((time.time() - t0) * 1000),
+                    "top3":     [h["filename"] for h in treffer[:3]],
+                    "fehler":   fehler,
                 })
-
-            # ── Vektor-Recall ─────────────────────────────────────────────────
-            vec_hits      = 0
-            ollama_running = is_ollama_running()
-            if ollama_running:
-                for row in rows:
-                    query  = _excerpt(row["content"], length=200)
-                    t0     = time.time()
-                    qvec   = embed_query(query)
-                    hits   = vector_search(conn, qvec, limit=10) if qvec is not None else []
-                    found  = any(h["document_id"] == row["document_id"] for h in hits)
-                    vec_hits += int(found)
-                    results["vector"].append({
-                        "filename":    row["filename"],
-                        "page":        row["page_number"],
-                        "found":       found,
-                        "embed_ms":    round((time.time() - t0) * 1000),
-                        "top3":        [h["filename"] for h in hits[:3]],
-                        "top3_scores": [round(h.get("score", 0), 3) for h in hits[:3]],
-                    })
 
             # ── Summary ───────────────────────────────────────────────────────
             total = len(rows)
             results["summary"] = {
                 "total_chunks_tested": total,
-                "keyword_hits":        kw_hits,
-                "keyword_recall_pct":  round(kw_hits / total * 100, 1),
-                "keyword_pass":        kw_hits >= total * 0.7,
-                "vector_tested":       ollama_running,
-                "vector_hits":         vec_hits if ollama_running else None,
-                "vector_recall_pct":   round(vec_hits / total * 100, 1) if ollama_running else None,
-                "vector_pass":         (vec_hits >= total * 0.7) if ollama_running else None,
-                "overall_pass":        kw_hits >= total * 0.7 and (not ollama_running or vec_hits >= total * 0.7),
+                "hits":                hits_total,
+                "recall_pct":          round(hits_total / total * 100, 1),
+                "pass":                hits_total >= total * 0.7,
             }
 
         finally:
@@ -1971,53 +1685,44 @@ async def test_recall(n: int = 10, seed: int = 42):
 
         return results
 
-    data = await loop.run_in_executor(None, _run)
-    return JSONResponse(data)
+    return await loop.run_in_executor(None, _run)
+
+
+@router.get("/test/recall")
+async def test_recall(n: int = 10, seed: int = 42):
+    """
+    Recall-Test: Zufällige Chunks aus der DB → Suche mit Textausschnitt → Dokument gefunden?
+    Gemessen wird die produktive Volltextsuche, also derselbe Weg wie /search.
+    Läuft direkt auf dem Server wo die DB liegt.
+    ?n=10   Anzahl Chunks (default 10)
+    ?seed=  Zufalls-Seed für Reproduzierbarkeit
+    """
+    return JSONResponse(await _recall_lauf(n, seed))
 
 
 @router.get("/test/recall/multi")
 async def test_recall_multi(n: int = 10, runs: int = 5):
     """Mehrere Recall-Durchläufe mit verschiedenen Seeds → statistisch belastbares Ergebnis."""
-    import asyncio
-    loop = asyncio.get_event_loop()
-
-    async def _one_run(seed):
-        return await loop.run_in_executor(None, lambda: None)  # placeholder
-
-    # Sequenziell laufen lassen (DB-Last verteilen)
-    import httpx
-    base = "http://localhost:8000"
     results = []
-    for seed in range(runs):
+    for lauf in range(runs):
         try:
-            resp = httpx.get(f"{base}/api/test/recall?n={n}&seed={seed*17+42}", timeout=300)
-            if resp.status_code == 200:
-                results.append(resp.json()["summary"])
+            daten = await _recall_lauf(n, lauf * 17 + 42)
+            if daten.get("summary"):
+                results.append(daten["summary"])
         except Exception:
             pass
 
     if not results:
-        return {"error": "Keine Ergebnisse"}
+        return JSONResponse({"error": "Keine Ergebnisse"})
 
-    avg_kw  = round(sum(r["keyword_recall_pct"] for r in results) / len(results), 1)
-    avg_vec = round(sum(r["vector_recall_pct"] for r in results if r.get("vector_recall_pct") is not None) / len(results), 1)
-    hybrids = []
-    for r in results:
-        kw = r.get("keyword_hits", 0)
-        vec = r.get("vector_hits", 0) or 0
-        total = r.get("total_chunks_tested", 1)
-        # Hybrid nicht direkt verfügbar, approximieren
-        hybrids.append(round(min(kw + vec * 0.5, total) / total * 100, 1))
-
-    return {
-        "runs": len(results),
-        "n_per_run": n,
-        "avg_keyword_recall_pct": avg_kw,
-        "avg_vector_recall_pct": avg_vec,
-        "keyword_pass": avg_kw >= 70,
-        "vector_pass": avg_vec >= 70,
-        "per_run": results,
-    }
+    schnitt = round(sum(r["recall_pct"] for r in results) / len(results), 1)
+    return JSONResponse({
+        "runs":            len(results),
+        "n_per_run":       n,
+        "avg_recall_pct":  schnitt,
+        "pass":            schnitt >= 70,
+        "per_run":         results,
+    })
 
 
 @router.get("/debug/mail")
@@ -2107,7 +1812,7 @@ async def debug_mail_scan_test(mailbox: str = ""):
 @router.post("/mail/reset-and-rescan")
 async def mail_reset_and_rescan():
     """Löscht alle E-Mail-Dokumente und startet Mail-Scan neu.
-    Der neue Scan speichert Mails inkl. Chunks + Embeddings (mit Fehlertoleranz).
+    Der neue Scan speichert Mails inkl. Chunks (mit Fehlertoleranz).
     """
     # Mails aus DB löschen
     conn = connection.get_connection()
@@ -2130,7 +1835,7 @@ async def mail_reset_and_rescan():
     threading.Thread(target=_run_mail_scan, daemon=True).start()
 
     return JSONResponse({"ok": True, "deleted": deleted,
-                         "message": f"{deleted} Mails gelöscht. Scan gestartet — inkl. Chunking + Embedding."})
+                         "message": f"{deleted} Mails gelöscht. Scan gestartet — inkl. Chunking."})
 
 
 # ── PDF-Metadaten-Backfill ────────────────────────────────────────────────────
@@ -2468,28 +2173,22 @@ async def diagnostics():
             detail=f"ok: {ok_docs}, Fehler: {err_docs}, ausstehend: {pend_docs}, nicht unterstützt: {unsup_docs}"
         )
         total_chunks = _conn.execute("SELECT COUNT(*) FROM document_chunks").fetchone()[0]
-        missing_emb  = _conn.execute("SELECT COUNT(*) FROM document_chunks WHERE embedding IS NULL").fetchone()[0]
         docs_no_chunk = _conn.execute(
             "SELECT COUNT(*) FROM documents d WHERE extraction_status='ok' "
             "AND NOT EXISTS (SELECT 1 FROM document_chunks dc WHERE dc.document_id = d.id)"
         ).fetchone()[0]
-        emb_ok = missing_emb == 0
-        if not emb_ok:
-            emb_detail = (
-                f"{missing_emb} Chunks ohne Embedding — "
-                f'<a href="#" onclick="fetch(\'/api/ai/backfill\',{{method:\'POST\'}})'
-                f'.then(function(){{alert(\'Backfill gestartet — kann einige Minuten dauern.\')}})'
-                f';return false">Backfill jetzt starten</a>'
-            )
-        elif docs_no_chunk:
-            emb_detail = f"{docs_no_chunk} Dokumente ohne Chunks"
-        else:
-            emb_detail = ""
+        # Bewusst kein Fehler, wenn Dokumente ohne Abschnitte übrig bleiben: das sind in
+        # aller Regel gescannte PDFs ohne Textebene. Die stehen oben schon unter "Kein
+        # Textinhalt gefunden" -- hier nochmals als rotes Kreuz zu erscheinen, würde einen
+        # Normalzustand wie einen Defekt aussehen lassen.
         _chk(
-            "Embeddings",
-            f"{total_chunks - missing_emb} / {total_chunks} Chunks",
-            ok=emb_ok if total_chunks > 0 else None,
-            detail=emb_detail
+            "Durchsuchbare Abschnitte",
+            f"{total_chunks} Chunks",
+            ok=True if total_chunks > 0 and not docs_no_chunk else (None if total_chunks else False),
+            detail=(f"{docs_no_chunk} Dokumente sind als extrahiert markiert, haben aber "
+                    f"keine Abschnitte — meist gescannte PDFs ohne Textebene; sie sind "
+                    f"nicht im Volltext auffindbar"
+                    if docs_no_chunk else "")
         )
         pdfs_ok       = _conn.execute(
             "SELECT COUNT(*) FROM documents WHERE extension='.pdf' AND extraction_status='ok'"
@@ -2517,26 +2216,6 @@ async def diagnostics():
         _conn.close()
     except Exception as _exc:
         _chk("DB-Qualität", str(_exc), ok=False)
-
-    # Ollama
-    try:
-        from scanner.embedder import is_ollama_installed, is_ollama_running, ai_status, EMBED_MODEL, LLM_MODEL
-        if not is_ollama_installed():
-            _chk("Ollama", "Nicht installiert", ok=False,
-                 detail='<a href="https://bauchat.ch/docs.html#ki" target="_blank">Anleitung zur Installation</a>')
-        elif not is_ollama_running():
-            _chk("Ollama", "Installiert, aber nicht gestartet", ok=False,
-                 detail="Ollama starten: Menubar → KI-Suche klicken, oder 'ollama serve' im Terminal")
-        else:
-            status = ai_status()
-            if status["ok"]:
-                _chk("Ollama", "Läuft", ok=True,
-                     detail=f"Modelle: {EMBED_MODEL}, {LLM_MODEL}")
-            else:
-                _chk("Ollama", f"Läuft – {status['reason']}", ok=None,
-                     detail=f"Modelle prüfen: {EMBED_MODEL}, {LLM_MODEL}")
-    except Exception as _exc:
-        _chk("Ollama", str(_exc), ok=False)
 
     # HTML rendern
     rows = []

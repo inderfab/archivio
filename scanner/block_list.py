@@ -3,7 +3,7 @@ Norm-Erkennung (scanner/norms.py) um von Hand gesetzte Regeln.
 
 Architekturprinzip identisch zu scanner/norms.py: redact_hits()/guard_read() sind
 die EINZIGEN Stellen, die MCP-Antworten vor dem Verlassen des Prozesses sehen
-(siehe web/api.py mcp_search/mcp_semantic_search/mcp_document), direkt neben den
+(siehe web/api.py mcp_search/mcp_document), direkt neben den
 entsprechenden Aufrufen aus scanner.norms -- ein zweiter, unabhängiger Gate-Layer,
 kein Ersatz dafür.
 

@@ -13,7 +13,7 @@
 Vollständig **lokale** Dokumenten- und Mail-Suchplattform für ein Architekturbüro. Keine
 Cloud. Läuft auf einem Mac im Büronetz, indexiert Dateien vom NAS und Mails per IMAP.
 
-- **Stack:** Python 3.13 (eingebettet), FastAPI, SQLite + FTS5, HTMX + Jinja2, rumps (Menubar-App), Ollama (Embeddings `nomic-embed-text` + LLM `llama3.2:3b`)
+- **Stack:** Python 3.13 (eingebettet), FastAPI, SQLite + FTS5, HTMX + Jinja2, rumps (Menubar-App)
 - **Repo:** https://github.com/inderfab/archivio (GitHub-User: `inderfab`)
 - **Website:** https://bauchat.ch (GitHub Pages aus `docs/`, Custom Domain)
 - **Dateiidentität:** SHA256-Hash (nicht Pfad) → Duplikate/Verschiebungen werden erkannt. **Wichtig:** dadurch kann *ein* Dokument mehrere Pfade in verschiedenen Projekten haben.
@@ -28,7 +28,6 @@ Cloud. Läuft auf einem Mac im Büronetz, indexiert Dateien vom NAS und Mails pe
 - DATA_DIR: `~/Library/Application Support/Archivio/` (DB, config.yaml, Helper-ZIP)
 - Logs: **`~/Library/Application Support/Archivio/logs/server.log`** = der **echte** Scanner-/uvicorn-Log (Python-Logging, DATA_DIR-basiert — hier stehen `scanner.walker`-Zeilen wie Datei-Timeout/SIGKILL/RSS). Zusätzlich `~/Library/Logs/ArchivioServer.log` (Menubar/Watchdog). **Falle:** `~/.archivio/logs/server.log` ist ein **veralteter** Pfad (alte Config) — dort wird NICHT mehr geschrieben, Greps darauf sind irreführend leer. Die aktuelle Log-Datei zur Not per `lsof -p <server-pid> | grep '\.log'` verifizieren.
 - DB: `~/Library/Application Support/Archivio/archivio.db`
-- Ollama läuft dort (Port 11434)
 - **Autostart:** LaunchAgent `~/Library/LaunchAgents/io.archivio.server.plist` (siehe §5)
 
 **Dev-Mac (Apple Silicon) — hier wird entwickelt & gebaut:**
@@ -218,7 +217,8 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 - **Warum das kein Schönheitsfix ist:** vorher nahm uvicorn erst nach den Migrationen Verbindungen an. Die v3.4.0-Migration braucht auf 240'000 Dokumenten ~3 min — in der Zeit sah der Nutzer nur „Verbindung fehlgeschlagen". **Schlimmer:** der Watchdog prüft alle 15 s `/api/status` und startet nach vier Fehlversuchen (60 s) neu. Eine Migration über 60 s wäre also mitten drin abgeschossen und von vorn begonnen worden — bei `_m026` (FTS-Neuaufbau, wird erst nach Abschluss in `_migrations` eingetragen) potenziell endlos.
 - **`/api/status` wird durchgelassen und OHNE Datenbankzugriff beantwortet** (`{"server": true, "vorbereitung": true, "seit_s": n}`). Eine Abfrage gegen die migrierende DB würde bis zum 30-s-Sperrtimeout hängen und den Server als hängend erscheinen lassen.
 - **`_start_zustand["laeuft"]` startet auf `False`** und wird erst im `lifespan` gesetzt. Der Wert heisst „läuft gerade", nicht „steht aus" — sonst antwortet alles mit der Warteseite, wo der lifespan nicht ausgeführt wird (Tests binden die App direkt ein; das kostete einmal 144 rote Tests).
-- Scheduler und Embedding-Nachlauf starten erst **nach** der Vorbereitung, nicht parallel dazu.
+- Der Scheduler startet erst **nach** der Vorbereitung, nicht parallel dazu.
+- Direkt nach den Migrationen läuft `_aufraeumen_nach_migration()`: setzt eine Migration die Marke `029_vacuum_offen`, folgt ein einmaliges `VACUUM` — noch hinter der Warteseite, `/api/status` bleibt frei. Vorher wird der Plattenplatz geprüft (`VACUUM` schreibt die DB ein zweites Mal).
 - Tests: `tests/test_startvorbereitung.py`.
 
 ---
@@ -229,7 +229,7 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 - **Skip-Pfad im Hauptprozess** (Performance): unveränderte Dateien (Pfad+Größe+mtime, status in ok/listed/error/unsupported) werden per `stat()` + indexierter SELECT übersprungen — **ohne** Worker/IPC. `skip_conn` ist eine reine Lese-Verbindung (nur SELECTs → keine Transaktion → kein WAL-Snapshot-Problem).
 - **`_process_file`:** Fast-Path → List-Only (Bilder/Video/3D/Disk-Images, `_LIST_ONLY_EXTENSIONS`) → **unbekannte Formate = auch list-only** (per Dateiname suchbar) → sonst SHA256 + Extraktion. `supported = _supported_extensions()` MUSS lokal geholt werden (war mal ein NameError-Bug).
 - **Müll-Filter `_is_junk_file`:** versteckte Dateien, `~$…`, `…~`, `Thumbs.db`, `desktop.ini`, `.DS_Store`, `.lock/.tmp/.part/.crdownload/.swp/.bak`.
-- **`_worker_status(pid)` (seit 3.0.3):** nur Prozesse, deren Parent DIESER Prozess ist, gelten als Worker. RSS-Zählung und alle SIGKILLs überspringen fremde PIDs. **Grund:** eine wiederverwendete tote Worker-PID zählte sonst den RSS eines Fremdprozesses (z. B. Ollama 12 GB) → falsche „12.8 GB"-Messung → jeder Worker sofort gekillt → Scan kroch 18h ohne Fortschritt.
+- **`_worker_status(pid)` (seit 3.0.3):** nur Prozesse, deren Parent DIESER Prozess ist, gelten als Worker. RSS-Zählung und alle SIGKILLs überspringen fremde PIDs. **Grund:** eine wiederverwendete tote Worker-PID zählte sonst den RSS eines Fremdprozesses (12 GB) → falsche „12.8 GB"-Messung → jeder Worker sofort gekillt → Scan kroch 18h ohne Fortschritt.
 - **Stall-Abbruch (seit 3.0.3):** nach `_MAX_CONSECUTIVE_STALLS = 8` Timeouts/Speicher-Kills in Folge bricht der Scan mit „NAS-Verbindung prüfen" ab (statt stundenlang bei hängendem NAS zu kriechen).
 - **RAM-Limits:** `_MAX_WORKER_RSS` = 20% RAM (64 GB → 12.8 GB), Datei-Timeout 120s (Nicht-PDF), da SIGALRM bei NAS-I/O nicht durchkommt.
 - **D-State-Falle:** Worker in unterbrechbarem NAS-I/O sind nicht sofort killbar (OS-Limit). Hängt das NAS, hilft nur der Stall-Abbruch + NAS neu verbinden.
@@ -237,11 +237,20 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 
 ---
 
-## 7. Embedding (`web/dashboard.py`)
+## 7. Entfernte KI-Suche (seit v3.5.0)
 
-- Läuft **nach** dem Scan, nicht im Worker. `_run_post_scan_embedding` wartet, bis der GANZE Scan-Batch (inkl. Warteschlange + Mail) fertig ist (`_any_scan_active`).
-- **`_embedding_ram_ok()` misst PROZESS-RSS (< 15 GB), nicht system-weites RAM%** (seit 3.0.1). Grund: der launchd/Watchdog killt bei 20 GB Prozess-RSS — system-RAM% (80%) griff auf großen Maschinen nie rechtzeitig → Embedding trieb den Server in einen Neustart-Loop.
-- `_resume_embeddings_on_startup` holt beim Start offene Chunks nach. Große Scans erzeugen riesige Chunk-Rückstände (>70k) → mit korrekter Drossel unkritisch.
+Die lokale KI-Suche (Ollama, Embeddings, generierte Antwort) ist **vollständig ausgebaut**. Letzter Stand mit KI: Tag **`archiv/ki-suche-3.4.4`** und Branch `archiv/ki-suche` (24.09.2026). Wiederherstellen einzelner Teile: `git checkout archiv/ki-suche-3.4.4 -- <pfad>`.
+
+**Grund — an den echten Protokollen gemessen, nicht geschätzt:**
+- Suche-Protokoll 07.–24.09.2026: **67 Volltextsuchen** (36 % mit Klick, Ø 0,96 s) gegen **2 KI-Suchen**, beide aus einem Entwicklertest, beide ohne Klick (5 s bzw. 47 s). Im Büro benutzte sie in dem Zeitraum niemand.
+- MCP-Protokoll 02.–23.09.2026: von 170 Zugriffen `search` 129 (76 %), `read_document` 36 (21 %), **`semantic_search` 4 (2 %)**.
+- Kosten dagegen: Ollama-Installation bei jedem Kunden (die Weboberfläche führte dafür ein `curl … | sh` aus), automatischer Download von `llama3.2:3b` + `nomic-embed-text`, Embedding-Nachlauf nach jedem Scan, 71 MB numpy im Bundle (zwei Architekturen) und **1,00 GB Embedding-Rohdaten** in der Produktivdatenbank (652'684 × 1536 Bytes).
+
+**Was entfiel:** `scanner/embedder.py` komplett, `/search/ai(+/answer)`, `/api/ai/*`, `/api/mcp/semantic-search`, MCP-Werkzeug `semantic_search`, der Ollama-Lebenszyklus in `menubar/server_app.py`, vier Templates (`_ai_answer*.html`, `_ai_sources.html`, `_ollama_setup.html`), die Spalte `document_chunks.embedding` (Migration 029) sowie `numpy` aus `requirements.txt`.
+
+**Zwei Fallen dabei:**
+- `keyword_search_chunks()` in `embedder.py` war KI-frei, hatte aber ausser der KI-Suche nur `/api/test/recall` als Aufrufer — der Qualitätstest der Suche mass also eine Implementierung, die **kein Kundenpfad ausführte**. Er läuft jetzt über `_run_scoped_search()`, denselben Weg wie `/search` und `/api/mcp/search`. Dasselbe galt für `tests/test_search_scoring.py` (ersetzt durch `tests/test_suchtreffer.py`) und `tests/test_search_recall.py`.
+- `httpx` und `pytest` standen in `requirements.txt` und wanderten damit ins Bundle, obwohl beide reine Testabhängigkeiten sind. Jetzt in `requirements-dev.txt`; `build_server_app.sh` liest weiterhin nur `requirements.txt`.
 
 ---
 
@@ -250,7 +259,6 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 - **Scope:** `search_in` (`docs,folders,filenames`, + `plans`). `docs` → `chunks_fts` (Fallback LIKE); `filenames` → `documents_fts` mit `filename:term*`; `folders` → `_search_folders`.
 - **`_make_fts_query`:** Split auf Space UND Punkt; deutsche Komposita (Nachbarwörter zusammengeklebt vor/rück).
 - **`_search_folders` (Filter-Fix seit 3.0.4):** filtert bei Projektauswahl nach **Projektpfad** (`dp.path LIKE projektpfad/%`), NICHT nur `project_id`. Grund: durch Hash-Dedup hat ein Dokument mehrere Pfade in verschiedenen Projekten → `project_id`-Filter zeigte sonst fremde Projektordner (z. B. HB-Therm/Skyframe bei Auswahl „200 Keller"). Vorfilterung in SQL (`LIKE %wort%`), `folder.exists()` (NAS-Stat) nur für die wenigen Treffer.
-- **KI-Suche:** `/search/ai` (~1s, keyword+vector, max 12 Quellen) → `/search/ai/answer` (~30s LLM). Toggle „KI-Suche".
 - **Such-Dropdown:** „Mail" liegt in der Gruppe „Kategorien".
 
 ---
@@ -270,7 +278,7 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 - **Der Knopf im Hinweis darf NICHT auf `/search?q=…` verlinken.** `/search` liefert nur das Ergebnis-Fragment für HTMX; ein `href` dorthin zeigte im Browser die rohe, ungestaltete Teilseite. Stattdessen `sucheErsetzen()` (index.html): Suchfeld setzen und `htmx.trigger(feld, 'search')`. Die Anfrage geht über ein `data-`Attribut — `|tojson` im `onclick` zerreisst das Attribut mit seinen Anführungszeichen (der Knopf tat dann gar nichts).
 - Tests: `tests/test_suchbegriffe.py`, `tests/test_leertreffer_diagnose.py`.
 
-**Nebenbefund (v3.4.3):** der Handler `htmx:beforeRequest` prüfte `document.getElementById('ai-toggle').checked`. Diese Checkbox wurde vor längerem durch die beiden Modus-Knöpfe ersetzt, der Handler aber nie nachgezogen — seither warf **jede** Suche einen TypeError und die Ladeanimation der KI-Suche erschien nie. Jetzt über `#mode-ki-btn.classList.contains('active')`.
+**Nebenbefund (v3.4.3):** der Handler `htmx:beforeRequest` prüfte `document.getElementById('ai-toggle').checked`. Diese Checkbox wurde vor längerem durch die beiden Modus-Knöpfe ersetzt, der Handler aber nie nachgezogen — seither warf **jede** Suche einen TypeError. Mit dem Ausbau der KI-Suche (v3.5.0) ist der Handler ersatzlos entfallen; es gibt nur noch einen Suchmodus.
 
 ---
 
@@ -308,6 +316,7 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
   - **027 — Embeddings float32 → float16.** Grösster Einzelposten (produktiv ~2 GB von 6,5 GB). **KRITISCH: der Datentyp steht nirgends in der DB.** Ein doppelt konvertierter Blob wird zu Unsinn, und `embedder.py` baut aus allen Zeilen EINE Matrix → eine einzige falsche Zeile legt die semantische Suche lahm. Die Migration hält deshalb die **Quell-Blobgrösse vor der ersten Umwandlung** als eigene `_migrations`-Zeile (`027_quelllaenge_<n>`) fest — ohne diesen Merker wäre ein Abbruch zwischen „alles umgewandelt" und „in `_migrations` eingetragen" nicht von „noch nichts getan" unterscheidbar (`_apply()` legt keine Transaktion um die Migration).
     **Qualität gemessen** (22'582 Chunks, 200 Anfragen): max. Score-Abweichung 5,3e-05; wo sich die Reihenfolge dreht, beträgt der Score-Abstand der getauschten Treffer ≤ 8,6e-06 — es sind also ausschliesslich Gleichstände. Top-10 als Menge in 186/200 Fällen identisch.
   - **028 — `document_chunks.created_at` entfernt.** Wird nirgends gelesen; produktiv ~13 MB, bei 1 Mio. Dokumenten dreistellig. Braucht SQLite ≥ 3.35 (Bundle: 3.53) — schlägt es fehl, bleibt die Spalte stehen statt abzubrechen.
+  - **029 — `document_chunks.embedding` entfernt (v3.5.0).** Mit dem Ausbau der KI-Suche (Kap. 7) hat die Spalte keinen Leser mehr: produktiv 652'684 Vektoren × 1536 Bytes = **1,00 GB**. `DROP COLUMN` gibt den Platz nicht zurück, deshalb hinterlässt die Migration die Zeile `029_vacuum_offen` in `_migrations`, an der `_aufraeumen_nach_migration()` (`web/main.py`) ein einmaliges `VACUUM` festmacht und die Marke danach löscht. **027 bleibt bewusst in der Kette**, damit zwischen 3.4.0 und 3.4.4 entstandene Datenbanken dieselbe Reihenfolge sehen; ohne numpy steigt sie sauber aus (`return` + Logzeile) und wird regulär als erledigt eingetragen.
   - **Nach der Migration ist ein `VACUUM` nötig**, damit die Datei tatsächlich schrumpft — gelöschte Seiten werden sonst nur als frei markiert.
 - **`queries.upsert_path` (Fix):** hängt Pfad per `ON CONFLICT(path) DO UPDATE` auf das aktuelle Dokument um + räumt verwaiste Alt-Version auf. Vorher (`INSERT OR IGNORE`) blieb der Pfad bei geänderten Dateien auf der alten Version → neues Dokument verwaist.
 - **Beim Projekt-Löschen:** `mail_scan_config` hat kein CASCADE → separat löschen. Deletion großer Projekte im Hintergrund-Thread (`_delete_project_bg`) mit Polling.
@@ -345,7 +354,7 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 ## 12. Tests
 
 - `tests/` mit pytest. **`conftest.py`:** setzt `ARCHIVIO_DATA_DIR` (wird an spawn-Worker vererbt!) + eigene config.yaml, Datenverzeichnis GETRENNT von den gescannten Dateien. **Falle:** ohne das schreiben spawn-Worker in die echte Repo-`archivio.db` (Monkeypatch überquert Prozessgrenze nicht) → grüne, aber wertlose Tests.
-- `test_walker.py`, `test_mail_delete.py`, `test_hasher.py` grün. `test_search_recall.py` braucht Ollama + echte DB (`ORDER BY RANDOM()`) → flaky/skip, ist KEINE Regression.
+- `test_walker.py`, `test_mail_delete.py`, `test_hasher.py` grün. `test_search_recall.py` braucht eine echte DB (`ARCHIVIO_DB=<pfad>`, `ORDER BY RANDOM()`) → läuft nicht in der normalen Suite, ist KEINE Regression. Auf der Dev-DB zuletzt 9/10 Treffer (90 %); der eine Fehltreffer war ein italienischsprachiger Abschnitt.
 - Stand v3.4.0: **442 Tests** grün (`pytest tests/ -q --ignore=tests/test_search_recall.py`).
 - **Dev-`.venv` läuft seit v3.4.0 auf Python 3.14.5 mit SQLite 3.53.1 — derselben SQLite-Version wie das ausgelieferte Bundle** (vorher 3.9.2/SQLite 3.34). Nötig geworden mit den FTS5-Änderungen und `ALTER TABLE … DROP COLUMN` (braucht ≥ 3.35): vorher hätte lokal grün sein können, was beim Kunden bricht. Neu aufsetzen: `/opt/homebrew/bin/python3 -m venv .venv && .venv/bin/pip install -r requirements.txt`.
 - **`requests` und `zeroconf` fehlten in `requirements.txt`** (standen nur in den `EXTRAS` des Build-Skripts) → eine frische Dev-venv konnte die Menubar-/Discovery-Tests nicht sammeln. Seit v3.4.0 dort eingetragen.
@@ -362,7 +371,7 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 ## 14. Offene Punkte / Beobachten
 
-- **RAM-Wachstum des Servers über Laufzeit** (schleichend, evtl. Embedding-Verarbeitung). Mit Watchdog+launchd unkritisch, aber Ursache nie final geprofiled. Könnte man mit tracemalloc auf dem iMac untersuchen.
+- **RAM-Wachstum des Servers über Laufzeit** (schleichend). Mit Watchdog+launchd unkritisch, aber Ursache nie final geprofiled. Könnte man mit tracemalloc auf dem iMac untersuchen.
 - **Adresse `archivio:8000`** statt `windows.local:8000`: geht über (a) Bonjour LocalHostname `archivio` → `archivio.local:8000`, oder (b) Router-DNS + feste IP → `archivio:8000`. Kein App-Change nötig; ggf. LaunchAgent, der `scutil --set LocalHostName archivio` setzt.
 - **Alte Müll-Dokumente** (Thumbs.db etc. aus früheren Scans) bleiben in der DB, bis manuell bereinigt.
 - **Nacht-Scan (Scheduler 22:00, `web/main.py:_scheduler_loop`)** postet `/api/scan/all`. Bei sehr großen Beständen + Neustarts konvergiert es über mehrere Nächte (stale-first).
@@ -389,8 +398,8 @@ Die lokal gelesenen **Mail-Zugangsdaten (bauchat/strut, `config.yaml`) dürfen N
 
 Claude Desktop kann Archivio als lokales **MCP-Tool** nutzen (vollständig lokal, kein Cloud-Dienst). Der MCP-Server ist **in den Helper integriert** (nicht separat verteilt) und läuft mit dessen eingebettetem Python.
 
-- **Server-Endpunkte (`web/api.py`, alle read-only JSON):** `GET /api/mcp/search` (nutzt `_build_filters`+`_search` aus `web/main.py`, entfernt `<mark>`-Tags), `GET /api/mcp/semantic-search` (nutzt `_ai_vector_search`, liefert Chunk-`content`; ohne Ollama sauberes `ollama_missing`), `GET /api/mcp/document?document_id=` (Volltext + bei Mails Absender/Betreff/… für `read_document`).
-- **MCP-Server (`helper/archivio_mcp.py`, stdio, FastMCP):** 5 Tools — `search`, `semantic_search`, `read_document` (Text in den Chat laden → umschreiben/zusammenfassen), `open_file` + `reveal_file` (extern öffnen / im Finder zeigen via Helper-HTTP `localhost:44380`). Suchergebnisse zeigen `[ID nnn]` → an `read_document` übergeben.
+- **Server-Endpunkte (`web/api.py`, alle read-only JSON):** `GET /api/mcp/search` (nutzt `_build_filters`+`_search` aus `web/main.py`, entfernt `<mark>`-Tags), `GET /api/mcp/document?document_id=` (Volltext + bei Mails Absender/Betreff/… für `read_document`).
+- **MCP-Server (`helper/archivio_mcp.py`, stdio, FastMCP):** `search`, `read_document` (Text in den Chat laden → umschreiben/zusammenfassen), `open_file` + `reveal_file` (extern öffnen / im Finder zeigen via Helper-HTTP `localhost:44380`). Suchergebnisse zeigen `[ID nnn]` → an `read_document` übergeben.
 - **Server-URL-Auflösung:** `_server_url()` fragt ZUERST den laufenden Helper (`GET localhost:44380/config` → im Menü gesetzte URL, z.B. `windows.local:8000`), dann eigene `config.json`, dann `localhost:8000`. So kein falscher Server durch veraltete gebündelte config.
 - **Auto-Registrierung:** `_ensure_mcp_registered()` (in `archivio_helper.py`, beim Start) trägt idempotent einen `archivio`-Eintrag in `~/Library/Application Support/Claude/claude_desktop_config.json` ein (`command`=`sys.executable`=eingebettetes Python, `args`=archivio_mcp.py), ohne andere `mcpServers` anzutasten. Danach Notification „Claude Desktop neu starten".
 - **Helper-HTTP `/config`-Endpoint** neu; `_cors_headers(code, body=None)` kann jetzt JSON-Body senden. **404-Fix:** `/open`+`/reveal` senden die HTTP-Antwort VOR `rumps.notification` (die aus dem HTTP-Thread eine Exception werfen kann → vorher leere Antwort statt sauberem 404).

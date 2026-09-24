@@ -1,5 +1,5 @@
-"""Tests für das Suche-Protokoll (scanner/search_log.py) -- jede normale Suche und
-KI-Suche muss eine Zeile in search_log hinterlassen, ein Klick auf ein Ergebnis
+"""Tests für das Suche-Protokoll (scanner/search_log.py) -- jede Suche muss eine
+Zeile in search_log hinterlassen, ein Klick auf ein Ergebnis
 muss den clicks-Zähler dieser Zeile erhöhen. Bewusst OHNE Bezug zu Person/Gerät."""
 from db import queries
 

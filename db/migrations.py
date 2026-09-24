@@ -42,6 +42,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "026_documents_fts_ohne_content", _m026)
     _apply(conn, "027_embeddings_float16", _m027)
     _apply(conn, "028_chunks_ohne_created_at", _m028)
+    _apply(conn, "029_chunks_ohne_embedding", _m029)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -565,7 +566,7 @@ def _m022(conn: sqlite3.Connection):
 
 
 def _m023(conn: sqlite3.Connection):
-    """Roher Query-String der ursprünglichen /search- bzw. /search/ai-Anfrage --
+    """Roher Query-String der ursprünglichen /search-Anfrage --
     die "Resultate anzeigen"-Schaltfläche im Suche-Protokoll (Systemstatus) muss
     Suchfrage UND alle aktiven Filter (Projekt, Typ, Zeitraum, Umfang, Tag, ...)
     exakt reproduzieren können. Der bereits vorhandene 'filters'-Text ist nur eine
@@ -764,3 +765,29 @@ def _m028(conn: sqlite3.Connection):
         if "no such column" in str(exc).lower():
             return
         log.warning("created_at konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
+
+
+def _m029(conn: sqlite3.Connection):
+    """document_chunks.embedding entfernen -- die lokale KI-Suche ist ab Server 3.5.0
+    ausgebaut, die Spalte hat keinen Leser mehr.
+
+    Auf der Produktivdatenbank sind das 652'684 Vektoren zu je 1536 Bytes, also rund
+    1,0 GB. DROP COLUMN gibt den Platz nicht zurueck -- die Seiten bleiben als freie
+    Seiten in der Datei liegen. Deshalb hinterlaesst diese Migration eine Marke, an der
+    die Startvorbereitung ein einmaliges VACUUM festmacht (web/main.py::_vacuum_faellig).
+
+    Der letzte Stand mit KI-Suche liegt auf dem Tag archiv/ki-suche-3.4.4.
+
+    DROP COLUMN braucht SQLite >= 3.35 (Bundle: 3.53). Schlaegt es fehl, bleibt die
+    Spalte stehen -- der Rest funktioniert dann trotzdem, nur ohne Platzgewinn.
+    """
+    spalten = [r[1] for r in conn.execute("PRAGMA table_info(document_chunks)")]
+    if "embedding" not in spalten:
+        return
+    try:
+        conn.execute("ALTER TABLE document_chunks DROP COLUMN embedding")
+        conn.execute("INSERT OR IGNORE INTO _migrations (id) VALUES ('029_vacuum_offen')")
+        conn.commit()
+        log.info("document_chunks.embedding entfernt -- VACUUM beim naechsten Start")
+    except Exception as exc:
+        log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
