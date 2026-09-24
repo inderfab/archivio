@@ -4,6 +4,52 @@
 {% elif not results and not folder_results %}
   <div class="empty-state">
     <p>Keine Dokumente gefunden für <strong>„{{ query }}"</strong>.</p>
+
+    {# Mehrere Wörter werden mit UND verknüpft — ein einziger Begriff, den es nirgends
+       gibt, lässt die ganze Suche ins Leere laufen. Ohne diesen Hinweis sieht das aus
+       wie „das Dokument existiert nicht", dabei ist meist nur ein Wort vertippt.
+       Die engere Suche wird bewusst NICHT automatisch ausgeführt: eine Trefferliste
+       für eine andere als die gestellte Frage wäre irreführend. #}
+    {% if diagnose %}
+    <div class="suchhinweis">
+      <p style="margin:0 0 6px;">
+        {% if diagnose.art == "unbekannt" %}
+          {% if diagnose.fehlend|length == 1 %}
+            <strong>„{{ diagnose.fehlend[0] }}"</strong> kommt in keinem Dokument vor.
+          {% else %}
+            Diese Begriffe kommen in keinem Dokument vor:
+            {% for w in diagnose.fehlend %}<strong>„{{ w }}"</strong>{% if not loop.last %}, {% endif %}{% endfor %}.
+          {% endif %}
+          Vielleicht ein Tippfehler?
+        {% else %}
+          Jeder Begriff kommt vor, aber in keinem Dokument alle zusammen.
+          Am stärksten schränkt <strong>„{{ diagnose.weglassen[0] }}"</strong> ein.
+        {% endif %}
+      </p>
+      {% if diagnose.rest_treffer %}
+        {# Bewusst ein Knopf, kein Link: /search liefert nur das Ergebnis-Fragment für
+           HTMX. Ein href dorthin lud die rohe, unformatierte Teilseite im Browser.
+           So bleibt man auf der Suchseite, das Suchfeld wird mitgeführt. #}
+        {# Anfrage über ein data-Attribut statt direkt im onclick: tojson liefert
+           doppelte Anführungszeichen, die das Attribut zerreissen — der Knopf tat
+           dann gar nichts und die Konsole meldete einen Syntaxfehler. #}
+        <button type="button" class="btn btn-primary" style="font-size:13px; padding:6px 14px;"
+                data-anfrage="{{ diagnose.rest_query }}"
+                onclick="sucheErsetzen(this.dataset.anfrage)">
+          {% if diagnose.art == "unbekannt" and diagnose.fehlend|length > 1 %}
+            Ohne diese Begriffe suchen
+          {% else %}
+            Ohne diesen Begriff suchen
+          {% endif %} — {{ diagnose.rest_treffer }} Treffer
+        </button>
+      {% elif diagnose.rest %}
+        <p style="margin:0; font-size:13px; color:var(--text-3);">
+          Auch ohne {% if diagnose.fehlend|length == 1 %}diesen Begriff{% else %}diese Begriffe{% endif %}
+          findet sich nichts.
+        </p>
+      {% endif %}
+    </div>
+    {% endif %}
   </div>
 
 {% else %}

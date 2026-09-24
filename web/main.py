@@ -594,6 +594,7 @@ async def search(
     results, error, total = [], None, 0
     folder_results = []
     search_log_id = None
+    diagnose = None          # nur gesetzt, wenn eine Suche lief und nichts fand
     has_filters = any([from_addr, to_addr, subject_filter, date_from, date_to, filesize, duplicates_only, tag_id, scope, search_in])
     if q.strip() or has_filters:
         # run_in_executor: _run_scoped_search ist eine blockierende SQLite-Anfrage, die bei
@@ -617,13 +618,19 @@ async def search(
                                                      in_scope)
                 folders = _search_folders(conn, q.strip(), project_id) if search_folders and q.strip() else []
                 _prefer_project_path(conn, results, project_id)
-                return results, error, folders
+                # Nur wenn nichts gefunden wurde: nachsehen, ob ein einzelner Begriff
+                # schuld ist. Läuft in diesem Thread mit, nicht im Event-Loop.
+                diagnose = None
+                if not results and not folders and not error:
+                    diagnose = _leertreffer_diagnose(conn, q.strip(), filters_str,
+                                                     filter_params, in_scope)
+                return results, error, folders, diagnose
             finally:
                 conn.close()
 
         loop = asyncio.get_event_loop()
         t0 = time.perf_counter()
-        results, error, folder_results = await loop.run_in_executor(None, _do_search)
+        results, error, folder_results, diagnose = await loop.run_in_executor(None, _do_search)
         duration_ms = int((time.perf_counter() - t0) * 1000)
         total = len(results)
 
@@ -649,6 +656,7 @@ async def search(
         "error":          error,
         "folder_results": folder_results,
         "search_log_id":  search_log_id,
+        "diagnose":       diagnose,
     })
 
 
@@ -1762,7 +1770,7 @@ def _search_filtered(conn, filters: str, filter_params: list):
             results.append(d)
         return results, None
     except Exception as exc:
-        return [], str(exc)
+        return [], _suchfehler(exc, q)
 
 
 def _search_fts(conn, q: str, filters: str, filter_params: list):
@@ -1806,11 +1814,99 @@ def _search_fts(conn, q: str, filters: str, filter_params: list):
                 break
         return results, None
     except Exception as exc:
-        return [], str(exc)
+        return [], _suchfehler(exc, q)
+
+
+def _wort_kommt_vor(conn, wort: str, filters: str, filter_params: list) -> bool:
+    """Gibt es überhaupt EIN Dokument mit diesem Wort (unter den aktiven Filtern)?
+
+    Bewusst nur ein Existenztest mit LIMIT 1 statt einer vollständigen Suche: bei
+    einem Wort wie „Eingabe" gäbe es tausende Treffer, gebraucht wird aber nur die
+    Antwort ja/nein. Geprüft wird beides -- Volltext und Dateiname --, sonst würde ein
+    Wort, das nur in Dateinamen vorkommt, fälschlich als unbekannt gemeldet."""
+    volltext = f"""
+        SELECT 1 FROM chunks_fts
+        JOIN  document_chunks dc_chunk ON chunks_fts.rowid = dc_chunk.id
+        JOIN  documents       d        ON d.id = dc_chunk.document_id
+        LEFT JOIN projects       p  ON p.id = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN mails          m  ON m.document_id = d.id
+        WHERE chunks_fts MATCH ? {filters} LIMIT 1
+    """
+    dateiname = f"""
+        SELECT 1 FROM documents_fts
+        JOIN  documents       d  ON d.id = documents_fts.rowid
+        LEFT JOIN projects       p  ON p.id = d.project_id
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        LEFT JOIN mails          m  ON m.document_id = d.id
+        WHERE documents_fts MATCH ? {filters} LIMIT 1
+    """
+    for sql, ausdruck in ((volltext, f"{wort}*"), (dateiname, f"filename:{wort}*")):
+        try:
+            if conn.execute(sql, [ausdruck] + filter_params).fetchone():
+                return True
+        except Exception as exc:
+            logging.getLogger(__name__).warning("Existenzprüfung für %r: %s", wort, exc)
+    return False
+
+
+def _leertreffer_diagnose(conn, q: str, filters: str, filter_params: list,
+                          in_scope) -> dict | None:
+    """Erklärt, warum eine Mehrwort-Suche nichts gefunden hat.
+
+    Mehrere Wörter werden mit UND verknüpft -- ein einziger Begriff, den es nirgends
+    gibt, lässt die ganze Suche ins Leere laufen. Für den Nutzer sieht das aus wie
+    „das Dokument existiert nicht", dabei ist meist nur ein Wort vertippt. Real
+    beobachtet: Suche nach „260902 Afo Eingabe", während die Datei „260209 Afo
+    Eingabe…" heisst -- zwei vertauschte Ziffern, null Treffer, kein Hinweis.
+
+    Läuft ausschliesslich, wenn ohnehin nichts gefunden wurde; erfolgreiche Suchen
+    kostet das nichts. Gibt None zurück, wenn jedes Wort für sich vorkommt -- dann
+    liegt es nicht an einem einzelnen Begriff.
+    """
+    woerter = [w for w in _TRENNZEICHEN.split(q)
+               if w and w.lower() not in _STOPWORDS]
+    if len(woerter) < 2:
+        return None
+
+    fehlend = [w for w in woerter if not _wort_kommt_vor(conn, w, filters, filter_params)]
+
+    if fehlend:
+        rest = [w for w in woerter if w not in fehlend]
+        if not rest:
+            return {"art": "unbekannt", "fehlend": fehlend, "rest": [], "rest_treffer": 0}
+        rest_query = " ".join(rest)
+        treffer, _ = _run_scoped_search(conn, rest_query, filters, filter_params, in_scope)
+        return {"art": "unbekannt", "fehlend": fehlend, "rest": rest,
+                "rest_query": rest_query, "rest_treffer": len(treffer)}
+
+    # Jedes Wort kommt vor, nur nie im selben Dokument. Dann hilft die Frage: welcher
+    # eine Begriff engt so stark ein, dass nichts übrig bleibt? Beispiel aus der
+    # Praxis: "treppenhaus hochhaus lift plan keller rietbachstrasse" -- ohne den
+    # Strassennamen gibt es Treffer.
+    #
+    # Dafür wird pro Wort einmal ohne dieses Wort gesucht. Das sind bis zu sechs
+    # zusätzliche Abfragen, aber nur auf dem Null-Treffer-Pfad; erfolgreiche Suchen
+    # kostet es nichts. Ab sieben Wörtern lohnt der Aufwand nicht mehr -- dann ist
+    # die Anfrage ohnehin eher ein Satz als eine Suche.
+    if len(woerter) > 6:
+        return None
+
+    bester = None
+    for w in woerter:
+        rest = [x for x in woerter if x != w]
+        rest_query = " ".join(rest)
+        treffer, _ = _run_scoped_search(conn, rest_query, filters, filter_params, in_scope)
+        if treffer and (bester is None or len(treffer) > bester["rest_treffer"]):
+            bester = {"art": "zu_eng", "weglassen": [w], "rest": rest,
+                      "rest_query": rest_query, "rest_treffer": len(treffer)}
+    return bester
 
 
 def _search_like(conn, q: str, filters: str, filter_params: list):
-    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in q.split() if w]
+    # Gleiche Zerlegung wie die FTS-Suche: sonst sucht der LIKE-Zweig nach "u-wert"
+    # als Ganzes, während im Index "u" und "wert" stehen.
+    words = [w for w in _TRENNZEICHEN.split(q) if w]
     if not words:
         return [], None
 
@@ -1855,50 +1951,53 @@ def _search_like(conn, q: str, filters: str, filter_params: list):
             results.append(d)
         return results, None
     except Exception as exc:
-        return [], str(exc)
+        return [], _suchfehler(exc, q)
 
 
 def _excerpt(text: str, query: str, window: int = 220) -> str:
     if not text:
         return ""
-    words = [re.sub(r'["\(\)\*\:\^]', "", w) for w in query.split()]
-    words = [w for w in words if w]
+    # Gleiche Zerlegung wie die Suche selbst, sonst wird etwas anderes hervorgehoben
+    # als gefunden wurde -- bei "u wert" markierte die alte Fassung das erste
+    # beliebige "u" im Text, also meist gar nicht die Fundstelle.
+    words = [w for w in _TRENNZEICHEN.split(query) if w]
     if not words:
         return text[:window] + ("…" if len(text) > window else "")
 
-    text_lower = text.lower()
+    # Zum Hervorheben das ganze getroffene Wort markieren, nicht nur den Wortanfang.
+    muster = [
+        re.compile(_wortmuster(w).pattern + ("" if len(w) < _MIN_PRAEFIX_LAENGE else r"[^\W_]*"),
+                   re.IGNORECASE | re.UNICODE)
+        for w in words
+    ]
     pos = len(text)
-    for w in words:
-        idx = text_lower.find(w.lower())
-        if idx != -1:
-            pos = min(pos, idx)
+    for m in muster:
+        treffer = m.search(text)
+        if treffer:
+            pos = min(pos, treffer.start())
 
     start   = max(0, pos - 60)
     end     = min(len(text), start + window)
     snippet = text[start:end]
 
-    for w in words:
-        snippet = re.sub(
-            f"({re.escape(w)})", r"<mark>\1</mark>",
-            snippet, flags=re.IGNORECASE,
-        )
+    for m in muster:
+        snippet = m.sub(lambda t: f"<mark>{t.group(0)}</mark>", snippet)
 
     return ("…" if start > 0 else "") + snippet + ("…" if end < len(text) else "")
 
 
 def _search_filename(conn, q: str, filters: str, filter_params: list) -> list[dict]:
-    """Sucht per documents_fts nach Dateinamen-Treffern — nur filename-Spalte, nicht content."""
-    # Column-Filter: nur filename-Spalte durchsuchen (documents_fts hat auch content)
-    words = []
-    for w in q.split():
-        w = re.sub(r'["\(\)\*\:\^]', "", w)
-        for part in w.split('.'):
-            part = part.strip()
-            if part and part.lower() not in _STOPWORDS:
-                words.append(part)
+    """Sucht per documents_fts nach Dateinamen-Treffern.
+
+    Seit Migration 026 führt documents_fts nur noch die filename-Spalte; der
+    Spaltenfilter bleibt trotzdem stehen, er kostet nichts und macht die Absicht
+    lesbar. Die Wortzerlegung ist dieselbe wie in _make_fts_query -- inklusive der
+    Behandlung von Bindestrichen, an denen FTS5 sonst abbricht."""
+    words = [w for w in _TRENNZEICHEN.split(q)
+             if w and w.lower() not in _STOPWORDS]
     if not words:
         return []
-    fts_q = " AND ".join(f"filename:{w}*" for w in words)
+    fts_q = " AND ".join(f"filename:{_fts_wort(w)}" for w in words)
     sql = f"""
         SELECT
             d.id, d.filename, d.extension, d.filesize, d.modified_at,
@@ -1947,9 +2046,16 @@ def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
     nur noch für die wenigen namentlich passenden Treffer aufgerufen, nicht für
     jeden Elternordner jedes Pfades.
     """
-    words = [w.lower() for w in q.split() if len(w) > 1]
+    # Dieselbe Zerlegung wie die Dokumentsuche: sonst verhalten sich "u-wert" und
+    # "u wert" unterschiedlich -- ersteres suchte den Teilstring "u-wert", letzteres
+    # warf das "u" weg und suchte nur "%wert%", was "Bewertung" und
+    # "Schalldaemmwerte" mitbrachte.
+    words = [w.lower() for w in _TRENNZEICHEN.split(q) if w]
     if not words:
         return []
+    # Treffer nur an Wortgrenzen. Kurze Wörter müssen ein ganzes Wort sein -- "u"
+    # soll das U in "U-Wert" treffen, nicht das u in "und".
+    muster = [_wortmuster(w) for w in words]
     try:
         # Grobfilter in SQL: nur Pfade die ALLE Suchwörter irgendwo enthalten —
         # notwendige Bedingung dafür, dass ein Ordnername alle Wörter enthält.
@@ -1991,7 +2097,7 @@ def _search_folders(conn, q: str, project_id: str = "") -> list[dict]:
                 if folder_str in seen_dirs:
                     continue
                 seen_dirs.add(folder_str)
-                if all(w in folder.name.lower() for w in words) and folder.exists():
+                if all(m.search(folder.name) for m in muster) and folder.exists():
                     results.append({
                         "path":         folder_str,
                         "name":         folder.name,
@@ -2016,20 +2122,74 @@ _STOPWORDS = {
     "sich", "es", "er", "sie", "wir", "ihr", "du", "ich",
 }
 
+# Alles, was kein Buchstabe und keine Ziffer ist, trennt Wörter. Bewusst als
+# Positivliste statt als Liste verbotener Zeichen: der frühere Ansatz zählte einzelne
+# Sonderzeichen auf und übersah dabei den Bindestrich -- FTS5 liest "u-wert" als
+# Spaltenfilter und die ganze Suche brach mit "no such column: wert" ab. Jedes andere
+# Satzzeichen hätte dasselbe Risiko.
+#
+# Die Trennung entspricht genau dem, was der Indexer macht: der unicode61-Tokenizer
+# behandelt alles Nicht-Alphanumerische als Worttrenner. "U-Wert" steht im Index also
+# ohnehin als zwei Tokens -- "u wert" findet es, "u-wert" als ein Token niemals.
+# Unterstriche gehören dazu ("06_Felix" ist im Index "06" und "felix").
+_TRENNZEICHEN = re.compile(r"[\W_]+", re.UNICODE)
+
+
+def _suchfehler(exc: Exception, q: str) -> str:
+    """Übersetzt einen Datenbankfehler in etwas, das man einem Nutzer zeigen kann.
+
+    Vorher landete die rohe SQLite-Meldung in der Oberfläche -- bei einer Suche nach
+    "u-wert" stand dort wörtlich »Fehler: no such column: wert«. Das ist für ein
+    Architekturbüro nicht nur unverständlich, es lenkt auch vom eigentlichen Problem
+    ab. Der genaue Wortlaut geht ins Log, wo er hingehört."""
+    logging.getLogger(__name__).warning("Suche fehlgeschlagen (%r): %s", q, exc)
+    return ("Die Suche konnte nicht ausgeführt werden. Bitte die Eingabe anders "
+            "formulieren — Sonderzeichen können weggelassen werden.")
+
+
+# Ab wie vielen Zeichen ein Suchwort als Wortanfang (mit *) gesucht wird. Kürzere
+# Wörter werden exakt gesucht: "u*" trifft jedes Wort, das mit u beginnt -- und, uns,
+# unten -- und macht eine Suche nach "u wert" (also U-Wert) praktisch wertlos. Als
+# ganzes Token gesucht trifft "u" nur ein alleinstehendes U, genau wie in "U-Wert",
+# das der Indexer ohnehin als "u" + "wert" ablegt.
+_MIN_PRAEFIX_LAENGE = 3
+
+
+def _fts_wort(w: str) -> str:
+    return f"{w}*" if len(w) >= _MIN_PRAEFIX_LAENGE else w
+
+
+def _wortmuster(wort: str, ganzes_wort: bool | None = None) -> "re.Pattern":
+    """Sucht ein Wort an einer Wortgrenze -- mit derselben Vorstellung von „Wortgrenze"
+    wie der Indexer.
+
+    Warum nicht einfach \\b: für reguläre Ausdrücke ist der Unterstrich ein Wortzeichen,
+    für den unicode61-Tokenizer dagegen ein Trenner. In einem Ordner „250813_Attika"
+    gäbe es vor „Attika" also kein \\b, obwohl im Index „250813" und „attika" getrennt
+    stehen. Deshalb die Grenze selbst definieren: alles ausser Buchstaben und Ziffern
+    trennt.
+
+    Kurze Wörter werden als ganzes Wort verlangt (siehe _MIN_PRAEFIX_LAENGE), längere
+    dürfen ein Wortanfang sein -- „wert" trifft „Werte", aber nicht „Bewertung"."""
+    if ganzes_wort is None:
+        ganzes_wort = len(wort) < _MIN_PRAEFIX_LAENGE
+    rechts = r"(?![^\W_])" if ganzes_wort else ""
+    return re.compile(r"(?<![^\W_])" + re.escape(wort) + rechts,
+                      re.IGNORECASE | re.UNICODE)
+
+
 def _make_fts_query(q: str) -> str:
     words = []
-    for w in q.split():
-        w = re.sub(r'["\(\)\*\:\^]', "", w)
-        for part in w.split('.'):          # Punkt ist kein gültiges FTS5-Query-Zeichen
-            part = part.strip()
-            if part and part.lower() not in _STOPWORDS:
-                words.append(part)
+    for w in _TRENNZEICHEN.split(q):
+        w = w.strip()
+        if w and w.lower() not in _STOPWORDS:
+            words.append(w)
     if not words:
         return '""'
     if len(words) == 1:
-        return f"{words[0]}*"
+        return _fts_wort(words[0])
 
-    and_query = " AND ".join(f"{w}*" for w in words)
+    and_query = " AND ".join(_fts_wort(w) for w in words)
 
     # Deutsche Komposita: "fenster liste" und "liste fenster" finden beide "Fensterliste".
     # Benachbarte Wortpaare in beiden Reihenfolgen zusammenkleben + vollständige Konkatenation.

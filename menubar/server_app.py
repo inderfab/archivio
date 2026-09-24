@@ -262,6 +262,7 @@ def _start_server():
     with _server_lock:
         if _server_proc and _server_proc.poll() is None:
             return
+        bridge.startseite_aus(log)   # gibt Port 8000 frei, bevor uvicorn ihn braucht
         if not _kill_port_8000():
             # Fremder, gesunder Server auf Port 8000 -- den uebernehmen wir, statt
             # einen eigenen zu starten. Ohne diesen Zweig wuerde das folgende Popen
@@ -355,6 +356,7 @@ def _restart_server(resume_projects: bool = False, resume_mail: bool = False,
     Postfächer gescannt hat).
     """
     _stop_server()
+    bridge.startseite_an(8000, log)   # auch beim Neustart nicht ins Leere laufen lassen
     time.sleep(5)
     _start_server()
     if not _wait_for_server():
@@ -551,6 +553,7 @@ class ArchivioServer(rumps.App):
         threading.Thread(target=self._boot, daemon=True).start()
 
     def _boot(self):
+        bridge.startseite_an(8000, log)
         _start_server()
         threading.Thread(target=_ensure_ollama_models, daemon=True).start()
         threading.Thread(target=_server_memory_watchdog, daemon=True).start()

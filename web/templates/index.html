@@ -667,7 +667,12 @@ function _clearAiLoading() {
 
 document.body.addEventListener('htmx:beforeRequest', function(evt) {
   if (evt.detail.elt.id !== 'q') return;
-  if (!document.getElementById('ai-toggle').checked) return;
+  // Früher hing das an einer Checkbox #ai-toggle. Die wurde durch die beiden
+  // Modus-Knöpfe ersetzt, dieser Handler aber nie nachgezogen: seither warf JEDE
+  // Suche einen TypeError (getElementById(...) war null) und die Ladeanimation
+  // der KI-Suche erschien nie.
+  var kiBtn = document.getElementById('mode-ki-btn');
+  if (!kiBtn || !kiBtn.classList.contains('active')) return;
   _showAiLoading();
 });
 document.body.addEventListener('htmx:afterRequest', function(evt) {
@@ -846,6 +851,17 @@ function toggleDocSelect(id, evt) {
   var cb = row ? row.querySelector('.result-select input') : null;
   if (cb) cb.checked = docSelection.has(id);
   updateDocSelectionBar();
+}
+
+// Übernimmt eine engere Suchanfrage aus dem Null-Treffer-Hinweis, ohne die Seite
+// zu verlassen: /search liefert nur das Ergebnis-Fragment für HTMX, ein direkter
+// Aufruf im Browser zeigte die rohe Teilseite ohne Gestaltung.
+function sucheErsetzen(neueAnfrage) {
+  var feld = document.getElementById('q');
+  if (!feld) return;
+  feld.value = neueAnfrage;
+  feld.focus();
+  htmx.trigger(feld, 'search');
 }
 
 function selectAllVisibleDocs() {

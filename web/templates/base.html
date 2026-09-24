@@ -803,6 +803,16 @@
     .preview-label { color: var(--text-3); font-size: 12px; }
     .preview-text { font-size: 13px; color: var(--text-2); line-height: 1.6; }
 
+    /* Hinweis bei null Treffern: nennt den Begriff, an dem die UND-Verknüpfung
+       gescheitert ist. Bewusst ruhig gestaltet — es ist ein Angebot, kein Fehler. */
+    .suchhinweis {
+      display: inline-block; text-align: left; margin-top: 14px;
+      padding: 12px 16px; font-size: 13px; line-height: 1.5;
+      border: 1px solid var(--border); border-left: 3px solid #b45309;
+      border-radius: var(--radius); background: var(--bg-2); color: var(--text-2);
+    }
+    .suchhinweis strong { color: var(--text); }
+
     /* ── Error ── */
     .search-error {
       font-size: 13px;

@@ -753,6 +753,87 @@ def resolve_discovery(found: list[tuple[str, int]]) -> tuple[str, str | None]:
 _single_instance_handles: dict[str, object] = {}
 
 
+def _melde(log, text, *args):
+    if log:
+        log.info(text, *args)
+
+
+# ── Startseite vor dem Serverstart ────────────────────────────────────────────
+# Zwischen "App gestartet" und "uvicorn nimmt Verbindungen an" liegen nach einer
+# Neuinstallation bis zu einer Minute (Datenverzeichnis anlegen, Python-Bundle,
+# schwere Importe). Wer in dieser Zeit den Browser öffnet, sieht nur "Verbindung
+# fehlgeschlagen" und hält Archivio für kaputt. Deshalb belegt ein winziger
+# HTTP-Dienst den diesen Port vorübergehend und zeigt eine Meldung. Er wird beendet,
+# unmittelbar bevor uvicorn den Port braucht.
+
+_startseite = None
+_startseite_lock = threading.Lock()
+
+_STARTSEITE_HTML = b"""<!doctype html>
+<html lang="de"><head><meta charset="utf-8"><title>Archivio startet</title>
+<meta http-equiv="refresh" content="3">
+<style>body{font-family:-apple-system,BlinkMacSystemFont,"Helvetica Neue",sans-serif;
+background:#fafafa;color:#111;display:flex;align-items:center;justify-content:center;
+height:100vh;margin:0}.box{max-width:430px;text-align:center;padding:0 24px}
+h1{font-size:20px;font-weight:700;margin:18px 0 10px}
+p{font-size:14px;line-height:1.6;color:#4b5563;margin:0 0 10px}
+.kreis{width:34px;height:34px;margin:0 auto;border:3px solid #e5e7eb;border-top-color:#111;
+border-radius:50%;animation:dreh 1s linear infinite}@keyframes dreh{to{transform:rotate(360deg)}}
+</style></head><body><div class="box"><div class="kreis"></div>
+<h1>Archivio startet</h1>
+<p>Der Server wird gerade hochgefahren. Nach einer Neuinstallation oder einem Update
+kann das eine Minute dauern.</p>
+<p>Bitte das Fenster offen lassen &mdash; es wechselt von selbst, sobald Archivio bereit ist.</p>
+</div></body></html>"""
+
+
+def startseite_an(port: int, log=None):
+    """Belegt diesen Port mit der Startmeldung, solange uvicorn ihn nicht braucht."""
+    global _startseite
+    import http.server
+
+    class _Handler(http.server.BaseHTTPRequestHandler):
+        def do_GET(self):
+            self.send_response(503)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(_STARTSEITE_HTML)))
+            self.end_headers()
+            self.wfile.write(_STARTSEITE_HTML)
+
+        do_POST = do_GET
+
+        def log_message(self, *a):
+            pass
+
+    with _startseite_lock:
+        if _startseite is not None:
+            return
+        try:
+            srv = http.server.ThreadingHTTPServer(("0.0.0.0", port), _Handler)
+        except OSError as e:
+            _melde(log, "Startseite nicht moeglich, diesen Port belegt: %s", e)
+            return
+        _startseite = srv
+        threading.Thread(target=srv.serve_forever, daemon=True).start()
+        _melde(log, "Startseite auf diesen Port aktiv")
+
+
+def startseite_aus(log=None):
+    """Gibt diesen Port frei -- muss VOR dem uvicorn-Start passieren."""
+    global _startseite
+    with _startseite_lock:
+        srv, _startseite = _startseite, None
+    if srv is None:
+        return
+    try:
+        srv.shutdown()
+        srv.server_close()
+        _melde(log, "Startseite beendet, diesen Port frei")
+    except Exception as e:
+        _melde(log, "Startseite liess sich nicht beenden: %s", e)
+
+
+
 def acquire_single_instance_lock(name: str, log=None) -> bool:
     """Stellt sicher, dass von einer App nur EINE Instanz laeuft. False = laeuft schon.
 

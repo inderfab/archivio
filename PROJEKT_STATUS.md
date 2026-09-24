@@ -200,6 +200,17 @@ läuft** sauber neu.
 
 ---
 
+### Startseite vor dem Serverstart (seit v3.4.3)
+
+`bridge.startseite_an(8000, log)` / `startseite_aus(log)` — ein winziger HTTP-Dienst belegt Port 8000, **bevor** uvicorn läuft, und antwortet überall mit „Archivio startet" (HTTP 503, Selbstaktualisierung alle 3 s).
+
+- **Warum zusätzlich zur Warteseite oben:** die deckt nur die Migrationen *innerhalb* der App ab. Zwischen „Menüleisten-App gestartet" und „uvicorn nimmt Verbindungen an" liegen nach einer Neuinstallation bis zu einer Minute (Datenverzeichnis, Python-Bundle, schwere Importe) — dort gab es gar keine Antwort.
+- Eingeschaltet in `_boot()` und in `_restart_server()` (nach `_stop_server()`); ausgeschaltet als **erste** Anweisung in `_start_server()`, vor `_kill_port_8000()`. Reihenfolge ist zwingend: sonst hält die Startseite den Port, den uvicorn gleich braucht.
+- Liegt in `shared/menubar_bridge.py`, damit sie testbar ist (`tests/test_startseite.py`) — `menubar/server_app.py` lässt sich wegen rumps nicht importieren.
+- Ist der Port schon belegt, wird still übersprungen statt den App-Start zu verhindern.
+
+---
+
 ### Startvorbereitung & Warteseite (seit v3.4.0)
 
 Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung`), nicht mehr blockierend im `lifespan`. Solange sie laufen, liefert eine Middleware allen Aufrufen eine Warteseite („Archivio wird vorbereitet", Selbstaktualisierung alle 4 s, HTTP 503).
@@ -241,6 +252,25 @@ Schema + Migrationen laufen **im Hintergrund** (`web/main.py::_startvorbereitung
 - **`_search_folders` (Filter-Fix seit 3.0.4):** filtert bei Projektauswahl nach **Projektpfad** (`dp.path LIKE projektpfad/%`), NICHT nur `project_id`. Grund: durch Hash-Dedup hat ein Dokument mehrere Pfade in verschiedenen Projekten → `project_id`-Filter zeigte sonst fremde Projektordner (z. B. HB-Therm/Skyframe bei Auswahl „200 Keller"). Vorfilterung in SQL (`LIKE %wort%`), `folder.exists()` (NAS-Stat) nur für die wenigen Treffer.
 - **KI-Suche:** `/search/ai` (~1s, keyword+vector, max 12 Quellen) → `/search/ai/answer` (~30s LLM). Toggle „KI-Suche".
 - **Such-Dropdown:** „Mail" liegt in der Gruppe „Kategorien".
+
+---
+
+### Suchbegriffe zerlegen & Null-Treffer-Diagnose (seit v3.4.2)
+
+- **Positivliste statt verbotener Zeichen** (`_TRENNZEICHEN`, `web/main.py`): alles ausser Buchstaben und Ziffern trennt Wörter — genau wie der `unicode61`-Tokenizer beim Indexieren. **Falle, die das ausgelöst hat:** die frühere Bereinigung zählte verbotene Zeichen einzeln auf (`"()*:^` und `.`) und übersah den **Bindestrich**. FTS5 liest `u-wert` als Spaltenfilter → jede Suche mit Bindestrich brach mit `no such column: wert` ab, und die rohe SQLite-Meldung stand wörtlich in der Oberfläche. Unterstriche gehören ebenfalls dazu (`06_Felix` steht im Index als `06` + `felix`).
+- Dieselbe Zerlegung nutzen **alle Suchwege** (`_make_fts_query`, `_search_filename`, `_search_like`, `_search_folders`, `_excerpt`) — vorher hatte jeder seine eigene Kopie, mit sichtbar unterschiedlichem Verhalten.
+- **Kurze Wörter bekommen keinen Präfix-Stern** (`_MIN_PRAEFIX_LAENGE = 3`, `_fts_wort`). `u*` traf jedes Wort, das mit u beginnt — und, uns, unten — und machte eine Suche nach „u wert" (also U-Wert) wertlos. Als ganzes Token gesucht trifft `u` nur ein alleinstehendes U, genau wie in „U-Wert", das der Indexer ohnehin als `u` + `wert` ablegt. „u-wert" und „u wert" ergeben damit **dieselbe** Abfrage.
+- **`_wortmuster()` definiert die Wortgrenze selbst** statt `\b` zu benutzen: für reguläre Ausdrücke ist der **Unterstrich ein Wortzeichen**, für den unicode61-Tokenizer ein Trenner. In einem Ordner `250813_Attika` gäbe es vor „Attika" kein `\b`, obwohl im Index `250813` und `attika` getrennt stehen (genau das liess einen bestehenden Test scheitern). Kurze Wörter müssen ein ganzes Wort sein, längere dürfen Wortanfang sein: „wert" trifft „Werte", aber nicht „Bewertung".
+- **Ordnersuche und Hervorhebung folgen derselben Regel.** Vorher: `_search_folders` warf Wörter mit einem Zeichen weg und suchte den Rest als Teilstring (`%wert%` → „Bewertung", „Schalldaemmwerte"); `_excerpt` markierte bei „u wert" das erste beliebige „u" im Text, also meist gar nicht die Fundstelle.
+- `_suchfehler()` übersetzt Datenbankfehler in einen verständlichen Satz; der Wortlaut geht ins Log.
+- **Null-Treffer-Diagnose** (`_leertreffer_diagnose`): Mehrwortsuchen sind UND-verknüpft, ein einziger unbekannter Begriff lässt alles ins Leere laufen. Bei null Treffern wird pro Wort ein Existenztest gefahren (LIMIT 1, Volltext **und** Dateiname, unter den aktiven Filtern) und der schuldige Begriff genannt, plus Trefferzahl ohne ihn. Realer Anlass: Suche nach `260902 Afo Eingabe`, Datei heisst `260209 Afo Eingabe…`.
+  **Die engere Suche wird bewusst NICHT automatisch ausgeführt** — eine Trefferliste für eine andere als die gestellte Frage ist in einem Archiv gefährlich (jemand schliesst daraus, das gesuchte Dokument existiere). Angebot per Link, nicht stille Korrektur.
+  Läuft nur auf dem Null-Treffer-Pfad; erfolgreiche Suchen kostet es nichts.
+- **Zweiter Fall (seit v3.4.3): kommt jedes Wort vor, aber nie gemeinsam**, wird pro Wort einmal ohne dieses Wort gesucht und der am stärksten einschränkende Begriff genannt (`art: "zu_eng"`). Beispiel aus der Praxis: `treppenhaus hochhaus lift plan keller rietbachstrasse` — ohne den Strassennamen gibt es Treffer. Begrenzt auf ≤ 6 Wörter, darüber lohnen die zusätzlichen Abfragen nicht.
+- **Der Knopf im Hinweis darf NICHT auf `/search?q=…` verlinken.** `/search` liefert nur das Ergebnis-Fragment für HTMX; ein `href` dorthin zeigte im Browser die rohe, ungestaltete Teilseite. Stattdessen `sucheErsetzen()` (index.html): Suchfeld setzen und `htmx.trigger(feld, 'search')`. Die Anfrage geht über ein `data-`Attribut — `|tojson` im `onclick` zerreisst das Attribut mit seinen Anführungszeichen (der Knopf tat dann gar nichts).
+- Tests: `tests/test_suchbegriffe.py`, `tests/test_leertreffer_diagnose.py`.
+
+**Nebenbefund (v3.4.3):** der Handler `htmx:beforeRequest` prüfte `document.getElementById('ai-toggle').checked`. Diese Checkbox wurde vor längerem durch die beiden Modus-Knöpfe ersetzt, der Handler aber nie nachgezogen — seither warf **jede** Suche einen TypeError und die Ladeanimation der KI-Suche erschien nie. Jetzt über `#mode-ki-btn.classList.contains('active')`.
 
 ---
 
