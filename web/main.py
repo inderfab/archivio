@@ -327,7 +327,23 @@ async def _vorbereitung_abfangen(request: Request, call_next):
         status_code=503)
 
 
-app.mount("/static", StaticFiles(directory="web/static"), name="static")
+# Absoluter Pfad statt "web/static" -- Starlettes StaticFiles löst eine relative
+# Angabe bei JEDER Anfrage neu über os.getcwd() auf (siehe lookup_path() in
+# starlette/staticfiles.py), statt sie einmal beim Start festzuhalten. Läuft ein
+# Update über eine noch laufende alte Instanz drüber (das .pkg ersetzt den
+# gesamten "Contents/Resources"-Ordner, bevor das postinstall-Skript den alten
+# Prozess beendet), verschwindet dessen Arbeitsverzeichnis für die Dauer der
+# Installation unter ihm weg -- os.getcwd() wirft dann ENOENT, und JEDE
+# /static/…-Anfrage (inkl. htmx.min.js, logo.svg) endet in einem echten
+# "Internal Server Error" statt einem sauberen 404. Andere Routen bemerken das
+# nicht, weil sie über ARCHIVIO_DATA_DIR (absolut) statt über das
+# Arbeitsverzeichnis auf ihre Dateien zugreifen. templates in web/shared.py
+# macht es mit Path(__file__)... bereits richtig -- hier nachgezogen.
+app.mount(
+    "/static",
+    StaticFiles(directory=str(Path(__file__).resolve().parent / "static")),
+    name="static",
+)
 app.include_router(dashboard_router)
 app.include_router(api_router)
 app.include_router(gallery_router)

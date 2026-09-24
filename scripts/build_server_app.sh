@@ -474,6 +474,16 @@ PLISTEOF
   # Evtl. manuell/ausserhalb launchd laufende Instanz beenden, damit danach nur
   # die launchd-verwaltete (KeepAlive) laeuft — sonst zwei Menueleisten-Icons.
   pkill -f "Contents/Resources/archivio_server.py" 2>/dev/null || true
+  # Der eigentliche uvicorn-Serverprozess ist ein KIND von archivio_server.py
+  # (menubar/server_app.py::_start_server, subprocess.Popen) -- er heisst auf der
+  # Kommandozeile NICHT "archivio_server.py" (sondern "... -m uvicorn web.main:app
+  # ..."), das pkill oben trifft ihn also nicht. Ohne diese Zeile ueberlebt er das
+  # Beenden der Menueleisten-App und laeuft mit dem ALTEN Code weiter -- die neu
+  # gestartete Menueleisten-App haelt ihn ueber _kill_port_8000() faelschlich fuer
+  # "schon gesund" (antwortet ja auf /api/status) und startet gar keinen neuen
+  # Serverprozess. Ein Update ueber eine laufende Installation griff dadurch nie,
+  # bis der Nutzer den Zombie von Hand per kill -9 entfernte (siehe PROJEKT_STATUS.md).
+  pkill -f "archivio-python-(x86_64|arm64).*uvicorn web.main:app" 2>/dev/null || true
   sleep 1
   # Neuen Agent laden (RunAtLoad + KeepAlive starten die App)
   if ! sudo -u "$CURRENT_USER" launchctl bootstrap "gui/$USER_UID" "$PLIST" 2>/dev/null; then

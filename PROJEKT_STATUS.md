@@ -199,6 +199,73 @@ läuft** sauber neu.
 
 ---
 
+### Statische Dateien brauchen einen absoluten Pfad (seit v3.5.0)
+
+`app.mount("/static", StaticFiles(directory="web/static"), ...)` in `web/main.py` stand
+lange mit einem **relativen** Pfad da. Starlette löst den bei **jeder einzelnen Anfrage**
+neu auf (`StaticFiles.lookup_path()`), nicht einmalig beim Start — dafür ruft
+`os.path.realpath()` intern `os.getcwd()`.
+
+- **Fund (v3.5.0, echte Installation über eine laufende alte Instanz):** `logo.svg` und
+  `htmx.min.js` lieferten „Internal Server Error" statt eines Bildes/Skripts — mit dem
+  Effekt, dass ohne htmx **gar keine** hx-Anfrage mehr feuerte: Suche und Fotos wirkten
+  komplett tot, obwohl `/search` bei direktem Aufruf einwandfreie Ergebnisse lieferte.
+  Alle anderen Routen blieben unauffällig, weil sie über `ARCHIVIO_DATA_DIR` (absolut)
+  statt über das Arbeitsverzeichnis auf ihre Dateien zugreifen.
+- **Ursache:** Ein `.pkg`-Update ersetzt den kompletten `Contents/Resources`-Ordner,
+  **bevor** das Postinstall-Skript die alte, noch laufende Instanz beendet (`pkill`,
+  siehe oben). Für die Dauer der Installation zeigt das Arbeitsverzeichnis der alten
+  Instanz ins Leere — `os.getcwd()` wirft dann `FileNotFoundError`, `lookup_path()` fängt
+  das nur um `os.stat()` herum ab, nicht um `os.path.realpath()`.
+  Reproduziert mit `os.chdir()` in ein Verzeichnis, das man danach selbst löscht.
+- **Fix:** `StaticFiles(directory=str(Path(__file__).resolve().parent / "static"))` — ein
+  bereits absoluter Pfad braucht kein `os.getcwd()` mehr. `web/shared.py` machte es bei
+  `Jinja2Templates` schon immer richtig, `web/main.py` war die einzige Ausnahme (geprüft:
+  einziger `StaticFiles`/`mount()`-Aufruf im ganzen Code).
+- **Lehre:** Bei einem Update-über-laufende-Instanz-Szenario testen, nicht nur bei einer
+  frischen Installation — genau dieser Fall (Prozess A läuft, Dateien unter ihm werden
+  ersetzt) deckte den Fehler auf, eine saubere Neuinstallation hätte ihn nie gezeigt.
+
+---
+
+### Zombie-Serverprozess überlebt jedes Update (seit v3.5.0 behoben)
+
+Direkte Folge des Bugs oben, aber ein eigenständiges, schwereres Problem: der Prozess mit
+dem defekten Arbeitsverzeichnis überlebte **jedes** weitere Update/Neuinstallieren und
+jedes „Beenden" über das Menü — das Update griff bei mehreren aufeinanderfolgenden
+Installationsversuchen nie, bis der Prozess von Hand per `kill -9` entfernt wurde.
+
+- **Ursache 1 — Postinstall killt nur den Elternprozess.** `pkill -f
+  "Contents/Resources/archivio_server.py"` im Postinstall-Skript trifft die
+  Menüleisten-App, aber **nicht** ihren uvicorn-Kindprozess (`_start_server()`,
+  `subprocess.Popen`) — dessen Kommandozeile enthält "archivio_server.py" gar nicht,
+  sondern "… -m uvicorn web.main:app …". Der Kindprozess wird beim Töten des Elternteils
+  nicht automatisch mitbeendet (kein Process-Group-Kill), läuft als Waise mit dem ALTEN
+  Code weiter.
+  **Fix:** zweite `pkill`-Zeile im Postinstall auf
+  `archivio-python-(x86_64|arm64).*uvicorn web.main:app`.
+- **Ursache 2 — `_kill_port_8000()` verschont "gesunde" Fremdprozesse.** Die neu
+  gestartete Menüleisten-App prüft nur, ob **irgendetwas** auf Port 8000 auf
+  `/api/status` antwortet (200 OK) — das tut der verwaiste Alt-Prozess anstandslos,
+  seine kaputten Dateipfade betreffen nur `/static/…`. Die neue Instanz „übernimmt" ihn
+  dann, statt einen eigenen zu starten (bewusst so gebaut, um den früheren
+  gegenseitigen-Neustart-Loop zu vermeiden, siehe Ebene 3 oben) — mit dem Nebeneffekt,
+  dass der neue Code nie zum Zug kommt.
+  **Noch offen:** ein Versionsvergleich (`/api/version` vs. installierte `VERSION`-Datei)
+  wäre hier keine verlässliche Abgrenzung — die `VERSION`-Datei liegt im selben,
+  während der Installation überschriebenen Ordner und würde für den Alt-Prozess
+  denselben (neuen) Versionsstring liefern, sobald die Installation fertig ist, obwohl
+  sein Code unverändert im Speicher steht. Für "Beenden" über das Menü zusätzlich
+  gehärtet: `_stop_server()` killt jetzt auch dann den Port-8000-Listener per `lsof`,
+  wenn diese Instanz gar keinen eigenen `_server_proc` kennt (also selbst nur
+  übernommen, nie selbst gestartet hat) — sonst überlebte ein übernommener
+  Alt-Prozess auch ein explizites Beenden unbemerkt.
+- **Diagnose, falls doch nochmal ein Prozess überlebt:** `lsof -nP -iTCP:8000
+  -sTCP:LISTEN` zeigt die tatsächliche PID (nicht `ps … | grep archivio_server` --
+  das findet nur den Elternprozess, nicht den uvicorn-Kindprozess).
+
+---
+
 ### Startseite vor dem Serverstart (seit v3.4.3)
 
 `bridge.startseite_an(8000, log)` / `startseite_aus(log)` — ein winziger HTTP-Dienst belegt Port 8000, **bevor** uvicorn läuft, und antwortet überall mit „Archivio startet" (HTTP 503, Selbstaktualisierung alle 3 s).

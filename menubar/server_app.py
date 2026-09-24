@@ -183,6 +183,22 @@ def _stop_server():
                 _server_proc.kill()
             _server_proc = None
             log.info("uvicorn gestoppt")
+        else:
+            # Kein selbst gestarteter Prozess bekannt -- diese Instanz hat beim Start
+            # einen bereits laufenden, gesunden Server UEBERNOMMEN statt selbst einen
+            # zu starten (siehe _kill_port_8000()). "Beenden" muss ihn trotzdem
+            # wirklich stoppen, sonst ueberlebt er unbemerkt jedes weitere
+            # Beenden/Neuinstallieren -- genau das liess ein Update ueber eine
+            # laufende Installation ins Leere laufen, bis jemand den Prozess von Hand
+            # per kill -9 entfernte (siehe PROJEKT_STATUS.md).
+            try:
+                r = subprocess.run(["lsof", "-ti", "-sTCP:LISTEN", ":8000"],
+                                   capture_output=True, text=True)
+                for pid in r.stdout.strip().split():
+                    subprocess.run(["kill", "-9", pid], capture_output=True)
+                    log.info("Uebernommenen Serverprozess beendet: PID %s", pid)
+            except Exception as e:
+                log.warning("Uebernommenen Server stoppen fehlgeschlagen: %s", e)
 
 
 def _notify(message: str):
