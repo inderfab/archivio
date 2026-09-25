@@ -1,0 +1,52 @@
+<div id="mail-accounts-section">
+  {% if mail_accounts %}
+  {% for acc in mail_accounts %}
+  <div class="sp-row">
+    <span class="chip">{{ acc.get('label') or acc.get('username') }}</span>
+    <span class="meta">{{ acc.get('username') }} · {{ acc.get('host') }}</span>
+    {% if not acc.get('password') %}
+    <span class="meta" style="color:#b45309;" title="Ohne Passwort werden für dieses Konto keine Mails abgerufen">Passwort fehlt</span>
+    {% endif %}
+    <form hx-post="/dashboard/mail-accounts/remove" hx-target="#mail-accounts-section" hx-swap="outerHTML" style="display:contents;">
+      <input type="hidden" name="username" value="{{ acc.get('username') }}">
+      <button type="submit" class="norm-icon-btn" title="Entfernen">×</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="norm-empty">Noch kein Mail-Konto eingerichtet.</p>
+  {% endif %}
+
+  <div id="mail-account-add-panel" style="margin-top:10px;">
+    <form hx-post="/dashboard/mail-accounts/add" hx-target="#mail-accounts-section" hx-swap="outerHTML"
+          style="display:flex; flex-direction:column; gap:10px; max-width:420px;">
+      <div class="field">
+        <span class="field-prefix">Label</span>
+        <input type="text" name="label" placeholder="z.B. Büro">
+      </div>
+      <div class="field">
+        <span class="field-prefix">Server</span>
+        <input type="text" name="host" placeholder="imap.beispiel.ch" required>
+      </div>
+      <div class="field">
+        <span class="field-prefix">Port</span>
+        <input type="number" name="port" value="993" min="1" max="65535">
+      </div>
+      <div class="field">
+        <span class="field-prefix">Benutzername</span>
+        <input type="text" name="username" required autocomplete="off">
+      </div>
+      <div class="field">
+        <span class="field-prefix">Passwort</span>
+        <input type="password" name="password" required autocomplete="new-password">
+      </div>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <button type="button" class="btn btn-sm" onclick="testNewMailAccount(this)">Verbindung testen</button>
+        <span class="test-result"></span>
+      </div>
+      <div>
+        <button type="submit" class="btn btn-sm btn-primary">+ Konto hinzufügen</button>
+      </div>
+    </form>
+  </div>
+</div>

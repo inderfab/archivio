@@ -5,7 +5,6 @@
 <style>
   .helper-page { padding: 32px 0 64px; max-width: 680px; }
   .helper-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
-  .helper-page .intro { color: var(--text-2); font-size: 13px; margin-bottom: 24px; line-height: 1.5; }
   .helper-section { border: 1px solid var(--border); border-radius: var(--radius); padding: 20px; margin-bottom: 20px; }
   .helper-section p { font-size: 13px; color: var(--text-2); line-height: 1.6; margin: 0; }
   .helper-section p + p { margin-top: 10px; }
@@ -15,45 +14,196 @@
     padding: 1px 6px; font-size: 12px; user-select: all;
   }
   .helper-section ol { font-size: 13px; color: var(--text-2); line-height: 1.8; margin: 0; padding-left: 20px; }
+  .helper-mcp-row { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+  .helper-mcp-row select {
+    font-size: 13px; padding: 6px 10px; border: 1px solid var(--border);
+    border-radius: var(--radius); background: var(--bg); color: var(--text);
+  }
+  .helper-mcp-status { font-size: 12px; color: var(--text-2); margin-top: 8px; }
+  .helper-mcp-status.ok { color: #166534; }
+  .helper-mcp-status.err { color: #991b1b; }
+  .helper-linkshare {
+    display: flex; align-items: flex-start; justify-content: space-between;
+    gap: 8px; margin-top: 14px; padding: 0 4px;
+  }
+  .helper-linkshare-step { display: flex; flex-direction: column; align-items: center; gap: 6px; flex: 1; min-width: 0; }
+  .helper-linkshare-ico {
+    width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid var(--accent);
+    color: var(--accent); display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+  }
+  .helper-linkshare-lbl { font-size: 11px; color: var(--text-2); text-align: center; line-height: 1.4; }
+  .helper-linkshare-arrow { color: var(--text); font-size: 16px; padding-top: 10px; flex-shrink: 0; }
 </style>
-<div class="helper-page">
-  <h1>Helper</h1>
-  <p class="intro">
-    Menubar-App für macOS. Fürs ganze Büro muss nur ein Server laufen, alle
-    Mitarbeiter brauchen nur den Helper. Damit können Sie Suchresultate in Archivio
-    direkt öffnen, die MCP-Schnittstelle zur KI-Anwendung nutzen und Archivio-
-    Dateilinks versenden.
-  </p>
-
-  <div class="helper-section">
-    {% if helper_available %}
-    <a href="/dashboard/download/helper"
-       style="display:inline-block; text-decoration:none;"
-       class="btn btn-primary">
-      ⬇ Helper herunterladen (v{{ helper_version }})
-    </a>
-    <p style="margin-top:12px;">
-      Installer öffnen und den Anweisungen folgen (Admin-Passwort nötig). Der erste
-      Start dauert ein bis zwei Minuten.
-    </p>
-    <p>
-      Den Server findet der Helper normalerweise selbst. Falls nicht: Helper-Menü →
-      „Server suchen" oder „Server ändern" → <code>{{ helper_url_hint }}</code>
-    </p>
-    {% else %}
-    <p>Noch kein Build vorhanden — <code>bash helper/build.sh</code> ausführen.</p>
-    {% endif %}
-  </div>
-
-  <div class="helper-section">
-    <h2>Datei-Link teilen</h2>
-    <ol>
-      <li>Rechtsklick auf die Datei im Finder</li>
-      <li>Schnellaktionen → „Archivio-Link kopieren"</li>
-      <li>Link einfügen, z. B. in Mail oder Chat</li>
-      <li>Empfänger mit installiertem Helper klickt darauf — die Datei öffnet sich
-        oder wird im Finder gezeigt, je nach eigener Einstellung im Helper-Menü</li>
-    </ol>
+<div id="mcp-activation-modal" style="display:none; position:fixed; inset:0; background:rgba(0,0,0,.4); z-index:1000; align-items:center; justify-content:center;">
+  <div style="background:var(--bg); border-radius:10px; padding:24px; max-width:420px; box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 id="mcp-activation-title" style="margin:0 0 12px; font-size:15px; font-weight:700;"></h3>
+    <ol id="mcp-activation-steps" style="margin:0 0 18px; padding-left:20px; font-size:13px; line-height:1.7; color:var(--text-2);"></ol>
+    <div style="text-align:right;">
+      <button type="button" class="btn" onclick="document.getElementById('mcp-activation-modal').style.display='none';">Verstanden</button>
+    </div>
   </div>
 </div>
+<div class="helper-page">
+  <h1>Helper</h1>
+
+  <div class="helper-section">
+    <div style="display:flex; align-items:center; justify-content:space-between; gap:8px; position:relative;">
+      <span style="font-size:14px; font-weight:700;">Helper</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Menubar-App für macOS. Fürs ganze Büro muss nur ein Server laufen, alle Mitarbeiter brauchen nur den Helper. Damit können Sie Suchresultate in Archivio direkt öffnen, die MCP-Schnittstelle zur KI-Anwendung nutzen und Archivio-Dateilinks versenden.</p>
+        {% if helper_available %}
+        <p>Die heruntergeladene <code>.pkg</code>-Datei doppelklicken und den Installer-Anweisungen folgen (Admin-Passwort nötig) — landet automatisch für alle Benutzer dieses Macs in „Programme", wichtig falls mehrere Accounts denselben Mac nutzen. Der erste Start dauert ein bis zwei Minuten.</p>
+        <p>„Autostart beim Login" ist standardmässig aktiviert, lässt sich im Helper-Menü abschalten.</p>
+        <p>Den Server findet der Helper normalerweise selbst. Falls nicht: Helper-Menü → „Server suchen" oder „Server ändern" → <code>{{ helper_url_hint }}</code></p>
+        {% endif %}
+      </div>
+    </div>
+    <div style="margin-top:12px;">
+      {% if helper_available %}
+      <a href="/dashboard/download/helper"
+         style="display:inline-block; text-decoration:none;"
+         class="btn btn-primary">
+        ⬇ Helper herunterladen (v{{ helper_version }})
+      </a>
+      {% else %}
+      <p>Noch kein Build vorhanden — <code>bash helper/build.sh</code> ausführen.</p>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="helper-section">
+    <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">
+      <span>KI-Schnittstelle (MCP) einrichten</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Der KI-Dienst sucht über eine Programmschnittstelle in der Archivio-Datenbank. Die Suchresultate werden als Dokumentfragmente an das KI-Programm übergeben. Diese Fragmente werden je nach Anbieter lokal oder in der Cloud verarbeitet.</p>
+        <p>Jede Arbeitsstation, die MCP nutzen will, muss zum einen den Archivio Helper installieren und zum anderen die MCP-Schnittstelle einrichten. Unterstützt werden bewusst nur Anwendungen, die MCP über eine lokale Konfigurationsdatei einbinden (aktuell Claude Desktop). Claude braucht dafür keinen Internetzugriff auf die Archivio-Datenbank. Nach der Installation Claude Desktop einmal neu starten, damit die Verbindung aktiv wird.</p>
+        <p>ChatGPT funktioniert anders: dort läuft MCP in der OpenAI-Cloud und braucht eine Internetverbindung zum Server — die Daten werden nicht lokal, sondern auf einem fremden Server verarbeitet. Aus Datenschutz-/Urheberrechtsgründen ist das deshalb zurzeit nicht freigegeben. Bei Interesse bitte Feedback senden.</p>
+        <p>Welche Projekte MCP überhaupt sehen darf, wird pro Projekt in „Projekte" freigegeben (☁-Symbol) — standardmässig ist keines freigegeben, ohne Freigabe liefert die Verbindung keine Treffer. Verwaltung der Sperrliste und Protokoll aller Zugriffe unter „Verwaltung → Verlauf"/„Sperrliste". Erkannte Normen werden nie übermittelt.</p>
+        <p>Bei Claude kann in den Einstellungen konfiguriert werden, dass Chats nicht fürs Modelltraining verwendet werden. Trotzdem werden die Suchfragmente auf dem Server des Anbieters verarbeitet. Die aktive Sperrliste und die automatische Normen-Erkennung verhindern, dass Datenschutz und Urheberrecht verletzt werden — dafür ist aber eine aktive Mitarbeit der Nutzenden nötig.</p>
+      </div>
+    </h2>
+    <div class="helper-mcp-row">
+      <select id="mcp-client-select">
+        <option value="claude_desktop">Claude Desktop</option>
+      </select>
+      <button type="button" class="btn" onclick="installMcp()">MCP-Schnittstelle installieren</button>
+    </div>
+    <div id="mcp-install-status" class="helper-mcp-status">Status wird geprüft…</div>
+  </div>
+
+  <div class="helper-section">
+    <h2 style="display:flex; align-items:center; justify-content:space-between; position:relative;">
+      <span>Datei-Link teilen</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Server und Helper installieren automatisch eine Finder-Erweiterung. Je nach Mac erscheint sie im Rechtsklick-Menü unter „Schnellaktionen" oder unter „Dienste" — beides ist derselbe Befehl.</p>
+        <p>Mail und Messages zeigen beim Einfügen des Links eine Vorschau mit dem Datei-/Ordnernamen an.</p>
+        <p>Ob ein geöffneter Link die Datei direkt öffnet oder im Finder zeigt, stellt jede Person für sich im eigenen Helper-Menü ein.</p>
+        <p>Mit dieser Funktion können bürointern Dateien „versendet" werden — es sind jedoch keine Kopien, sondern der Link zum Originaldokument auf dem Server.</p>
+      </div>
+    </h2>
+    <div class="helper-linkshare">
+      <div class="helper-linkshare-step">
+        <span class="helper-linkshare-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M9 3v18"></path></svg></span>
+        <span class="helper-linkshare-lbl">Rechtsklick<br>auf die Datei</span>
+      </div>
+      <span class="helper-linkshare-arrow">→</span>
+      <div class="helper-linkshare-step">
+        <span class="helper-linkshare-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="14" y2="17"></line></svg></span>
+        <span class="helper-linkshare-lbl">Schnellaktion / Dienste<br>„Archivio-Link kopieren"</span>
+      </div>
+      <span class="helper-linkshare-arrow">→</span>
+      <div class="helper-linkshare-step">
+        <span class="helper-linkshare-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg></span>
+        <span class="helper-linkshare-lbl">Link einfügen,<br>z. B. in Mail</span>
+      </div>
+      <span class="helper-linkshare-arrow">→</span>
+      <div class="helper-linkshare-step">
+        <span class="helper-linkshare-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg></span>
+        <span class="helper-linkshare-lbl">Empfänger klickt —<br>Original-Datei öffnet sich</span>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+function refreshMcpStatus() {
+  var el = document.getElementById('mcp-install-status');
+  fetch(HELPER + '/mcp-status')
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      var installed = d.clients && d.clients.claude_desktop;
+      el.textContent = installed
+        ? '✓ Für Claude Desktop eingerichtet.'
+        : 'Noch nicht eingerichtet.';
+      el.className = 'helper-mcp-status ' + (installed ? 'ok' : '');
+    })
+    .catch(function() {
+      el.textContent = 'Archivio Helper nicht erreichbar — läuft er in der Menüleiste?';
+      el.className = 'helper-mcp-status err';
+    });
+}
+
+// Pro Client die Schritte, die NACH der Registrierung noch im jeweiligen Programm
+// selbst nötig sind -- das Eintragen in die Config-Datei allein reicht bei den
+// meisten Apps nicht, sie muss den neuen Connector zusätzlich noch freischalten.
+var MCP_ACTIVATION_STEPS = {
+  claude_desktop: {
+    title: 'Claude Desktop — letzter Schritt',
+    steps: [
+      'In Claude Desktop: Einstellungen → Connectors (Konnektoren) öffnen.',
+      '„Archivio" dort freischalten und Zugriff erlauben.',
+      'Im Chat unten links auf das Plus-Symbol klicken → Connectors → „Archivio" aktivieren.',
+    ],
+  },
+};
+
+function showMcpActivationSteps(client) {
+  var info = MCP_ACTIVATION_STEPS[client] || {
+    title: 'Letzter Schritt',
+    steps: ['Bitte in der Dokumentation dieser Anwendung nachsehen, wie „Archivio" dort als Connector/MCP-Server aktiviert wird.'],
+  };
+  document.getElementById('mcp-activation-title').textContent = info.title;
+  var ol = document.getElementById('mcp-activation-steps');
+  ol.innerHTML = '';
+  info.steps.forEach(function(s) {
+    var li = document.createElement('li');
+    li.textContent = s;
+    ol.appendChild(li);
+  });
+  document.getElementById('mcp-activation-modal').style.display = 'flex';
+}
+
+function installMcp() {
+  var client = document.getElementById('mcp-client-select').value;
+  var el = document.getElementById('mcp-install-status');
+  el.textContent = 'Wird eingerichtet…';
+  el.className = 'helper-mcp-status';
+  fetch(HELPER + '/install-mcp', {
+    method: 'POST',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({client: client}),
+  })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      el.textContent = d.message || (d.ok ? 'Fertig.' : 'Fehler.');
+      el.className = 'helper-mcp-status ' + (d.ok ? 'ok' : 'err');
+      if (d.ok) {
+        // Helper einmal frisch neu starten -- rein defensiv, damit er sicher mit
+        // sauberem Zustand läuft. Fehler hier bewusst ignoriert: der Neustart ist
+        // ein Komfort-Schritt, kein Teil der eigentlichen Installation.
+        fetch(HELPER + '/restart-app', { method: 'POST' }).catch(function() {});
+        showMcpActivationSteps(client);
+      }
+    })
+    .catch(function() {
+      el.textContent = 'Archivio Helper nicht erreichbar — läuft er in der Menüleiste?';
+      el.className = 'helper-mcp-status err';
+    });
+}
+
+window.addEventListener('load', refreshMcpStatus);
+</script>
 {% endblock %}

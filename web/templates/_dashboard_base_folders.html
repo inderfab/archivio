@@ -1,0 +1,48 @@
+{% from "_icons.html" import icon_folder %}
+<div id="base-folders-section" class="ordner-callout">
+  <div style="display:flex; align-items:center; gap:8px; margin-bottom:10px; position:relative;">
+    <label style="font-size:14px; font-weight:700; color:var(--text);">Projektordner — neues Projekt hinzufügen</label>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p>Jeder hier eingetragene Ordner wird durchsucht — seine direkten Unterordner erscheinen unten automatisch als eigene Projekte. Ohne mindestens einen eingetragenen Ordner findet die Suche keine Dokumente.</p>
+      <p>Liegt der Ordner auf einem Datei-Server/NAS, diesen vorher im Finder einhängen (<code>⌘K</code> „Mit Server verbinden") — am besten so einrichten, dass er beim Start dieses Macs automatisch verbunden wird (macOS-Systemeinstellungen → „Anmeldeobjekte").</p>
+      <p>Einen Ordner entfernen deaktiviert automatisch alle daraus entdeckten Projekte — ihre Dokumente bleiben in der Datenbank, bis sie einzeln endgültig gelöscht werden.</p>
+    </div>
+  </div>
+  {% if fda_missing %}
+  <div class="hint" style="margin-bottom:8px; padding:8px 10px; background:#fffbeb; border-left:3px solid #e6a817; border-radius:4px; color:var(--text-2);">
+    <strong>macOS-Zugriff:</strong> Damit Archivio auf Dokumente, Desktop, Downloads oder NAS-Mounts zugreifen kann, benötigt die App <strong>Festplattenvollzugriff</strong>.<br>
+    <em>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff → Archivio Server hinzufügen.</em>
+  </div>
+  {% endif %}
+  {% if base_folders %}
+  {% for f in base_folders %}
+  <div class="sp-row">
+    {% if f.get('label') %}<span class="meta" style="flex:0 0 auto; font-weight:600; color:var(--text);">{{ f.get('label') }}</span>{% endif %}
+    <span class="chip">{{ f.get('path') }}</span>
+    <form hx-post="/dashboard/base-folders/remove" hx-target="#base-folders-section" hx-swap="outerHTML" style="display:contents;">
+      <input type="hidden" name="path" value="{{ f.get('path') }}">
+      <button type="submit" class="norm-icon-btn" title="Entfernen">×</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="norm-empty">Noch kein Projektordner eingetragen.</p>
+  {% endif %}
+  <form hx-post="/dashboard/base-folders/add" hx-target="#base-folders-section" hx-swap="outerHTML"
+        hx-trigger="submit, blur from:#new-base-folder-path changed"
+        style="display:flex; flex-direction:column; gap:10px; margin-top:10px; max-width:420px;">
+    <div class="field">
+      <span class="field-prefix">Label</span>
+      <input type="text" name="label" placeholder="optional" id="new-base-folder-label">
+    </div>
+    <div class="field">
+      <span class="field-prefix">Ordner</span>
+      <input type="text" name="path" placeholder="/Volumes/NAS/Projekte" id="new-base-folder-path" required>
+    </div>
+    <div style="display:flex; gap:8px;">
+      <button type="button" class="btn btn-sm" title="Ordner im Finder auswählen" onclick="chooseNewBaseFolder()" style="display:inline-flex; align-items:center; gap:6px;">{{ icon_folder() }} Ordner wählen</button>
+      <button type="submit" class="btn btn-sm btn-primary">+ Ordner hinzufügen</button>
+    </div>
+  </form>
+</div>

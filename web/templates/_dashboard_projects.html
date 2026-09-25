@@ -1,4 +1,4 @@
-{% from "_icons.html" import icon_archive, icon_cloud %}
+{% from "_icons.html" import icon_archive, icon_cloud, icon_blocked %}
 
 {# Eine Projektzeile. Rekursiv, damit tiefer verschachtelte Projekte (via
    "Unterordner ▸" angelegt) unter ihrem Elternordner eingerückt erscheinen --
@@ -7,7 +7,7 @@
 {# id nur mit p.id (echte DB-Projekte) -- dient dem Löschen-Dialog als gezieltes
    HX-Retarget-Ziel (siehe toggle_project() in web/dashboard.py), damit die
    Rückfrage genau bei diesem Projekt erscheint statt am Kopf der ganzen Liste. #}
-<div class="project-entry"{% if p.id %} id="project-row-{{ p.id }}"{% endif %}{% if depth %} style="margin-left:{{ depth * 26 }}px;"{% endif %}>
+<div class="project-entry"{% if p.id %} id="project-row-{{ p.id }}"{% endif %}>
 
   <div class="project-row">
 
@@ -33,6 +33,10 @@
               class="mcp-toggle {{ 'on' if p.mcp_enabled else '' }}"
               title="{{ 'Für KI-Anwendungen freigegeben — klicken zum Sperren' if p.mcp_enabled else 'Nicht für KI-Anwendungen freigegeben — klicken zum Freigeben' }}">{{ icon_cloud(p.mcp_enabled) }}</button>
     </form>
+    {% if p.mcp_blocked %}
+    <a href="/sperrliste#block-rules-section" class="mcp-block-badge"
+       title="Zusätzlich über die Sperrliste komplett von MCP ausgeschlossen — unabhängig vom Freigabe-Symbol. Klicken, um die Regel in der Sperrliste zu öffnen.">{{ icon_blocked() }}</a>
+    {% endif %}
     <form hx-post="/dashboard/projects/{{ p.id }}/archive-toggle"
           hx-target="#project-list"
           hx-swap="innerHTML"
@@ -49,9 +53,7 @@
     {% else %}
     {# Projektinfo (aktiv) — volle Darstellung #}
     <div style="flex:1; min-width:0;" title="{{ p.path }}">
-      <div class="project-name">
-        {% if depth %}<span class="nested-marker" title="Unterordner-Projekt">↳</span> {% endif %}{{ p.name }}
-      </div>
+      <div class="project-name">{{ p.name }}</div>
       <div class="project-meta">
         {% if p.sub_label %}<span class="nested-rel">{{ p.sub_label }}</span> · {% endif %}
         {{ p.doc_count }} Dokumente
@@ -125,17 +127,21 @@
 
 </div>
 
-{% for child in p.nested %}{{ project_entry(child, depth + 1) }}{% endfor %}
+{% if p.nested %}
+<div class="project-children">
+  {% for child in p.nested %}{{ project_entry(child, depth + 1) }}{% endfor %}
+</div>
+{% endif %}
 {% endmacro %}
 
 
 {% macro projects_help() %}
 <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
 <div class="section-help-panel">
-  <p><strong>Projekt aktivieren/deaktivieren:</strong> Schalter links neben dem Projekt. Deaktivieren fragt, ob die bereits indexierten Dokumente behalten oder aus der Datenbank entfernt werden sollen.</p>
-  <p><strong>Unterordner als eigenes Projekt:</strong> „Unterordner ▸" öffnen, gewünschten Ordner anklicken, im Detailpanel „Diesen Ordner als eigenes Projekt" wählen — läuft danach separat, mit eigenem Scan und eigener MCP-Freigabe.</p>
-  <p><strong>Ordner ignorieren:</strong> Im selben Ordner-Browser einen Ordner anklicken und im Detailpanel „Ignorieren" wählen. Betrifft nur diesen Scan-Durchlauf, keine Datenbankänderung.</p>
-  <p><strong>Für KI-Anwendungen freigeben:</strong> ☁-Symbol neben einem aktiven Projekt. Standardmässig ist kein Projekt freigegeben — erst nach Klick kann eine angebundene KI-Anwendung über die MCP-Schnittstelle darauf zugreifen. Verwaltung und Protokoll dazu im Reiter „MCP".</p>
+  <p><span class="project-toggle on" style="display:inline-block; vertical-align:middle; margin-right:8px; pointer-events:none;"></span><strong>Projekt aktivieren/deaktivieren:</strong> dieser Schalter links neben dem Projekt. Deaktivieren fragt, ob die bereits indexierten Dokumente behalten oder aus der Datenbank entfernt werden sollen.</p>
+  <p><strong>Unterordner als eigenes Projekt:</strong> „Unterordner ▸" öffnen, gewünschten Ordner anklicken, im Detailpanel „Diesen Ordner als eigenes Projekt" wählen — läuft danach separat, mit eigenem Scan und eigener MCP-Freigabe. Bereits indexierte Dokumente darin bleiben auch über die Ober-Suche auffindbar. „Nicht mehr als eigenes Projekt" macht es rückgängig. Mehrere Ordner auf einmal ankreuzen und „Als eigene Projekte erstellen" wählen, um viele gleichzeitig umzuwandeln.</p>
+  <p><strong>Ordner ignorieren:</strong> Im selben Ordner-Browser einen Ordner anklicken und im Detailpanel „Ignorieren" wählen — bleibt bei jedem weiteren Scan aussen vor, bis „Ignorierung aufheben" geklickt wird. „Alle Ordner auf dieser Ebene ignorieren" schliesst mit einem Klick alle Geschwister-Ordner aus; mehrere Ordner ankreuzen und „Alle ignorieren"/„Ignorierung aufheben" wirkt auf eine beliebige Auswahl. Betrifft nur diesen einen Projektordner, nicht das ganze Büro — für eine büroweite Regel „Ausgeschlossene Ordner" in der Sperrliste verwenden.</p>
+  <p><strong>Für KI-Anwendungen freigeben:</strong> ☁-Symbol neben einem aktiven Projekt. Standardmässig ist kein Projekt freigegeben — erst nach Klick kann eine angebundene KI-Anwendung über die MCP-Schnittstelle darauf zugreifen. Ein 🚫-Abzeichen daneben bedeutet: zusätzlich über die Sperrliste komplett gesperrt, unabhängig von diesem Symbol. Zugriffsprotokoll unter „Verwaltung → Verlauf", zusätzliche Sperrregeln unter „Verwaltung → Sperrliste".</p>
   <p><strong>Archivieren:</strong> 📦-Symbol neben einem aktiven Projekt. Ein Projekt, das mehrfach in Folge nichts Neues mehr liefert, wird automatisch seltener gescannt (Rhythmus verdoppelt sich mit jeder weiteren leeren Prüfung, 1 Woche bis maximal 1 Jahr) — taucht dabei ein neuer/veränderter Ordnerinhalt auf, springt es sofort zurück auf normal. Klicken setzt ein Projekt manuell auf Archiv (startet bei 4 Wochen), erneutes Klicken hebt es wieder auf.</p>
   <p><strong>Nicht auffindbarer Ordner:</strong> Wurde ein Projektordner verschoben statt gelöscht, erscheint „📁 Neu verknüpfen" — verknüpft das Projekt mit dem neuen Pfad, ohne Tags/Bewertungen zu verlieren.</p>
 </div>
@@ -154,7 +160,7 @@
 {% if ns.any_active and not ns.any_mcp %}
 <div class="orphan-banner" style="background:#eff6ff; border-color:#bfdbfe; color:#1d4ed8;">
   <span>☁ Kein Projekt ist für KI-Anwendungen freigegeben — die MCP-Suche liefert aktuell keine Treffer. Freigabe über das ☁-Symbol bei jedem Projekt.</span>
-  <a href="/mcp-log" style="color:#1d4ed8;">MCP-Zugriffe ↓</a>
+  <a href="/verlauf" style="color:#1d4ed8;">MCP-Zugriffe ↓</a>
 </div>
 {% endif %}
 

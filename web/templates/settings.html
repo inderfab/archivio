@@ -3,8 +3,13 @@
 
 {% block content %}
 <style>
-  .settings-page { padding: 32px 0 64px; max-width: 680px; }
+  .settings-page { padding: 32px 0 64px; max-width: 1000px; }
   .settings-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 28px; letter-spacing: -.02em; }
+
+  .settings-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin: 0 0 16px; }
+  .settings-grid2 > .settings-section { display: flex; flex-direction: column; margin-bottom: 0; }
+  .settings-grid2 > .settings-section > .settings-body { flex: 1; }
+  @media (max-width: 820px) { .settings-grid2 { grid-template-columns: 1fr; } }
 
   .settings-banner {
     padding: 10px 14px; border-radius: var(--radius);
@@ -68,10 +73,6 @@
     animation: backup-dreh .8s linear infinite;
   }
   @keyframes backup-dreh { to { transform: rotate(360deg); } }
-  .pw-missing {
-    color: #b91c1c; font-size: 12px; font-weight: 600; margin-left: 6px;
-  }
-
   /* Immer offene Sektionen (kein <details>/Einklappen mehr) */
   .settings-section { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 16px; overflow: visible; }
   .settings-section-header {
@@ -90,33 +91,14 @@
   /* Beschriftung + Eingabefeld in EINER Box, wie im Filter-Panel der Suche
      (.field/.field-prefix aus base.html) -- hier nur die Präfix-Breite an die
      längeren Settings-Labels angepasst (dort reichen kurze Wörter wie "Von"). */
-  .settings-body .field-prefix,
-  .mail-account-body .field-prefix { min-width: 168px; }
+  .settings-body .field-prefix { min-width: 168px; }
   .field select {
     flex: 1 1 auto; border: 0; outline: none; background: transparent;
     padding: 7px 10px; min-width: 0; font-size: 13px; font-family: inherit; color: var(--text);
   }
-  .field-row-2 { display: flex; gap: 12px; }
-  .field-row-2 .field { flex: 1; }
   .hint { font-size: 12px; color: var(--text-3); line-height: 1.5; }
 
-  /* Mail-Konten */
-  .mail-accounts { display: flex; flex-direction: column; gap: 12px; }
-  .mail-account { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
-  .mail-account-header {
-    display: flex; align-items: center; gap: 8px;
-    padding: 8px 12px; background: var(--bg-2);
-    border-bottom: 1px solid var(--border);
-  }
-  .mail-account-header input {
-    flex: 1; padding: 4px 8px; font-size: 13px; font-weight: 600;
-    font-family: inherit; border: 1px solid transparent; border-radius: var(--radius);
-    background: transparent; color: var(--text); outline: none;
-  }
-  .mail-account-header input:focus { border-color: var(--border); background: var(--bg); }
-  .mail-account-body { padding: 12px; display: flex; flex-direction: column; gap: 10px; }
-
-  /* Listen (Projektordner, Ausgeschlossene Ordner) */
+  /* Listen (Sicherungspfad) */
   .list-items { display: flex; flex-direction: column; gap: 6px; }
   .list-item  { display: flex; gap: 8px; align-items: center; }
   .list-item input {
@@ -140,14 +122,6 @@
   }
   .list-item-box .list-item-value { flex: 1 1 auto; min-width: 0; background: transparent; }
 
-  .remove-btn {
-    flex-shrink: 0; width: 26px; height: 26px;
-    border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--bg); color: var(--text-3); cursor: pointer;
-    font-size: 15px; display: flex; align-items: center; justify-content: center;
-  }
-  .remove-btn:hover { background: #fee2e2; border-color: #fca5a5; color: #991b1b; }
-
   .browse-btn {
     flex-shrink: 0; width: 26px; height: 26px;
     border: 1px solid var(--border); border-radius: var(--radius);
@@ -164,18 +138,6 @@
   }
   .add-btn:hover { border-color: #9ca3af; color: var(--text); background: var(--bg-2); }
 
-  /* Mail-Test */
-  .mail-test-row  { display: flex; align-items: center; gap: 10px; }
-  .mail-test-btn  {
-    padding: 5px 12px; font-size: 13px; font-family: inherit;
-    border: 1px solid var(--border); border-radius: var(--radius);
-    background: var(--bg-2); color: var(--text); cursor: pointer;
-  }
-  .mail-test-btn:hover { border-color: #9ca3af; }
-  .test-result { font-size: 13px; }
-  .test-ok  { color: #166534; }
-  .test-err { color: #991b1b; }
-
 </style>
 
 <div class="settings-page">
@@ -188,7 +150,7 @@
     <button type="button" onclick="saveSettingsNow()">Speichern</button>
   </div>
 
-  <form method="POST" action="/dashboard/settings" id="settings-form">
+  <form method="POST" action="/dashboard/settings" id="settings-form" class="settings-grid2">
     {# Hidden submit so Enter works in any text input #}
     <button type="submit" style="display:none"></button>
 
@@ -199,7 +161,6 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p><strong>Automatischer Scan:</strong> Aktive Projekte werden täglich um die eingestellte Uhrzeit (HH:MM) aktualisiert. Leer = deaktiviert. Die Uhrzeit so wählen, dass der Computer läuft — bleibt er immer an, eignet sich der Abend (z. B. 22:00); wird er über Nacht ausgeschaltet, eher die Mittagszeit (z. B. 12:15).</p>
-          <p><strong>Ausgeschlossene Ordner:</strong> werden in allen Projekten ignoriert. Ohne Stern zählt der exakte Ordnername (z. B. „Log" schliesst „Analog" oder „Logitech" nicht mit aus). Mit Stern als Muster: „*privat*" trifft jeden Ordner, der „privat" irgendwo im Namen enthält (z. B. „Privatnotizen" oder „Alt_privat"); „privat*" nur Namen, die damit beginnen.</p>
           <p><strong>Scanner-Worker:</strong> mehrere Worker beschleunigen den Scan, erhöhen aber den RAM-Verbrauch. Standard ist 1 Worker — nur umstellen, wenn wirklich nötig.</p>
         </div>
       </div>
@@ -211,58 +172,6 @@
             <input type="text" name="scan_time" placeholder="z.B. 22:00"
               value="{{ cfg.get('scheduler', {}).get('scan_time', '') }}">
           </div>
-        </div>
-
-        <div class="ordner-callout" id="ordner">
-          <label style="font-size:14px; font-weight:700; color:var(--text); display:block; margin-bottom:6px;">
-            📁 Projektordner
-          </label>
-          <p style="font-size:12px; color:var(--text-2); margin:0 0 10px;">
-            Hier festlegen, welche Ordner Archivio durchsuchen soll — ohne mindestens einen
-            eingetragenen Ordner findet die Suche keine Dokumente.
-          </p>
-          {% if fda_missing %}
-          <div class="hint" style="margin-bottom:8px; padding:8px 10px; background:#fffbeb; border-left:3px solid #e6a817; border-radius:4px; color:var(--text-2);">
-            <strong>macOS-Zugriff:</strong> Damit Archivio auf Dokumente, Desktop, Downloads oder NAS-Mounts zugreifen kann, benötigt die App <strong>Festplattenvollzugriff</strong>.<br>
-            <em>Systemeinstellungen → Datenschutz &amp; Sicherheit → Festplattenvollzugriff → Archivio Server hinzufügen.</em>
-          </div>
-          {% endif %}
-          <div class="list-items" id="base-folders-list">
-            {% for f in cfg.get('scanner', {}).get('base_folders', []) %}
-            <div class="list-item">
-              <div class="list-item-box">
-                <input type="text" name="base_folder_label" class="list-item-label"
-                  placeholder="Label" value="{{ f.get('label', '') }}">
-                <input type="text" name="base_folder_path" class="list-item-value"
-                  placeholder="/Volumes/NAS/Projekte" value="{{ f.get('path', '') }}">
-              </div>
-              <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
-                onclick="chooseBaseFolder(this)">📁</button>
-              <button type="button" class="remove-btn"
-                onclick="this.closest('.list-item').remove()">×</button>
-            </div>
-            {% endfor %}
-          </div>
-          <button type="button" class="add-btn" onclick="addBaseFolder()">+ Ordner hinzufügen</button>
-        </div>
-
-        <div>
-          <label style="font-size:13px; font-weight:500; color:var(--text); display:block; margin-bottom:6px;">
-            Ausgeschlossene Ordner
-          </label>
-          <div class="list-items" id="excluded-folders-list">
-            {% for f in cfg.get('scanner', {}).get('excluded_folders', []) %}
-            <div class="list-item">
-              <input type="text" name="excluded_folder"
-                placeholder="Ordnername oder Muster wie *privat*" value="{{ f }}">
-              <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
-                onclick="chooseExcludedFolder(this)">📁</button>
-              <button type="button" class="remove-btn"
-                onclick="this.closest('.list-item').remove()">×</button>
-            </div>
-            {% endfor %}
-          </div>
-          <button type="button" class="add-btn" onclick="addExcludedFolder()">+ Ordner hinzufügen</button>
         </div>
 
         <div>
@@ -285,76 +194,7 @@
       </div>
     </div>
 
-    {# ── Mail ── #}
-    <div class="settings-section">
-      <div class="settings-section-header">
-        Mail (IMAP)
-        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
-        <div class="section-help-panel">
-          <p>Verknüpfe deinen Projekt-Mailaccount, um auch Mails in den Suchresultaten anzeigen zu können.</p>
-          <p><strong>Passwort:</strong> leer lassen, um das bestehende Passwort zu behalten.</p>
-        </div>
-      </div>
-      <div class="settings-body">
-
-        <div class="mail-accounts" id="mail-accounts-list">
-          {% for acc in cfg.get('mail_accounts', []) %}
-          <div class="mail-account">
-            <div class="mail-account-header">
-              <input type="text" name="mail_label"
-                placeholder="Label (z.B. Büro)" value="{{ acc.get('label', '') }}">
-              {# Nach einem Import sind alle Passwörter leer — ohne sichtbaren Hinweis
-                 läuft der Mail-Scan sonst wochenlang ins Leere. #}
-              {% if not acc.get('password') %}
-              <span class="pw-missing" title="Ohne Passwort werden für dieses Konto keine Mails abgerufen">Passwort fehlt</span>
-              {% endif %}
-              <button type="button" class="remove-btn"
-                onclick="this.closest('.mail-account').remove()">×</button>
-            </div>
-            <div class="mail-account-body">
-              <div class="field-row-2">
-                <div class="field">
-                  <span class="field-prefix">Server</span>
-                  <input type="text" name="mail_host" value="{{ acc.get('host', '') }}">
-                </div>
-                <div class="field" style="flex:0 0 120px;">
-                  <span class="field-prefix" style="min-width:0;">Port</span>
-                  <input type="number" name="mail_port" min="1" max="65535"
-                    value="{{ acc.get('port', 993) }}">
-                </div>
-              </div>
-              <div class="field">
-                <span class="field-prefix">Benutzername</span>
-                <input type="text" name="mail_username"
-                  value="{{ acc.get('username', '') }}" autocomplete="off">
-              </div>
-              <div class="field">
-                <span class="field-prefix">Passwort</span>
-                <input type="password" name="mail_password"
-                  placeholder="{{ '••••••' if acc.get('password') else 'Passwort eingeben' }}"
-                  autocomplete="new-password">
-              </div>
-              <div class="mail-test-row">
-                <button type="button" class="mail-test-btn"
-                  onclick="testMail(this)">Verbindung testen</button>
-                <span class="test-result"></span>
-              </div>
-            </div>
-          </div>
-          {% endfor %}
-        </div>
-
-        <button type="button" class="add-btn" onclick="addMailAccount()">
-          + Konto hinzufügen
-        </button>
-
-        <div style="padding-top:4px;">
-          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
-        </div>
-
-      </div>
-    </div>
-
+    {# ── Rubrica (Mail-Konten stehen jetzt bei Projekte, im Mail-Bereich) ── #}
     <div class="settings-section">
       <div class="settings-section-header">Rubrica</div>
       <div class="settings-body">
@@ -372,7 +212,9 @@
 
   </form>
 
-  {# ── Sicherung & Umzug (ausserhalb Form — eigene Route, eigenes Formular) ── #}
+  <div class="settings-grid2">
+
+  {# ── Sicherung & Umzug (eigene Route, eigenes Formular) ── #}
   <div class="settings-section" id="sicherung">
     <div class="settings-section-header">
       Sicherung &amp; Umzug
@@ -381,7 +223,7 @@
         <p>Eine wöchentliche Kopie der Datenbank samt Einstellungen — damit ein Rechnerausfall keinen kompletten Neu-Scan bedeutet. Dieselbe Sicherung dient dem Umzug auf einen anderen Mac: dort einspielen statt alles neu zu indexieren.</p>
         <p><strong>Speicherort:</strong> am besten der Datei-Server oder eine externe Platte — nicht derselbe Rechner. Es wird immer genau eine Sicherung aufbewahrt; am Zielort sollte kurzzeitig der doppelte Platz frei sein, weil die bisherige erhalten bleibt, bis die neue vollständig geschrieben ist.</p>
         <p><strong>Wöchentlich sichern:</strong> läuft am gewählten Wochentag eine Stunde nach dem nächtlichen Scan, damit der frische Stand mitkommt. Läuft zu dem Zeitpunkt noch ein Scan, wird die Sicherung nachgeholt statt ausgelassen.</p>
-        <p><strong>Mail-Passwörter:</strong> die Sicherung enthält bewusst keine. Beim Einspielen auf einem anderen Mac werden sie einmalig neu abgefragt; bis dahin sind die betroffenen Konten oben als „Passwort fehlt" markiert.</p>
+        <p><strong>Mail-Passwörter:</strong> die Sicherung enthält bewusst keine. Beim Einspielen auf einem anderen Mac werden sie einmalig neu abgefragt; bis dahin sind die betroffenen Konten bei <a href="/dashboard">Projekte</a> im Mail-Bereich als „Passwort fehlt" markiert.</p>
         <p><strong>Sicherung einspielen:</strong> ersetzt Datenbank und Einstellungen vollständig. Vorher wird gefragt und eine Sicherheitskopie des bisherigen Standes angelegt. Heisst der Datei-Server auf diesem Mac anders, wird nach dem neuen Ort gefragt und der gesamte Index darauf umgeschrieben.</p>
       </div>
     </div>
@@ -436,13 +278,14 @@
     </div>
   </div>
 
-  {# ── Deinstallation ── #}
+  {# ── Diagnose und Deinstallation (kombiniert) ── #}
   <div class="settings-section" id="deinstallation">
     <div class="settings-section-header">
-      Deinstallation
+      Diagnose und Deinstallation
       <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
       <div class="section-help-panel">
-        <p>Entfernt Archivio von dem Mac, auf dem <strong>der Server</strong> läuft — auch wenn diese Seite gerade von einem anderen Rechner aus geöffnet ist. Andere Arbeitsplätze im Büro und eine bereits erstellte Sicherung bleiben unberührt.</p>
+        <p><strong>Diagnose:</strong> Prüft Pfade, Dateizugriffe und Systemkonfiguration des laufenden Servers.</p>
+        <p><strong>Archivio von diesem Mac entfernen:</strong> Entfernt Archivio von dem Mac, auf dem der Server läuft — auch wenn diese Seite gerade von einem anderen Rechner aus geöffnet ist. Andere Arbeitsplätze im Büro und eine bereits erstellte Sicherung bleiben unberührt.</p>
         <p>Der Knopf öffnet ein eigenes Programm, das durch die Rückfragen führt. Es erscheint auf dem Bildschirm des Server-Macs.</p>
         <p><strong>Zum Arbeitsplatz machen:</strong> für den Fall, dass der Server auf einen anderen Mac gezogen ist. Server und Datenbank werden entfernt, der Helper bleibt samt seinen Einstellungen und der Anbindung an Claude — dieser Mac arbeitet danach am neuen Server weiter.</p>
         <p><strong>Komplett entfernen:</strong> zusätzlich wird auch der Helper entfernt. Für einen Testrechner oder einen Mac, der ausgemustert wird.</p>
@@ -451,20 +294,6 @@
       </div>
     </div>
     <div class="settings-body">
-      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
-        <button type="button" class="add-btn" onclick="starteDeinstallation()">Archivio von diesem Mac entfernen…</button>
-        <span id="deinst-status" style="font-size:12px; color:var(--text-3);"></span>
-      </div>
-    </div>
-  </div>
-
-  {# ── Diagnose (ausserhalb Form) ── #}
-  <div class="settings-section">
-    <div class="settings-section-header">Diagnose</div>
-    <div class="settings-body">
-      <p style="font-size:13px; color:var(--text-2); margin:0 0 4px; line-height:1.5;">
-        Prüft Pfade, Dateizugriffe und Systemkonfiguration des laufenden Servers.
-      </p>
       <div>
         <button type="button"
           style="padding:6px 16px; font-size:13px; font-family:inherit;
@@ -479,126 +308,19 @@
               style="font-size:12px; color:var(--text-3); margin-left:8px;">Läuft…</span>
       </div>
       <div id="diag-results"></div>
+      <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:4px;">
+        <button type="button" class="add-btn" onclick="starteDeinstallation()">Archivio von diesem Mac entfernen…</button>
+        <span id="deinst-status" style="font-size:12px; color:var(--text-3);"></span>
+      </div>
     </div>
+  </div>
+
   </div>
 
 </div>
 
 <script>
 // toggleSectionHelp() lebt jetzt in base.html (auch vom Dashboard genutzt).
-
-function addMailAccount() {
-  var tpl = document.createElement('div');
-  tpl.className = 'mail-account';
-  tpl.innerHTML = `
-    <div class="mail-account-header">
-      <input type="text" name="mail_label" placeholder="Label (z.B. Büro)">
-      <button type="button" class="remove-btn" onclick="this.closest('.mail-account').remove()">×</button>
-    </div>
-    <div class="mail-account-body">
-      <div class="field-row-2">
-        <div class="field">
-          <span class="field-prefix">Server</span>
-          <input type="text" name="mail_host">
-        </div>
-        <div class="field" style="flex:0 0 120px;">
-          <span class="field-prefix" style="min-width:0;">Port</span>
-          <input type="number" name="mail_port" value="993" min="1" max="65535">
-        </div>
-      </div>
-      <div class="field">
-        <span class="field-prefix">Benutzername</span>
-        <input type="text" name="mail_username" autocomplete="off">
-      </div>
-      <div class="field">
-        <span class="field-prefix">Passwort</span>
-        <input type="password" name="mail_password" placeholder="Passwort eingeben" autocomplete="new-password">
-      </div>
-      <div class="mail-test-row">
-        <button type="button" class="mail-test-btn" onclick="testMail(this)">Verbindung testen</button>
-        <span class="test-result"></span>
-      </div>
-    </div>`;
-  document.getElementById('mail-accounts-list').appendChild(tpl);
-  tpl.querySelector('input[name="mail_label"]').focus();
-}
-
-function testMail(btn) {
-  var card = btn.closest('.mail-account');
-  var result = card.querySelector('.test-result');
-  var host = card.querySelector('input[name="mail_host"]').value;
-  var port = card.querySelector('input[name="mail_port"]').value;
-  var user = card.querySelector('input[name="mail_username"]').value;
-  var pw   = card.querySelector('input[name="mail_password"]').value;
-  result.textContent = 'Prüfe …';
-  var data = new FormData();
-  data.append('mail_host', host);
-  data.append('mail_port', port);
-  data.append('mail_username', user);
-  data.append('mail_password', pw);
-  fetch('/dashboard/settings/test-mail', { method: 'POST', body: data })
-    .then(function(r) { return r.text(); })
-    .then(function(html) { result.innerHTML = html; });
-}
-
-function addBaseFolder() {
-  var item = document.createElement('div');
-  item.className = 'list-item';
-  item.innerHTML =
-    '<div class="list-item-box">' +
-      '<input type="text" name="base_folder_label" class="list-item-label" placeholder="Label">' +
-      '<input type="text" name="base_folder_path" class="list-item-value" placeholder="/Volumes/NAS/Projekte">' +
-    '</div>' +
-    '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseBaseFolder(this)">📁</button>' +
-    '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
-  document.getElementById('base-folders-list').appendChild(item);
-  item.querySelector('input').focus();
-}
-
-function chooseBaseFolder(btn) {
-  var input = btn.closest('.list-item').querySelector('input[name="base_folder_path"]');
-  fetch(HELPER + '/choose-folder', { method: 'POST' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.cancelled) return;
-      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
-      input.value = d.path;
-      markSettingsDirty();
-    })
-    .catch(function() {
-      alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.');
-    });
-}
-
-function addExcludedFolder() {
-  var item = document.createElement('div');
-  item.className = 'list-item';
-  item.innerHTML =
-    '<input type="text" name="excluded_folder" placeholder="Ordnername oder Muster wie *privat*">' +
-    '<button type="button" class="browse-btn" title="Ordner im Finder auswählen" onclick="chooseExcludedFolder(this)">📁</button>' +
-    '<button type="button" class="remove-btn" onclick="this.closest(\'.list-item\').remove()">×</button>';
-  document.getElementById('excluded-folders-list').appendChild(item);
-  item.querySelector('input').focus();
-}
-
-function chooseExcludedFolder(btn) {
-  // Nur der Ordnername zählt beim Ausschliessen (exakter Name, siehe Hint-Text) --
-  // deshalb hier nur den letzten Pfadteil übernehmen, nicht den vollen Pfad wie bei
-  // chooseBaseFolder().
-  var input = btn.closest('.list-item').querySelector('input[name="excluded_folder"]');
-  fetch(HELPER + '/choose-folder', { method: 'POST' })
-    .then(function(r) { return r.json(); })
-    .then(function(d) {
-      if (d.cancelled) return;
-      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
-      var parts = d.path.replace(/\/+$/, '').split('/');
-      input.value = parts[parts.length - 1];
-      markSettingsDirty();
-    })
-    .catch(function() {
-      alert('Archivio Helper läuft nicht. Bitte starten, oder den Ordnernamen von Hand eintragen.');
-    });
-}
 
 function startMetaBackfill(link) {
   var parent = link.parentNode;

@@ -36,8 +36,8 @@ def test_norms_list_includes_validity_and_status(tmp_db):
     c = TestClient(app)
     r = c.get("/norms/list")
     assert r.status_code == 200
-    assert "2018-04-01" in r.text
-    assert "Ungeprüft" in r.text  # Default-Status vor jeder Prüfung
+    assert "2018" in r.text  # Jahr aus dem Gültigkeitsdatum, kompakte Zeile zeigt nur das Jahr
+    assert 'status-dot neutral' in r.text  # Default-Status als grauer Punkt vor jeder Prüfung
 
 
 def test_norms_check_one_updates_status(tmp_db, monkeypatch):
@@ -52,7 +52,7 @@ def test_norms_check_one_updates_status(tmp_db, monkeypatch):
     c = TestClient(app)
     r = c.post(f"/norms/check/{doc_id}")
     assert r.status_code == 200
-    assert "Aktuell" in r.text
+    assert "status-dot ok" in r.text  # kompakte Zeile zeigt den Status als grünen Punkt
 
     row = tmp_db.execute(
         "SELECT norm_check_status, norm_checked_at FROM documents WHERE id=?", (doc_id,)
@@ -91,8 +91,8 @@ def test_norms_check_one_backfills_missing_valid_from_before_checking(tmp_db, mo
     c = TestClient(app)
     r = c.post(f"/norms/check/{doc_id}")
     assert r.status_code == 200
-    assert "2018-04-01" in r.text  # Gültigkeit-Spalte jetzt befüllt
-    assert "Aktuell" in r.text
+    assert "2018" in r.text  # Gültigkeit-Jahr jetzt befüllt (kompakte Zeile zeigt nur das Jahr)
+    assert "status-dot ok" in r.text
 
     assert calls == [("180.081", "2018-04-01", "SIA")], "check_norm() muss das nachgetragene Datum bekommen"
 
@@ -140,8 +140,8 @@ def test_norms_check_one_reextracts_from_disk_when_cached_text_has_no_date(tmp_d
     c = TestClient(app)
     r = c.post(f"/norms/check/{doc_id}")
     assert r.status_code == 200
-    assert "2025-08-01" in r.text
-    assert "Aktuell" in r.text
+    assert "2025" in r.text  # kompakte Zeile zeigt nur das Jahr aus dem frisch extrahierten Datum
+    assert "status-dot ok" in r.text
     assert calls == [("142", "2025-08-01", "SIA")], "frisch extrahierter Typ/Nummer müssen verwendet werden"
 
     row = tmp_db.execute("SELECT norm_valid_from FROM documents WHERE id=?", (doc_id,)).fetchone()

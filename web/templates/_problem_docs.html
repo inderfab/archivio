@@ -1,9 +1,10 @@
-<div id="problem-docs-container" style="margin-top: 32px;">
+<div id="problem-docs-container">
   <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; position:relative; margin-bottom:12px;">
     <span>Dokumentenverarbeitung</span>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel">
       <p>Übersicht aller Dokumente, deren Inhalt (noch) nicht durchsuchbar ist — aufgeteilt nach Grund. „Nicht unterstützte Dateiformate" ist normal (Bilder, CAD-Dateien, Videos, …), die anderen Kategorien lassen sich zumindest teilweise nachholen.</p>
+      <p><strong>Farbpunkt pro Zeile:</strong> rot = Fehler bei der Extraktion, grau = Inhalt unklar oder zu gross (kein Fehler, aber ungeprüft), grün = erwartet, kein Handlungsbedarf. Mit der Maus über den Punkt fahren zeigt den genauen Grund.</p>
     </div>
   </div>
 
@@ -39,8 +40,8 @@
     <div class="problem-docs-list">
       {% for doc in error_files %}
       <div class="problem-doc-row problem-doc-error">
+        <span class="status-dot bad" title="{{ doc.reason }}"></span>
         <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
-        <span class="problem-doc-reason">{{ doc.reason }}</span>
         {% if doc.path %}
         <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
                 onclick="helperReveal(this.dataset.path)"
@@ -80,8 +81,8 @@
       </div>
       {% for doc in no_text_sample %}
       <div class="problem-doc-row problem-doc-no_text">
+        <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene"></span>
         <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
-        <span class="problem-doc-reason">{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene</span>
         {% if doc.path %}
         <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
                 onclick="helperReveal(this.dataset.path)"
@@ -112,8 +113,8 @@
     <div class="problem-docs-list">
       {% for doc in oversized_files %}
       <div class="problem-doc-row">
+        <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }}"></span>
         <span class="problem-doc-name" title="{{ doc.path or doc.filename }}">{{ doc.filename }}</span>
-        <span class="problem-doc-reason">{{ doc.filesize|fmt_size }}</span>
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
@@ -137,11 +138,9 @@
     <div class="problem-docs-list">
       {% for ext, cnt in unsupported_by_ext.items() %}
       <div class="problem-doc-row">
+        <span class="status-dot ok" title="{{ cnt }} Datei{{ 'en' if cnt != 1 else '' }} — erwartet, kein Handlungsbedarf"></span>
         <span class="problem-doc-name">{{ ext or '(ohne Endung)' }}</span>
-        <span class="problem-doc-reason">
-          {{ cnt }} Datei{{ "en" if cnt != 1 else "" }}
-          {% if ext in gallery_extensions %}· bereits über <a href="/">Suche → Fotos</a> zugänglich{% endif %}
-        </span>
+        {% if ext in gallery_extensions %}<a href="/" class="problem-doc-reason" style="flex:0 1 auto;">→ bereits über Fotos zugänglich</a>{% endif %}
       </div>
       {% endfor %}
     </div>

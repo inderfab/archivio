@@ -1,0 +1,213 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon_globe, icon_folder, icon_search %}
+{% block title %}Archivio – Sperrliste{% endblock %}
+
+{% block content %}
+<style>
+  .sperrliste-page { padding: 32px 0 64px; max-width: 960px; }
+  .sperrliste-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
+
+  .sp-box { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px; margin-bottom: 16px; }
+  .sp-box h2 {
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text); padding-bottom: 8px; border-bottom: 2px solid var(--accent);
+    margin: 0 0 12px; display: flex; align-items: center; justify-content: space-between; position: relative;
+  }
+  .sp-grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 720px) { .sp-grid2 { grid-template-columns: 1fr; } }
+
+  .sp-toolbar { display: flex; gap: 8px; margin-bottom: 10px; flex-wrap: wrap; align-items: center; }
+  .sp-toolbar .btn { display: inline-flex; align-items: center; gap: 6px; }
+  .sp-search-wrap { position: relative; flex: 1; min-width: 180px; }
+  .sp-search-ico { position: absolute; left: 10px; top: 50%; transform: translateY(-50%); color: var(--text-3); pointer-events: none; display: flex; }
+  .sp-search-wrap input[type=text] {
+    width: 100%; box-sizing: border-box; padding: 7px 10px 7px 32px; font-size: 12px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius); color: var(--text); background: var(--bg);
+  }
+  #norm-jump-results:empty { margin: 0; }
+
+  /* Kompakte Zeile: Kennung | Status | Aktionen -- für Normen */
+  .norm-list-row { display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+    border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 5px; font-size: 12px; }
+  .norm-list-row:last-child { margin-bottom: 0; }
+  .norm-chip { font-family: ui-monospace, monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+  .norm-meta { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+  .norm-unmark-btn:hover { opacity: 1; color: #dc2626; }
+
+  /* Normen-Kacheln SIA/VSS/Weitere */
+  details.norm-bucket { border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 6px; overflow: hidden; }
+  details.norm-bucket > summary {
+    display: flex; align-items: center; gap: 8px; padding: 8px 10px; background: var(--bg-2); cursor: pointer;
+    list-style: none; user-select: none; font-size: 12px; font-weight: 600;
+  }
+  details.norm-bucket > summary::-webkit-details-marker { display: none; }
+  details.norm-bucket > summary .bcount { color: var(--text-3); font-weight: 400; font-size: 11px; }
+  details.norm-bucket > summary .chev { margin-left: auto; color: var(--text-3); font-size: 10px; transition: transform .15s; }
+  details.norm-bucket[open] > summary .chev { transform: rotate(90deg); }
+  .norm-bucket-body { padding: 8px; }
+  .norms-list-scroll { max-height: 360px; overflow-y: auto; }
+
+  .norm-file-picker-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .norm-list { border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+
+  .norm-check-progress-banner {
+    display: flex; align-items: center; justify-content: space-between; gap: 12px;
+    padding: 8px 12px; margin-bottom: 10px; border-radius: var(--radius); font-size: 12px;
+    background: #eff6ff; border: 1px solid #bfdbfe; color: #1d4ed8;
+  }
+  .norm-check-progress-banner.done { background: #dcfce7; border-color: #bbf7d0; color: #166534; }
+  .norm-check-progress-banner.offline { background: #fef3c7; border-color: #fde68a; color: #92400e; }
+
+</style>
+
+<div class="sperrliste-page">
+  <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
+    <h1 style="margin-bottom:0;">Sperrliste</h1>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p>Drei unabhängige Arten, Inhalte einzuschränken:</p>
+      <p><strong>Normen</strong> — urheberrechtlich geschützte Normtexte gehen nie über MCP/KI hinaus, bleiben aber lokal durchsuchbar.</p>
+      <p><strong>Ausgeschlossene Ordner</strong> — büroweit, gilt für alle Projekte und sowohl für die lokale Suche als auch für MCP.</p>
+      <p><strong>MCP-Sperrbereich</strong> — zusätzliche, von Hand gesetzte Regeln nur für die KI-Schnittstelle; lokal bleibt alles durchsuchbar.</p>
+    </div>
+  </div>
+
+  {# ── Normen: volle Breite ──────────────────────────────────────────────── #}
+  <div class="sp-box sperrliste-normen">
+    <h2>
+      <span>Normen ({{ total_norms }})</span>
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Technische Normen (SIA/VSS/EN/DIN/ISO) werden lokal weiterhin durchsucht und angezeigt — ihr Volltext wird aber nicht über die KI/MCP-Schnittstelle ausgegeben (Urheber-/Lizenzrecht).</p>
+        <p>Fälschlich als Norm erkannte Dokumente (z. B. Korrespondenz oder Berechnungen, die eine Norm nur erwähnen) lassen sich in der jeweiligen Kachel über das ✕ dauerhaft als „keine Norm" markieren.</p>
+        <p>„Dokumente auf Normen prüfen" klassifiziert den ganzen Bestand anhand des bereits gespeicherten Texts neu — nötig nach dem Rescan eines Ordners, der schon vor der Norm-Erkennung indexiert war. „Aktualität prüfen" vergleicht jede erkannte Norm einzeln mit dem SIA-/VSS-Shop (kontaktiert externe Websites, nur auf Klick).</p>
+        <p><strong>Farbpunkt pro Zeile:</strong> grün = geprüft und aktuell, rot = nicht mehr aktuell, grau = noch nicht geprüft oder eine Prüfung war nicht möglich (z. B. kein Internetzugang).</p>
+      </div>
+    </h2>
+
+    <div id="norm-check-progress" hx-get="/norms/check-all/progress" hx-trigger="load, every 2s" hx-swap="innerHTML"></div>
+
+    <div class="sp-toolbar">
+      <span class="sp-search-wrap">
+        <span class="sp-search-ico">{{ icon_search() }}</span>
+        <input type="text" placeholder="Norm oder Datei suchen…"
+          hx-get="/norms/search-jump" hx-trigger="input changed delay:300ms" hx-target="#norm-jump-results" name="q">
+      </span>
+      <form hx-post="/norms/reclassify" hx-target=".sperrliste-normen" hx-select=".sperrliste-normen" hx-swap="outerHTML" style="display:contents;">
+        <button class="btn btn-sm" type="submit" title="Klassifiziert den kompletten Bestand anhand des bereits gespeicherten Volltexts neu -- nötig nach dem Rescan eines Ordners, der schon vor der Norm-Erkennung indexiert war">
+          Dokumente auf Normen prüfen
+        </button>
+      </form>
+      <button class="btn btn-sm" type="button" onclick="checkAllNorms(this)"
+              title="Vergleicht jede erkannte Norm einzeln mit shop.sia.ch/mobilityplatform.ch -- kontaktiert externe Websites, läuft nur auf diesen Klick hin, nie automatisch.">
+        {{ icon_globe() }} Aktualität prüfen
+      </button>
+      <button class="btn btn-sm btn-primary" type="button" onclick="document.getElementById('norm-add-panel').classList.toggle('open')">
+        + Datei als Norm kennzeichnen
+      </button>
+    </div>
+    <div id="norm-jump-results"></div>
+
+    <div id="norm-add-panel" class="norm-add-panel">
+      <div class="norm-file-picker-row">
+        <input type="text" class="sp-addrow-input" style="flex:1; font-size:12px; padding:7px 10px; border:1px solid var(--border); border-radius:var(--radius); background:var(--bg); color:var(--text);"
+          placeholder="Dokument als Norm hinzufügen: Dateiname oder Pfad eingeben…"
+          hx-get="/norms/search-candidates" hx-trigger="input changed delay:300ms"
+          hx-target="#norm-candidates" name="q" id="norm-search-input">
+        <button type="button" class="btn btn-sm" onclick="chooseNormFile()" title="Dokument im Finder auswählen" style="flex-shrink:0; display:inline-flex; align-items:center; gap:6px;">
+          {{ icon_folder() }} Datei wählen
+        </button>
+      </div>
+      <div id="norm-candidates" class="norm-list"></div>
+    </div>
+
+    {% for bucket in ['SIA', 'VSS', 'Weitere'] %}
+    <details class="norm-bucket" id="norm-bucket-{{ bucket }}"
+              hx-get="/norms/list?bucket={{ bucket }}" hx-trigger="toggle once"
+              hx-target="#norms-list-box-{{ bucket }}" hx-swap="innerHTML">
+      <summary>
+        <span>{{ bucket }}</span><span class="bcount">{{ bucket_counts.get(bucket, 0) }} Normen</span><span class="chev">▸</span>
+      </summary>
+      <div class="norm-bucket-body">
+        <div class="norms-list-scroll" id="norms-list-box-{{ bucket }}"></div>
+      </div>
+    </details>
+    {% endfor %}
+  </div>
+
+  {# ── Ausgeschlossene Ordner + MCP-Sperrbereich: zweispaltig ────────────── #}
+  <div class="sp-grid2">
+
+    <div class="sp-box">
+      <h2>
+        <span>Ausgeschlossene Ordner</span>
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Gilt büroweit, für alle Projekte, sowohl für die lokale Suche als auch für MCP. Ohne Stern zählt der exakte Ordnername (z. B. „Log" schliesst „Analog" oder „Logitech" nicht mit aus). Mit Stern als Muster: „*privat*" trifft jeden Ordner, der „privat" irgendwo im Namen enthält; „privat*" nur Namen, die damit beginnen.</p>
+          <p>Für eine Ausnahme in nur EINEM Projekt statt büroweit: „Ordner ignorieren" direkt beim jeweiligen Projekt in <a href="/dashboard">Projekte</a> verwenden.</p>
+        </div>
+      </h2>
+      {% include "_sperrliste_excluded_folders.html" %}
+    </div>
+
+    <div class="sp-box">
+      <h2>
+        <span>MCP-Sperrbereich</span>
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Ergänzt die automatische Norm-Erkennung um von Hand gesetzte Regeln: einzelne Dateien, Namens-Muster, ganze Ordner oder Projekte werden nie über MCP ausgegeben — lokal bleiben sie weiterhin durchsuchbar.</p>
+          <p>Ein Namens-Muster (z. B. <code>*Lohn*</code>) prüft sowohl den Dateinamen als auch den vollen Pfad.</p>
+          <p><strong>Wildcard-Syntax:</strong> <code>*xx*</code> — enthält „xx" irgendwo; <code>xx*</code> — beginnt mit „xx"; nur <code>xx</code> ohne Stern — ausschliesslich der exakt gleichnamige Ordner/Datei.</p>
+          <p>Eine Regel vom Typ „Projekt" zeigt beim betroffenen Projekt in <a href="/dashboard">Projekte</a> zusätzlich ein 🚫-Abzeichen neben dem ☁-Symbol.</p>
+        </div>
+      </h2>
+      {% include "_settings_block_rules.html" %}
+    </div>
+
+  </div>
+</div>
+
+<script>
+function checkAllNorms(btn) {
+  btn.disabled = true;
+  fetch('/norms/check-all', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (!d.ok) alert(d.error || 'Fehler beim Starten');
+      setTimeout(function() { btn.disabled = false; }, 2000);
+    })
+    .catch(function() { btn.disabled = false; });
+}
+
+function chooseNormFile() {
+  fetch(HELPER + '/choose-file', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      var input = document.getElementById('norm-search-input');
+      input.value = d.path;
+      input.dispatchEvent(new Event('input', { bubbles: true }));
+    })
+    .catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten, oder den Dateinamen von Hand eingeben.');
+    });
+}
+
+function chooseExcludedFolderSperrliste() {
+  var input = document.getElementById('excluded-folder-input');
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(function(r) { return r.json(); })
+    .then(function(d) {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      var parts = d.path.replace(/\/+$/, '').split('/');
+      input.value = parts[parts.length - 1];
+    })
+    .catch(function() {
+      alert('Archivio Helper läuft nicht. Bitte starten, oder den Ordnernamen von Hand eintragen.');
+    });
+}
+
+</script>
+{% endblock %}

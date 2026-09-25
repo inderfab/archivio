@@ -1,0 +1,10 @@
+{% from "_norms_row.html" import norm_row %}
+{% if matches %}
+<div class="norm-list" style="margin-top:8px; margin-bottom:8px;">
+  {% for d in matches %}
+  {{ norm_row(d, id_prefix='search-') }}
+  {% endfor %}
+</div>
+{% else %}
+<p class="norm-empty">Keine Norm gefunden.</p>
+{% endif %}

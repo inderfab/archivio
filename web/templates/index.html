@@ -16,7 +16,27 @@
       <button type="button" class="mode-btn active" id="mode-btn-search" onclick="switchMode('search')">Suche</button>
       <button type="button" class="mode-btn" id="mode-btn-gallery" onclick="switchMode('gallery')">Fotos</button>
     </div>
-    <select name="project_id" id="project_id_select" style="max-width:320px;"
+  </div>{# /header-row -- bleibt in Suche wie Fotos identisch, damit beim Moduswechsel
+             nichts (Logo, Umschalter) die Position wechselt. Die Projektauswahl steht
+             jetzt in der Filterzeile (search-scope-row), auf gleicher Ebene wie
+             Dateiformat/Weitere Filter/"?", statt separat ganz oben -- ein einzelnes
+             Element (nicht pro Modus dupliziert, sonst doppelte ID), das switchMode()
+             beim Wechsel zwischen den beiden Zeilen hin- und herschiebt. #}
+
+  <div id="search-mode-block">
+
+  <div class="search-wrap">
+    <input class="search-input" id="q" name="q" type="search"
+      placeholder="Dokumente und Mails durchsuchen…"
+      autocomplete="off" autofocus
+      hx-get="/search" hx-trigger="input changed delay:300ms, search"
+      hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
+    <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('q')">×</button>
+  </div>
+
+  {# ── Projekt- + Typ-Filter + Filter-Button (Row 3 -- gleiche Struktur wie bei Fotos) ── #}
+  <div class="search-scope-row">
+    <select name="project_id" id="project_id_select" style="max-width:220px; flex-shrink:0; font-weight:600;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
       onchange="updateChips(); if (currentMode === 'gallery') { refreshOrdnerTags(); reloadGallery(); }">
@@ -43,22 +63,6 @@
       </optgroup>
       {% endif %}
     </select>
-  </div>{# /header-row -- bleibt in Suche wie Fotos identisch, damit beim Moduswechsel
-             nichts (Logo, Umschalter, Projektauswahl) die Position wechselt #}
-
-  <div id="search-mode-block">
-
-  <div class="search-wrap">
-    <input class="search-input" id="q" name="q" type="search"
-      placeholder="Dokumente und Mails durchsuchen…"
-      autocomplete="off" autofocus
-      hx-get="/search" hx-trigger="input changed delay:300ms, search"
-      hx-target="#results" hx-include="#search-form" hx-indicator="#spinner">
-    <button type="button" class="search-clear-btn" aria-label="Suche leeren" onclick="clearSearchInput('q')">×</button>
-  </div>
-
-  {# ── Typ-Filter + Filter-Button (Row 3 -- gleiche Struktur wie bei Fotos) ── #}
-  <div class="search-scope-row">
     <select name="type" class="type-select"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
@@ -141,7 +145,14 @@
 
     <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
       aria-expanded="false" aria-controls="mehr-filter-panel"
-      onclick="toggleMehrFilter()">⚙ Filter</button>
+      onclick="toggleMehrFilter()">Weitere Filter</button>
+    <span style="position:relative;">
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p><strong>Einzelwörter</strong> (<code>Brandschutz</code>), <strong>Phrasen</strong> in Anführungszeichen (<code>"Technischer Bericht"</code>) oder <strong>mehrere Begriffe</strong> — dann müssen alle vorkommen.</p>
+        <p>Über „Weitere Filter" zusätzlich Zeitraum, Maildaten oder Tags einschränken.</p>
+      </div>
+    </span>
   </div>
   <input type="hidden" name="search_in" id="search_in_input" value="">
   <input type="hidden" name="scope" id="result_scope_input" value="">
@@ -269,7 +280,15 @@
        onclick="selectAllVisible()" title="Alle sichtbaren auswählen">☑ Sichtbare wählen</button>
      <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
        aria-expanded="false" aria-controls="gallery-filter-panel"
-       onclick="toggleGalleryFilterPanel()">⚙ Filter</button>
+       onclick="toggleGalleryFilterPanel()">Weitere Filter</button>
+     <span style="position:relative;">
+       <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+       <div class="section-help-panel">
+         <p><strong>Bewertung:</strong> Maus über ein Foto halten — Sterne (0–5) erscheinen, ein Klick setzt sie. Über „Weitere Filter" auch nach Bewertung eingrenzen, inklusive „Unbewertet".</p>
+         <p><strong>Tags:</strong> Taste <code>T</code> auf einem Foto öffnet die Eingabe. Tags lassen sich umbenennen und als Filter verwenden.</p>
+         <p><strong>Sortierung und Grösse:</strong> im Filter oberhalb der Galerie einstellbar.</p>
+       </div>
+     </span>
    </div>
 
    <div id="gallery-active-chips"></div>
@@ -520,7 +539,7 @@ function countActiveTier1Filters() {
 function updateMehrFilterCount() {
   var btn = document.getElementById('mehr-filter-btn');
   var n = countActiveTier1Filters();
-  btn.textContent = '⚙ Filter' + (n ? ' · ' + n : '');
+  btn.textContent = 'Weitere Filter' + (n ? ' · ' + n : '');
 }
 
 function toggleMehrFilter(forceOpen) {
@@ -652,6 +671,15 @@ function switchMode(mode) {
   document.getElementById('mode-btn-gallery').classList.toggle('active', mode === 'gallery');
   document.getElementById('search-mode-block').style.display = mode === 'search' ? '' : 'none';
   document.getElementById('gallery-mode-block').style.display = mode === 'gallery' ? '' : 'none';
+  // Die Projektauswahl ist EIN einzelnes Element (keine doppelte ID) -- beim
+  // Moduswechsel wandert es in die jeweils aktive Filterzeile, direkt vor den
+  // Dateiformat-Filter, statt separat und pro Modus dupliziert zu sein.
+  var projSel = document.getElementById('project_id_select');
+  if (mode === 'gallery') {
+    document.getElementById('gallery-format-select').before(projSel);
+  } else {
+    document.querySelector('#search-mode-block select[name="type"]').before(projSel);
+  }
   document.getElementById('results').style.display = mode === 'search' ? '' : 'none';
   document.getElementById('gallery-results').style.display = mode === 'gallery' ? '' : 'none';
   if (mode === 'gallery' && !galleryLoaded) {
@@ -956,7 +984,7 @@ function countActiveGalleryFilters() {
 function updateGalleryChips() {
   var btn = document.getElementById('gallery-filter-btn');
   var n = countActiveGalleryFilters();
-  btn.textContent = '⚙ Filter' + (n ? ' · ' + n : '');
+  btn.textContent = 'Weitere Filter' + (n ? ' · ' + n : '');
 
   var container = document.getElementById('gallery-active-chips');
   container.innerHTML = '';
@@ -1746,9 +1774,9 @@ document.addEventListener('keydown', function(e) {
 refreshSearchTagFilterList();  // Suche ist der Standard-Modus beim Laden
 
 document.addEventListener('DOMContentLoaded', function() {
-  // Deep-Link -- von /norms ("In der Suche anzeigen", nur "scope"/"norms") oder vom
-  // Suche-Protokoll im Systemstatus ("Resultate anzeigen", voller Query-String samt
-  // Suchfrage und allen aktiven Filtern, siehe scanner/search_log.py::query_string).
+  // Deep-Link -- von der Sperrliste ("In der Suche anzeigen", nur "scope"/"norms") oder
+  // vom Such-Verlauf ("Resultate anzeigen", voller Query-String samt Suchfrage und
+  // allen aktiven Filtern, siehe scanner/search_log.py::query_string).
   // Stellt Suchfeld + Filter aus der URL wieder her und löst danach die Suche aus.
   var params = new URLSearchParams(location.search);
   var _DEEP_LINK_PARAMS = ['q', 'project_id', 'type', 'scope', 'norms', 'search_in', 'tag_id',

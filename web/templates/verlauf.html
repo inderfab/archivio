@@ -1,0 +1,311 @@
+{% extends "base.html" %}
+{% from "_icons.html" import icon_download %}
+{% block title %}Archivio – Verlauf{% endblock %}
+
+{% block content %}
+<style>
+  .verlauf-page { padding: 32px 0 64px; max-width: 1100px; }
+  .verlauf-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
+
+  .verlauf-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+  @media (max-width: 760px) { .verlauf-grid { grid-template-columns: 1fr; } .vf-box { height: auto !important; } }
+
+  .vf-box { height: 460px; min-width: 0; border: 1px solid var(--border); border-radius: var(--radius); padding: 14px 16px; display: flex; flex-direction: column; overflow: hidden; }
+  .vf-box h2 {
+    font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em;
+    color: var(--text); padding-bottom: 6px; border-bottom: 2px solid var(--accent);
+    margin: 0 0 8px; display: flex; align-items: center; justify-content: space-between; position: relative;
+  }
+
+  .vf-stats { display: flex; gap: 16px; margin-bottom: 8px; }
+  .vf-stat-value { font-size: 15px; font-weight: 700; }
+  .vf-stat-label { font-size: 10px; color: var(--text-2); }
+  .vf-empty { color: var(--text-3); font-size: 12px; font-style: italic; }
+  #search-chart-btn.active, #search-chart-range-30.active, #search-chart-range-all.active {
+    background: var(--accent); color: #fff; border-color: var(--accent);
+  }
+
+  .vf-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
+  .vf-filters select, .vf-filters input {
+    padding: 5px 7px; font-size: 11px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg);
+  }
+
+  /* Universelles Zeilenmuster: Datum | Objekt/Datei/Ordner | Status-Punkt */
+  .vf-scroll { flex: 1; min-height: 0; overflow-y: auto; border-top: 1px solid var(--border); }
+  .vf-row { border-bottom: 1px solid var(--border); }
+  .vf-row > summary {
+    display: flex; align-items: center; gap: 8px; padding: 5px 2px; font-size: 11px;
+    cursor: pointer; list-style: none; user-select: none;
+  }
+  .vf-row > summary::-webkit-details-marker { display: none; }
+  .vf-dt { font-family: ui-monospace, monospace; color: var(--text-3); flex: 0 0 46px; white-space: nowrap; }
+  .vf-obj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vf-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .vf-dot.g { background: #16a34a; } .vf-dot.y { background: #d97706; } .vf-dot.r { background: #dc2626; }
+  .vf-detail { padding: 0 2px 8px 54px; font-size: 10.5px; color: var(--text-2); line-height: 1.6; }
+  .vf-group > summary { font-weight: 600; }
+  .vf-group .vf-row { margin-left: 12px; }
+</style>
+
+<div class="verlauf-page">
+  <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
+    <h1 style="margin-bottom:0;">Verlauf</h1>
+    <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <div class="section-help-panel">
+      <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
+      <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
+    </div>
+  </div>
+
+  {% macro render_scan(s) %}
+  <details class="vf-row">
+    <summary>
+      <span class="vf-dt">{{ s.started_at|fmt_ts }}</span>
+      <span class="vf-obj">{{ s.project_name or '—' }}</span>
+      <span class="vf-dot {{ 'g' if s.status == 'done' else ('y' if s.status == 'cancelled' else 'r') }}"></span>
+    </summary>
+    <div class="vf-detail">
+      <div style="color:var(--text);">
+        Start {{ s.started_at|fmt_ts }} · Dauer {{ s.duration_s|fmt_duration }} · {{ s.processed }}/{{ s.total }} Dateien · {{ s.new_count }} neu
+        · {{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% RAM){% endif %} · {{ s.peak_cpu_pct|round|int }}% CPU
+      </div>
+      {% if s.errors %}
+      <div style="margin-top:6px;">{{ s.error_count }} Fehler:</div>
+      {% for e in s.errors %}
+      <div style="display:flex; align-items:center; gap:8px; padding:2px 0; min-width:0;">
+        <span style="flex:1; min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap;" title="{{ e.path or e.filename }}">{{ e.filename or e.path }}</span>
+        {% if e.path %}
+        <button type="button" class="btn btn-sm" data-path="{{ e.path }}" onclick="helperReveal(this.dataset.path)"
+                style="font-size:10.5px; padding:1px 8px; flex-shrink:0;">Im Finder zeigen</button>
+        {% endif %}
+      </div>
+      {% endfor %}
+      {% endif %}
+    </div>
+  </details>
+  {% endmacro %}
+
+  {% macro render_mcp_entry(e) %}
+  <details class="vf-row">
+    <summary>
+      <span class="vf-dt">{{ e.ts[5:10] if e.ts else '—' }}</span>
+      <span class="vf-obj">{{ e.tool }} · {{ e.query or e.project_name or '—' }}</span>
+      <span class="vf-dot {{ 'g' if e.status == 'ok' else ('y' if e.status == 'blocked' else 'r') }}"></span>
+    </summary>
+    <div class="vf-detail">
+      {{ e.ts }}{% if e.project_name %} · {{ e.project_name }}{% endif %}
+      {% if e.query %}<br>Anfrage: {{ e.query }}{% endif %}
+      {% if e.files %}<br>{{ e.files | length }} Datei(en): {% for f in e.files %}{{ f.filename or f.path }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+      {% if e.blocked %}<br>Blockiert: {% for b in e.blocked %}{% if b.filename or b.path %}{{ b.filename or b.path }} — {% endif %}{{ b.reason }}{% if not loop.last %}, {% endif %}{% endfor %}{% endif %}
+    </div>
+  </details>
+  {% endmacro %}
+
+  <div class="verlauf-grid">
+
+    {# ── Such-Verlauf (oben links) ── #}
+    <div class="vf-box">
+      <h2>
+        <span>Such-Verlauf</span>
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Listet jede Suche auf: Anfrage, Trefferzahl, Dauer, und ob danach tatsächlich ein Treffer geöffnet wurde. Ohne Bezug zu Person oder Gerät.</p>
+          <p>Damit kann nachvollzogen werden, ob es Suchen ohne Treffer gibt oder ob es sehr lange geht, bis etwas angezeigt wird. Bei Problemen gerne Feedback senden.</p>
+        </div>
+      </h2>
+      <div class="vf-stats" style="justify-content:space-between;">
+        <div style="display:flex; gap:16px;">
+          <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 T.)</div></div>
+          <div><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Ø Dauer</div></div>
+          <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">0 Treffer</div></div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-sm" id="search-chart-btn" onclick="toggleSearchChart()">Grafik</button>
+          {% if search_entries %}<a class="btn btn-sm" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
+        </div>
+      </div>
+      <div id="search-chart-panel" style="display:none; flex:1; min-height:0; flex-direction:column;">
+        <div style="display:flex; gap:6px; margin-bottom:8px;">
+          <button type="button" class="btn btn-sm" id="search-chart-range-30" onclick="loadSearchChart('30')">Letzter Monat</button>
+          <button type="button" class="btn btn-sm" id="search-chart-range-all" onclick="loadSearchChart('all')">Gesamt</button>
+        </div>
+        <div id="search-chart-svg-wrap" style="flex:1; min-height:0; overflow-y:auto;"></div>
+      </div>
+      {% if not search_entries %}
+      <p class="vf-empty">Noch keine protokollierten Suchen.</p>
+      {% else %}
+      <div class="vf-scroll" id="search-list-wrap">
+        {% for e in search_entries %}
+        <details class="vf-row">
+          <summary>
+            <span class="vf-dt">{{ e.ts|fmt_ts }}</span>
+            <span class="vf-obj">{{ e.query or '—' }}</span>
+            <span class="vf-dot {{ 'y' if e.result_count == 0 else 'g' }}"></span>
+          </summary>
+          <div class="vf-detail">
+            {{ e.ts|fmt_ts }} · {{ e.project_name or 'Alle Projekte' }} · Filter: {{ e.filters or '—' }} · {{ e.result_count }} Treffer · {{ e.duration_ms|fmt_ms }}
+            {% if e.clicks %} · {{ e.clicks }}× geöffnet{% else %} · kein Klick{% endif %}
+            {% if e.query_string %}<br><a href="/?{{ e.query_string }}">Resultate anzeigen →</a>{% endif %}
+          </div>
+        </details>
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── MCP-Verlauf (oben rechts) ── #}
+    <div class="vf-box">
+      <h2>
+        <span>MCP-Verlauf</span>
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Jede Suche und jedes vollständig geladene Dokument über die Claude/MCP-Schnittstelle, inklusive der Fälle, in denen etwas blockiert wurde (Norm oder <a href="/sperrliste">Sperrliste</a>). Dieses Protokoll ist selbst nicht über MCP abfragbar.</p>
+        </div>
+      </h2>
+      <div class="vf-stats" style="justify-content:space-between;">
+        <div style="display:flex; gap:16px;">
+          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 T.)</div></div>
+          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Dateien</div></div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button type="submit" form="mcp-filter-form" class="btn btn-sm">Filtern</button>
+          <a class="btn btn-sm" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
+        </div>
+      </div>
+      <form id="mcp-filter-form" class="vf-filters" method="get" action="/verlauf">
+        <select name="project_id">
+          <option value="">Alle Projekte</option>
+          {% for p in mcp_projects %}
+          <option value="{{ p.id }}" {% if filter_project_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
+          {% endfor %}
+        </select>
+        <select name="status">
+          <option value="">Alle Status</option>
+          <option value="ok" {% if filter_status == 'ok' %}selected{% endif %}>Übermittelt</option>
+          <option value="blocked" {% if filter_status == 'blocked' %}selected{% endif %}>Blockiert</option>
+          <option value="error" {% if filter_status == 'error' %}selected{% endif %}>Fehler</option>
+        </select>
+      </form>
+      {% if not mcp_groups %}
+      <p class="vf-empty">Keine Zugriffe im gewählten Zeitraum/Filter.</p>
+      {% else %}
+      <div class="vf-scroll">
+        {% for g in mcp_groups %}
+          {% if g.count == 1 %}
+            {{ render_mcp_entry(g.entries[0]) }}
+          {% else %}
+          <details class="vf-row vf-group">
+            <summary>
+              <span class="vf-dt">{{ g.ts_start[5:10] }}</span>
+              <span class="vf-obj">{{ g.count }} Zugriffe{% if g.projects %} · {{ g.projects | join(', ') }}{% endif %}</span>
+              <span class="vf-dot {{ 'g' if g.status == 'ok' else ('y' if g.status == 'blocked' else 'r') }}"></span>
+            </summary>
+            {% for e in g.entries %}{{ render_mcp_entry(e) }}{% endfor %}
+          </details>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Scan-Verlauf (unten links) ── #}
+    <div class="vf-box">
+      <h2>
+        <span>Scan-Verlauf</span>
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
+        </div>
+      </h2>
+      {% if not groups %}
+      <p class="vf-empty">Noch keine protokollierten Scans.</p>
+      {% else %}
+      <div class="vf-scroll">
+        {% for g in groups %}
+          {% if g.count == 1 %}
+            {{ render_scan(g.entries[0]) }}
+          {% else %}
+          <details class="vf-row vf-group">
+            <summary>
+              <span class="vf-dt">{{ g.ts_start|fmt_ts }}</span>
+              <span class="vf-obj">Sammel-Scan · {{ g.count }} Projekte</span>
+              <span class="vf-dot {{ 'g' if g.status == 'done' else ('y' if g.status == 'cancelled' else 'r') }}"></span>
+            </summary>
+            {% for s in g.entries %}{{ render_scan(s) }}{% endfor %}
+          </details>
+          {% endif %}
+        {% endfor %}
+      </div>
+      {% endif %}
+    </div>
+
+    {# ── Dokumentenverarbeitung (unten rechts, bringt ihre eigene Überschrift+Hilfe mit, siehe _problem_docs.html) ── #}
+    <div class="vf-box">
+      <div id="problem-docs-container" class="vf-scroll" style="border-top:none;"
+           hx-get="/dashboard/problem-docs"
+           hx-trigger="load, archivio:scanComplete from:body"
+           hx-swap="outerHTML">
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+var _searchChartOpen = false;
+var _searchChartLastRange = null;
+
+function toggleSearchChart() {
+  _searchChartOpen = !_searchChartOpen;
+  var panel = document.getElementById('search-chart-panel');
+  var list  = document.getElementById('search-list-wrap');
+  var empty = document.querySelector('.vf-box .vf-empty');
+  panel.style.display = _searchChartOpen ? 'flex' : 'none';
+  if (list) list.style.display = _searchChartOpen ? 'none' : '';
+  if (empty) empty.style.display = _searchChartOpen ? 'none' : '';
+  document.getElementById('search-chart-btn').classList.toggle('active', _searchChartOpen);
+  if (_searchChartOpen && !_searchChartLastRange) loadSearchChart('30');
+}
+
+function loadSearchChart(range) {
+  _searchChartLastRange = range;
+  document.getElementById('search-chart-range-30').classList.toggle('active', range === '30');
+  document.getElementById('search-chart-range-all').classList.toggle('active', range === 'all');
+  var wrap = document.getElementById('search-chart-svg-wrap');
+  wrap.innerHTML = '<p class="vf-empty">Lädt…</p>';
+  fetch('/search-log/chart-data?range=' + range)
+    .then(function(r) { return r.json(); })
+    .then(function(rows) {
+      if (!rows.length) { wrap.innerHTML = '<p class="vf-empty">Keine Daten im gewählten Zeitraum.</p>'; return; }
+      wrap.innerHTML =
+        buildBarChart(rows, 'count', 'Suchen pro Tag', '#16a34a') +
+        buildBarChart(rows, 'avg_ms', 'Ø Dauer pro Tag (ms)', '#2563eb');
+    })
+    .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
+}
+
+function buildBarChart(rows, key, title, color) {
+  var w = 600, barGap = 2, padLeft = 4, padBottom = 16, chartH = 70;
+  var barW = Math.max(2, (w - padLeft * 2) / rows.length - barGap);
+  var max = Math.max.apply(null, rows.map(function(r) { return r[key]; })) || 1;
+  var bars = rows.map(function(r, i) {
+    var h = Math.max(1, (r[key] / max) * chartH);
+    var x = padLeft + i * (barW + barGap);
+    var y = chartH - h;
+    var label = r.day.slice(5) + ': ' + r[key];
+    return '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '"><title>' + label + '</title></rect>';
+  }).join('');
+  var firstDay = rows[0].day, lastDay = rows[rows.length - 1].day;
+  return '<div style="margin-bottom:16px;">' +
+    '<div style="font-size:11px; color:var(--text-2); margin-bottom:4px;">' + title + '</div>' +
+    '<svg viewBox="0 0 ' + w + ' ' + (chartH + padBottom) + '" style="width:100%; height:' + (chartH + padBottom) + 'px;">' +
+      bars +
+      '<text x="' + padLeft + '" y="' + (chartH + 12) + '" font-size="9" fill="currentColor" opacity="0.6">' + firstDay + '</text>' +
+      '<text x="' + (w - padLeft) + '" y="' + (chartH + 12) + '" font-size="9" fill="currentColor" opacity="0.6" text-anchor="end">' + lastDay + '</text>' +
+    '</svg>' +
+  '</div>';
+}
+</script>
+{% endblock %}

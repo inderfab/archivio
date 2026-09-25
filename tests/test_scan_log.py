@@ -94,6 +94,8 @@ def test_full_scan_writes_scan_log_via_run_scan(tmp_db, sample_files, monkeypatc
 
 
 def test_system_status_page_renders(tmp_db):
+    """/system-status ist seit v3.5.0 (Nav-Umbau: Systemstatus + MCP -> Verlauf)
+    nur noch ein Redirect auf /verlauf, wo der Scan-Verlauf jetzt lebt."""
     from fastapi.testclient import TestClient
     from web.main import app
 

@@ -114,6 +114,7 @@ async def dashboard(request: Request):
         "SELECT id, name FROM projects WHERE active=1 ORDER BY name"
     ).fetchall()
     conn.close()
+    fda_missing = await _fda_missing_check()
     return templates.TemplateResponse("dashboard.html", {
         "request":      request,
         "groups":       groups,
@@ -121,6 +122,8 @@ async def dashboard(request: Request):
         "orphans":      orphans,
         "configs":      [dict(r) for r in configs],
         "projects":     [dict(r) for r in projects],
+        "base_folders": settings.get("scanner.base_folders", []) or [],
+        "fda_missing":  fda_missing,
         "scan_status":  _mail_scan.get("status"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
@@ -1419,6 +1422,38 @@ def _helper_url_hint(cfg: dict) -> str:
     return f"http://{hostname}:{port}"
 
 
+async def _fda_missing_check() -> bool:
+    """Schneller FDA-Test: Desktop lesbar? Über run_in_executor+wait_for statt direkt --
+    ohne angehängte GUI-Session (z.B. via Launchd/Terminal-Automation, bevor macOS
+    je einen TCC-Zugriffsdialog für diesen Prozess gezeigt hat) kann scandir() auf
+    einem geschützten Ordner (Desktop/Documents/Downloads) unbegrenzt blockieren
+    statt sofort PermissionError zu werfen. Ein simples thread.join(timeout=..) würde
+    den Event-Loop trotzdem bis zum Timeout blockieren (und damit JEDE andere
+    gleichzeitige Anfrage an den Server) -- run_in_executor lagert den blockierenden
+    Aufruf in einen Worker-Thread aus, der Loop bleibt frei, nur DIESE Anfrage wartet.
+    Bei Timeout: Status unbekannt, Banner lieber nicht zeigen als den ganzen Server
+    lahmzulegen (der hängende Executor-Thread ist ein Daemon-Thread, kein Leak-Risiko
+    für den Prozess)."""
+    import os as _os
+
+    def _fda_check() -> bool:
+        _desktop = Path(_os.environ.get("HOME", str(Path.home()))) / "Desktop"
+        try:
+            list(_os.scandir(str(_desktop)))
+            return False
+        except PermissionError:
+            return True
+        except FileNotFoundError:
+            return False
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.get_event_loop().run_in_executor(None, _fda_check), timeout=2,
+        )
+    except asyncio.TimeoutError:
+        return False
+
+
 @router.get("/settings", response_class=HTMLResponse)
 async def settings_page(
     request: Request,
@@ -1435,35 +1470,7 @@ async def settings_page(
             "username": old.get("username", ""),
             "password": old.get("password", ""),
         }]
-    # Schneller FDA-Test: Desktop lesbar? Über run_in_executor+wait_for statt direkt --
-    # ohne angehängte GUI-Session (z.B. via Launchd/Terminal-Automation, bevor macOS
-    # je einen TCC-Zugriffsdialog für diesen Prozess gezeigt hat) kann scandir() auf
-    # einem geschützten Ordner (Desktop/Documents/Downloads) unbegrenzt blockieren
-    # statt sofort PermissionError zu werfen. Ein simples thread.join(timeout=..) würde
-    # den Event-Loop trotzdem bis zum Timeout blockieren (und damit JEDE andere
-    # gleichzeitige Anfrage an den Server) -- run_in_executor lagert den blockierenden
-    # Aufruf in einen Worker-Thread aus, der Loop bleibt frei, nur DIESE Anfrage wartet.
-    # Bei Timeout: Status unbekannt, Banner lieber nicht zeigen als den ganzen Server
-    # lahmzulegen (der hängende Executor-Thread ist ein Daemon-Thread, kein Leak-Risiko
-    # für den Prozess).
-    import os as _os
-
-    def _fda_check() -> bool:
-        _desktop = Path(_os.environ.get("HOME", str(Path.home()))) / "Desktop"
-        try:
-            list(_os.scandir(str(_desktop)))
-            return False
-        except PermissionError:
-            return True
-        except FileNotFoundError:
-            return False
-
-    try:
-        fda_missing = await asyncio.wait_for(
-            asyncio.get_event_loop().run_in_executor(None, _fda_check), timeout=2,
-        )
-    except asyncio.TimeoutError:
-        fda_missing = False
+    fda_missing = await _fda_missing_check()
     from db import backup as backup_mod
     return templates.TemplateResponse("settings.html", {
         "request":     request,
@@ -1513,6 +1520,16 @@ def _block_rules_context(conn) -> dict:
     for r in rows:
         d = dict(r)
         d["count"] = matching_count(conn, d["type"], d["value"])
+        if d["type"] == "project":
+            # Für die sichtbare Verbindung zur Projekte-Seite (☁-Symbol dort zeigt
+            # bei aktiver Regel zusätzlich ein 🚫-Abzeichen, siehe
+            # _dashboard_projects.html) den Projektnamen statt der blossen ID zeigen.
+            proj = conn.execute(
+                "SELECT id, name FROM projects WHERE id=?", (d["value"],)
+            ).fetchone()
+            if proj:
+                d["project_id"] = proj["id"]
+                d["project_name"] = proj["name"]
         rules.append(d)
     active_patterns = {r["value"] for r in rows if r["type"] == "pattern" and r["enabled"]}
     suggestions = [
@@ -1592,6 +1609,124 @@ async def block_rule_delete(request: Request, rule_id: int):
     return resp
 
 
+# ── Ausgeschlossene Ordner (Sperrliste) ────────────────────────────────────────
+# Bürobreite, namens-/musterbasierte Ausnahme, GILT FÜR ALLE PROJEKTE -- getrennt
+# vom projekt-eigenen "Ordner ignorieren" in _dashboard_projects.html
+# (ignored_paths-Tabelle, pfadgenau, pro Projekt). War früher Teil des grossen
+# Settings-Sammelformulars (POST /dashboard/settings); eigene Routen, damit ein
+# Klick hier nicht versehentlich mit einem unvollständig mitgeschickten
+# Settings-Formular alle anderen Settings-Felder überschreibt.
+
+def _excluded_folders_response(request: Request):
+    return templates.TemplateResponse("_sperrliste_excluded_folders.html", {
+        "request":          request,
+        "excluded_folders": settings.get("scanner.excluded_folders", []) or [],
+    })
+
+
+@router.post("/sperrliste/excluded-folders/add", response_class=HTMLResponse)
+async def excluded_folder_add(request: Request, value: str = Form(...)):
+    value = value.strip()
+    if value:
+        current = list(settings.get("scanner.excluded_folders", []) or [])
+        if value not in current:
+            current.append(value)
+            settings.save({"scanner": {"excluded_folders": current}})
+    return _excluded_folders_response(request)
+
+
+@router.post("/sperrliste/excluded-folders/remove", response_class=HTMLResponse)
+async def excluded_folder_remove(request: Request, value: str = Form(...)):
+    current = [v for v in (settings.get("scanner.excluded_folders", []) or []) if v != value]
+    settings.save({"scanner": {"excluded_folders": current}})
+    return _excluded_folders_response(request)
+
+
+# ── Projektordner (neue Projekte) ──────────────────────────────────────────────
+# War früher Teil des grossen Settings-Sammelformulars -- lebt jetzt direkt auf
+# der Projekte-Seite, wo ein neuer Ordner unmittelbar als neues Projekt sichtbar
+# wird, statt in den Einstellungen zu suchen.
+
+def _base_folders_response(request: Request):
+    return templates.TemplateResponse("_dashboard_base_folders.html", {
+        "request":      request,
+        "base_folders": settings.get("scanner.base_folders", []) or [],
+    })
+
+
+@router.post("/base-folders/add", response_class=HTMLResponse)
+async def base_folder_add(request: Request, label: str = Form(""), path: str = Form(...)):
+    path = path.strip()
+    if path:
+        current = list(settings.get("scanner.base_folders", []) or [])
+        if not any(f.get("path") == path for f in current):
+            current.append({"label": label.strip(), "path": path})
+            settings.save({"scanner": {"base_folders": current}})
+    return _base_folders_response(request)
+
+
+@router.post("/base-folders/remove", response_class=HTMLResponse)
+async def base_folder_remove(request: Request, path: str = Form(...)):
+    current = list(settings.get("scanner.base_folders", []) or [])
+    remaining = [f for f in current if f.get("path") != path]
+    settings.save({"scanner": {"base_folders": remaining}})
+
+    # Auto-entdeckte Projekte (direkte Unterordner dieses Base-Folders, siehe
+    # _discovered_projects_for_base) deaktivieren -- sonst bleiben sie in der DB
+    # active=1, unsichtbar im Dashboard (Gruppierung läuft nur über aktuelle
+    # base_folders), aber /api/scan/all und der geplante Scan scannen weiter ein
+    # Geisterprojekt, das nirgends im UI mehr auftaucht.
+    conn = connection.get_connection()
+    try:
+        rows = conn.execute("SELECT id, path FROM projects WHERE active=1").fetchall()
+        stale_ids = [r["id"] for r in rows if os.path.dirname(r["path"]) == path]
+        if stale_ids:
+            with conn:
+                conn.executemany("UPDATE projects SET active=0 WHERE id=?", [(i,) for i in stale_ids])
+            log.info("Base-Folder entfernt — %d verwaiste(s) Projekt(e) deaktiviert: %s", len(stale_ids), stale_ids)
+    finally:
+        conn.close()
+    return _base_folders_response(request)
+
+
+# ── Mail-Konten (neues Konto einrichten) ───────────────────────────────────────
+# Wie bei Projektordnern: eigene Routen statt Teil des grossen Settings-
+# Sammelformulars, direkt erreichbar auf der Projekte-Seite im Mail-Bereich.
+
+def _mail_accounts_response(request: Request):
+    return templates.TemplateResponse("_dashboard_mail_accounts.html", {
+        "request":      request,
+        "mail_accounts": settings.get("mail_accounts", []) or [],
+    })
+
+
+@router.post("/mail-accounts/add", response_class=HTMLResponse)
+async def mail_account_add(
+    request:  Request,
+    label:    str = Form(""),
+    host:     str = Form(...),
+    port:     str = Form("993"),
+    username: str = Form(...),
+    password: str = Form(...),
+):
+    host, username, password = host.strip(), username.strip(), password.strip()
+    if host and username and password:
+        current = list(settings.get("mail_accounts", []) or [])
+        current.append({
+            "label": label.strip(), "host": host,
+            "port": int(port or 993), "username": username, "password": password,
+        })
+        settings.save({"mail_accounts": current, "mail": current[0]})
+    return _mail_accounts_response(request)
+
+
+@router.post("/mail-accounts/remove", response_class=HTMLResponse)
+async def mail_account_remove(request: Request, username: str = Form(...)):
+    current = [a for a in (settings.get("mail_accounts", []) or []) if a.get("username") != username]
+    settings.save({"mail_accounts": current, "mail": current[0] if current else {}})
+    return _mail_accounts_response(request)
+
+
 @router.get("/helper", response_class=HTMLResponse)
 async def helper_page(request: Request):
     cfg = settings.load_all()
@@ -1608,11 +1743,6 @@ async def helper_page(request: Request):
 async def settings_save(request: Request):
     form = await request.form()
 
-    old_cfg  = settings.load_all()
-    old_accounts = old_cfg.get("mail_accounts", old_cfg.get("mail", []))
-    if isinstance(old_accounts, dict):
-        old_accounts = [old_accounts]
-
     # Büro
     office_name     = form.get("office_name", "").strip()
     office_language = form.get("office_language", "de")
@@ -1624,41 +1754,22 @@ async def settings_save(request: Request):
     scan_time   = form.get("scan_time", "").strip()
     num_workers = max(1, min(4, int(form.get("num_workers", "1") or "1")))
 
-    # Mail — mehrere Konten
-    labels    = form.getlist("mail_label")
-    hosts     = form.getlist("mail_host")
-    ports     = form.getlist("mail_port")
-    usernames = form.getlist("mail_username")
-    passwords = form.getlist("mail_password")
+    # Mail-Konten (mail_accounts) werden NICHT mehr über dieses Sammelformular
+    # gepflegt (siehe /dashboard/mail-accounts/add|remove auf der Projekte-Seite)
+    # -- absichtlich nicht in "updates" aufnehmen, aus demselben Grund wie
+    # base_folders/excluded_folders unten.
 
-    mail_accounts = []
-    for i, (lbl, h, po, u, pw) in enumerate(zip(labels, hosts, ports, usernames, passwords)):
-        if not h.strip() and not u.strip():
-            continue
-        if not pw.strip():
-            # bestehendes Passwort behalten
-            pw = old_accounts[i]["password"] if i < len(old_accounts) else ""
-        mail_accounts.append({
-            "label":    lbl.strip(),
-            "host":     h.strip(),
-            "port":     int(po or 993),
-            "username": u.strip(),
-            "password": pw.strip(),
-        })
+    # Scanner — base_folders wird NICHT mehr über dieses Sammelformular gepflegt
+    # (siehe /dashboard/base-folders/add|remove auf der Projekte-Seite) --
+    # absichtlich nicht in "updates" aufnehmen, sonst würde ein Speichern hier
+    # den dort gepflegten Bestand mit einer leeren Liste überschreiben.
 
-    # Scanner — base_folders
-    bf_labels = form.getlist("base_folder_label")
-    bf_paths  = form.getlist("base_folder_path")
-    base_folders = [
-        {"label": l.strip(), "path": p.strip()}
-        for l, p in zip(bf_labels, bf_paths)
-        if p.strip()
-    ]
-
-    # Scanner — excluded_folders
-    excluded_folders = [
-        v.strip() for v in form.getlist("excluded_folder") if v.strip()
-    ]
+    # Scanner — excluded_folders wird NICHT mehr über dieses Sammelformular
+    # gepflegt (siehe /sperrliste/excluded-folders/add|remove) -- absichtlich
+    # nicht in "updates" aufnehmen, sonst würde ein Speichern hier bei jedem
+    # Aufruf den in der Sperrliste gepflegten Bestand mit einer leeren Liste
+    # überschreiben (settings.save() ersetzt Listenwerte komplett, siehe
+    # config/settings.py::_deep_update).
 
     # Rubrica — nur "enabled" hier gesetzt; db_path bleibt (falls manuell in config.yaml
     # gesetzt) unangetastet, da settings.save() pro Sektion tief mergt statt zu ersetzen.
@@ -1670,46 +1781,10 @@ async def settings_save(request: Request):
             "language": office_language,
         },
         "scheduler":     {"scan_time": scan_time},
-        "mail_accounts": mail_accounts,
-        # erstes Konto auch unter mail: {} für Rückwärtskompatibilität
-        "mail":          mail_accounts[0] if mail_accounts else {},
-        "scanner": {
-            "base_folders":     base_folders,
-            "excluded_folders": excluded_folders,
-            "num_workers":      num_workers,
-        },
+        "scanner":       {"num_workers": num_workers},
         "rubrica": {"enabled": rubrica_enabled},
     }
     settings.save(updates)
-
-    # Auto-entdeckte Fotos-Projekte (direkte Unterordner eines Base-Folders, siehe
-    # _discovered_projects_for_base) deaktivieren, wenn ihr Base-Folder hier entfernt
-    # oder geändert wird. Sonst bleiben sie in der DB active=1 -- unsichtbar in den
-    # Settings (nur aktuelle base_folders werden angezeigt) UND im Dashboard (die
-    # Gruppierung läuft nur über die aktuellen base_folders), aber /api/scan/all und
-    # der geplante Scan holen weiterhin blind "WHERE active=1" und scannen munter
-    # weiter -- ein Geisterprojekt, das nirgends im UI mehr auftaucht.
-    old_base_paths = {
-        f.get("path") for f in old_cfg.get("scanner", {}).get("base_folders", []) if f.get("path")
-    }
-    new_base_paths = {f.get("path") for f in base_folders if f.get("path")}
-    removed_base_paths = old_base_paths - new_base_paths
-    if removed_base_paths:
-        conn = connection.get_connection()
-        try:
-            rows = conn.execute("SELECT id, path FROM projects WHERE active=1").fetchall()
-            stale_ids = [
-                r["id"] for r in rows if os.path.dirname(r["path"]) in removed_base_paths
-            ]
-            if stale_ids:
-                with conn:
-                    conn.executemany(
-                        "UPDATE projects SET active=0 WHERE id=?", [(i,) for i in stale_ids]
-                    )
-                log.info("Base-Folder entfernt/geändert — %d verwaiste(s) Projekt(e) deaktiviert: %s",
-                          len(stale_ids), stale_ids)
-        finally:
-            conn.close()
 
     return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
 
@@ -1909,6 +1984,13 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         # zeigt bewusst nicht "gescannt vor X Tg." (klänge nach überfällig), siehe
         # scanner/scan_log.py für die Stufenlogik.
         _fresh_label, _fresh_class = "archiviert", "archived"
+    # Ein Projekt kann zusätzlich zu mcp_enabled über eine Sperrliste-Regel
+    # (block_rules, type='project') komplett von MCP ausgeschlossen sein -- das
+    # Cloud-Symbol im Dashboard soll diesen Fall sichtbar machen (verlinkt zur
+    # Sperrliste), siehe _dashboard_projects.html.
+    _blocked_row = conn.execute(
+        "SELECT 1 FROM block_rules WHERE type='project' AND value=?", (str(db["id"]),)
+    ).fetchone()
     return {
         "name":             db["name"],
         "sub_label":        label,
@@ -1917,6 +1999,7 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "id":               db["id"],
         "active":           bool(db["active"]),
         "mcp_enabled":      bool(db["mcp_enabled"]) if "mcp_enabled" in db.keys() else False,
+        "mcp_blocked":      _blocked_row is not None,
         "archived":         bool(_archive_tier),
         "archive_next_check": _fmt_iso_datetime(db["archive_next_check_at"])
                               if "archive_next_check_at" in db.keys() else None,

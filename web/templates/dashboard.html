@@ -1,5 +1,5 @@
 {% extends "base.html" %}
-{% block title %}Archivio – Dashboard{% endblock %}
+{% block title %}Archivio – Projekte{% endblock %}
 
 {% block content %}
 <div style="padding-top: 32px;">
@@ -21,8 +21,18 @@
     </button>
   </div>
 
-  {# ── Statistiken ── #}
+  {# ── Statistiken + "Neuer Projektordner"/"Neues Mail-Konto" (öffnen die Panels darunter) ── #}
   {% include "_dashboard_stats.html" %}
+
+  <div id="project-folders-panel" class="norm-add-panel" style="border-top:none; margin-top:0;">
+    {% include "_dashboard_base_folders.html" %}
+  </div>
+  <div id="mail-accounts-panel" class="norm-add-panel" style="border-top:none; margin-top:0;">
+    <div class="ordner-callout" style="margin-bottom:16px;">
+      <label style="font-size:14px; font-weight:700; color:var(--text); display:block; margin-bottom:10px;">Neues Mail-Konto einrichten</label>
+      {% include "_dashboard_mail_accounts.html" %}
+    </div>
+  </div>
 
   {# ── Projektliste (Hilfebutton sitzt am ersten Gruppentitel, siehe _dashboard_projects.html) ── #}
   <div id="project-list"
@@ -43,6 +53,40 @@
 </div>
 
 <script>
+  function toggleTopPanel(panelId, btn) {
+    var panel = document.getElementById(panelId);
+    var otherId = panelId === 'project-folders-panel' ? 'mail-accounts-panel' : 'project-folders-panel';
+    document.getElementById(otherId).classList.remove('open');
+    panel.classList.toggle('open');
+  }
+
+  function testNewMailAccount(btn) {
+    var form = btn.closest('form');
+    var result = form.querySelector('.test-result');
+    result.textContent = 'Prüfe …';
+    var data = new FormData();
+    data.append('mail_host', form.querySelector('input[name="host"]').value);
+    data.append('mail_port', form.querySelector('input[name="port"]').value);
+    data.append('mail_username', form.querySelector('input[name="username"]').value);
+    data.append('mail_password', form.querySelector('input[name="password"]').value);
+    fetch('/dashboard/settings/test-mail', { method: 'POST', body: data })
+      .then(function(r) { return r.text(); })
+      .then(function(html) { result.innerHTML = html; });
+  }
+
+  function chooseNewBaseFolder() {
+    fetch(HELPER + '/choose-folder', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(d) {
+        if (d.cancelled) return;
+        if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+        document.getElementById('new-base-folder-path').value = d.path;
+      })
+      .catch(function() {
+        alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.');
+      });
+  }
+
   function moveProject(projectId) {
     fetch(HELPER + '/choose-folder', { method: 'POST' })
       .then(function(r) { return r.json(); })

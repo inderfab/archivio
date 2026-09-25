@@ -1,0 +1,24 @@
+{% from "_icons.html" import icon_folder %}
+<div id="excluded-folders-section">
+  {% if excluded_folders %}
+  {% for f in excluded_folders %}
+  <div class="sp-row">
+    <span class="chip">{{ f }}</span>
+    <form hx-post="/dashboard/sperrliste/excluded-folders/remove" hx-target="#excluded-folders-section" hx-swap="outerHTML" style="display:contents;">
+      <input type="hidden" name="value" value="{{ f }}">
+      <button type="submit" class="norm-icon-btn" title="Entfernen">×</button>
+    </form>
+  </div>
+  {% endfor %}
+  {% else %}
+  <p class="norm-empty">Keine ausgeschlossenen Ordner.</p>
+  {% endif %}
+
+  <form hx-post="/dashboard/sperrliste/excluded-folders/add" hx-target="#excluded-folders-section" hx-swap="outerHTML" class="sp-addrow">
+    <input type="text" name="value" placeholder="Ordnername oder Muster wie *privat*" id="excluded-folder-input"
+           hx-post="/dashboard/sperrliste/excluded-folders/add" hx-trigger="blur changed"
+           hx-target="#excluded-folders-section" hx-swap="outerHTML">
+    <button type="button" class="btn btn-sm" title="Ordner im Finder auswählen" onclick="chooseExcludedFolderSperrliste()" style="display:inline-flex; align-items:center;">{{ icon_folder() }}</button>
+    <button type="submit" class="btn btn-sm">+</button>
+  </form>
+</div>

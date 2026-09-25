@@ -38,7 +38,7 @@ def _setup_logging() -> None:
 _setup_logging()
 
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 
 from db import connection
@@ -537,8 +537,18 @@ async def search_log_click(search_log_id: int):
     return JSONResponse({"ok": True})
 
 
-@app.get("/norms", response_class=HTMLResponse)
-async def norms_page(request: Request):
+@app.get("/norms", response_class=RedirectResponse)
+async def norms_page_redirect():
+    # Alte Reiter-URL (bis v3.5.0: eigener "Normen"-Reiter) -- Normen sind seither
+    # Teil der konsolidierten Sperrliste (Verwaltung ▾), siehe sperrliste_page().
+    return RedirectResponse("/sperrliste", status_code=307)
+
+
+@app.get("/sperrliste", response_class=HTMLResponse)
+async def sperrliste_page(request: Request):
+    from config import settings
+    from web.dashboard import _block_rules_context
+
     # Eine abgeschlossene "Aktualität aller Normen prüfen"-Meldung ("✓ Geprüft: X/X")
     # soll nur so lange sichtbar bleiben, wie man auf der Seite bleibt -- ein frischer
     # Aufruf dieser Route (Seitenwechsel/Neuladen) räumt sie weg. Läuft der Abgleich
@@ -561,13 +571,20 @@ async def norms_page(request: Request):
         "WHERE status = 'rejected' ORDER BY path"
     ).fetchall()
     total_norms = conn.execute("SELECT COUNT(*) FROM documents WHERE is_norm = 1").fetchone()[0]
+    bucket_counts: dict[str, int] = {"SIA": 0, "VSS": 0, "Weitere": 0}
+    for d in _all_norm_docs(conn):
+        bucket_counts[_norm_bucket(d["type"])] += 1
+    block_ctx = _block_rules_context(conn)
     conn.close()
-    return templates.TemplateResponse("norms.html", {
-        "request":     request,
-        "proposed":    [dict(r) for r in proposed],
-        "confirmed":   [dict(r) for r in confirmed],
-        "rejected":    [dict(r) for r in rejected],
-        "total_norms": total_norms,
+    return templates.TemplateResponse("sperrliste.html", {
+        "request":          request,
+        "proposed":         [dict(r) for r in proposed],
+        "confirmed":        [dict(r) for r in confirmed],
+        "rejected":         [dict(r) for r in rejected],
+        "total_norms":      total_norms,
+        "bucket_counts":    bucket_counts,
+        "excluded_folders": settings.get("scanner.excluded_folders", []) or [],
+        **block_ctx,
     })
 
 
@@ -580,7 +597,7 @@ async def norms_confirm(request: Request, path: str = Form(...)):
     confirm_norm_folder(conn, path)
     reload_classifier(conn)
     conn.close()
-    return await norms_page(request)
+    return await sperrliste_page(request)
 
 
 @app.post("/norms/reject", response_class=HTMLResponse)
@@ -592,7 +609,7 @@ async def norms_reject(request: Request, path: str = Form(...)):
     reject_norm_folder(conn, path)
     reload_classifier(conn)
     conn.close()
-    return await norms_page(request)
+    return await sperrliste_page(request)
 
 
 @app.post("/norms/add-folder", response_class=HTMLResponse)
@@ -609,7 +626,7 @@ async def norms_add_folder(request: Request, path: str = Form(...)):
         add_manual_norm_folder(conn, path)
         reload_classifier(conn)
         conn.close()
-    return await norms_page(request)
+    return await sperrliste_page(request)
 
 
 @app.post("/norms/unmark/{doc_id}", response_class=HTMLResponse)
@@ -673,7 +690,7 @@ async def norms_reclassify(request: Request):
             conn.commit()
     finally:
         conn.close()
-    return await norms_page(request)
+    return await sperrliste_page(request)
 
 
 _NORMS_PAGE_SIZE = 50
@@ -698,9 +715,14 @@ def _norm_doc_dict(r) -> dict:
     }
 
 
-@app.get("/norms/list", response_class=HTMLResponse)
-async def norms_list(request: Request, offset: int = Query(default=0)):
-    conn = connection.get_connection()
+def _norm_bucket(norm_type: str) -> str:
+    """Gruppiert die kosmetischen Norm-Typen (siehe guess_norm_type) in die drei
+    Kacheln der Sperrliste -- SIA und VSS sind im Büroalltag die weitaus
+    häufigsten, alles andere (SN/EN/DIN/ISO/IEC/unbekannt) landet in "Weitere"."""
+    return norm_type if norm_type in ("SIA", "VSS") else "Weitere"
+
+
+def _all_norm_docs(conn) -> list[dict]:
     rows = conn.execute("""
         SELECT d.id AS id, d.filename AS filename, dp.path AS path,
                COALESCE(c.content, '') AS content,
@@ -712,16 +734,45 @@ async def norms_list(request: Request, offset: int = Query(default=0)):
         LEFT JOIN document_content c ON c.document_id = d.id
         WHERE d.is_norm = 1
         ORDER BY dp.path
-        LIMIT ? OFFSET ?
-    """, (_NORMS_PAGE_SIZE, offset)).fetchall()
+    """).fetchall()
+    return [_norm_doc_dict(r) for r in rows]
+
+
+@app.get("/norms/list", response_class=HTMLResponse)
+async def norms_list(request: Request, bucket: str = Query(default=""), offset: int = Query(default=0)):
+    conn = connection.get_connection()
+    docs = _all_norm_docs(conn)
     conn.close()
-    docs = [_norm_doc_dict(r) for r in rows]
+    if bucket:
+        docs = [d for d in docs if _norm_bucket(d["type"]) == bucket]
+    page = docs[offset:offset + _NORMS_PAGE_SIZE]
     return templates.TemplateResponse("_norms_list.html", {
         "request":     request,
-        "docs":        docs,
-        "has_more":    len(rows) == _NORMS_PAGE_SIZE,
+        "docs":        page,
+        "bucket":      bucket,
+        "has_more":    offset + _NORMS_PAGE_SIZE < len(docs),
         "next_offset": offset + _NORMS_PAGE_SIZE,
-        "is_empty":    offset == 0 and not rows,
+        "is_empty":    offset == 0 and not docs,
+    })
+
+
+@app.get("/norms/search-jump", response_class=HTMLResponse)
+async def norms_search_jump(request: Request, q: str = Query(default="")):
+    """Durchsucht ALLE erkannten Normen nach Dateiname/Nummer (unabhängig von der
+    SIA/VSS/Weitere-Kachel) -- fürs Sprungfeld über den drei Kacheln in der
+    Sperrliste. Liefert pro Treffer die Kachel mit, damit das Frontend die
+    richtige öffnen und zur Zeile scrollen kann (siehe jumpToNorm() in
+    sperrliste.html)."""
+    q = q.strip().lower()
+    if not q:
+        return HTMLResponse("")
+    conn = connection.get_connection()
+    docs = _all_norm_docs(conn)
+    conn.close()
+    matches = [d for d in docs if q in d["filename"].lower() or (d["number"] and q in d["number"].lower())][:15]
+    return templates.TemplateResponse("_norms_search_jump.html", {
+        "request": request,
+        "matches": [{**d, "bucket": _norm_bucket(d["type"])} for d in matches],
     })
 
 
@@ -1053,18 +1104,28 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
     return groups
 
 
-@app.get("/mcp-log", response_class=HTMLResponse)
-async def mcp_log_page(
-    request:    Request,
+@app.get("/mcp-log", response_class=RedirectResponse)
+async def mcp_log_page_redirect(
     project_id: str = Query(default=""),
     status:     str = Query(default=""),
     date_from:  str = Query(default=""),
     date_to:    str = Query(default=""),
 ):
+    # Alte Reiter-URL (bis v3.5.0: eigener "MCP"-Reiter mit Sperrliste+Protokoll
+    # zusammen) -- das Protokoll ist seither Teil von /verlauf, die Sperrliste
+    # ("MCP-Sperrbereich") Teil von /sperrliste, siehe verlauf_page().
+    qs = "&".join(
+        f"{k}={v}" for k, v in
+        [("project_id", project_id), ("status", status), ("date_from", date_from), ("date_to", date_to)]
+        if v
+    )
+    return RedirectResponse(f"/verlauf{'?' + qs if qs else ''}", status_code=307)
+
+
+def _mcp_log_context(conn, project_id: str, status: str, date_from: str, date_to: str) -> dict:
     import json as _json
     from datetime import timedelta
 
-    conn = connection.get_connection()
     clause, params = _mcp_log_query(project_id, status, date_from, date_to)
     rows = conn.execute(
         f"SELECT * FROM mcp_log {clause} ORDER BY ts DESC LIMIT 500", params
@@ -1085,25 +1146,17 @@ async def mcp_log_page(
         "SELECT files_json FROM mcp_log WHERE ts >= ?", (since,)
     ).fetchall()
 
-    from web.dashboard import _block_rules_context
-    block_ctx = _block_rules_context(conn)
-    conn.close()
-
-    groups = _group_mcp_log_entries(entries)
-
-    return templates.TemplateResponse("mcp_log.html", {
-        "request":           request,
-        "entries":           entries,
-        "groups":            groups,
-        "projects":          [dict(p) for p in projects],
+    return {
+        "mcp_entries":       entries,
+        "mcp_groups":        _group_mcp_log_entries(entries),
+        "mcp_projects":      [dict(p) for p in projects],
         "filter_project_id": project_id,
         "filter_status":     status,
         "filter_from":       date_from,
         "filter_to":         date_to,
-        "total_30d":         len(recent),
-        "files_30d":         sum(len(_json.loads(r["files_json"] or "[]")) for r in recent),
-        **block_ctx,
-    })
+        "mcp_total_30d":     len(recent),
+        "mcp_files_30d":     sum(len(_json.loads(r["files_json"] or "[]")) for r in recent),
+    }
 
 
 @app.get("/mcp-log/export.csv")
@@ -1184,14 +1237,46 @@ async def search_log_export():
     )
 
 
-@app.get("/system-status", response_class=HTMLResponse)
-async def system_status_page(request: Request):
+@app.get("/search-log/chart-data")
+async def search_log_chart_data(range: str = Query(default="30")):
+    """Tageswerte fürs Grafik-Panel im Such-Verlauf -- bewusst nur zwei einfache
+    Kennzahlen (Anzahl Suchen, Ø Dauer) statt einer grossen Auswertung, damit das
+    Diagramm ohne externe Bibliothek (kein Internet nötig) mit ein paar SVG-Balken
+    auskommt."""
+    conn = connection.get_connection()
+    where = ""
+    params: tuple = ()
+    if range != "all":
+        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        where = "WHERE ts >= ?"
+        params = (since,)
+    rows = conn.execute(f"""
+        SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n, AVG(duration_ms) AS avg_ms,
+               SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) AS empty_n
+        FROM search_log {where}
+        GROUP BY day ORDER BY day
+    """, params).fetchall()
+    conn.close()
+    return JSONResponse([
+        {"day": r["day"], "count": r["n"], "avg_ms": round(r["avg_ms"] or 0), "empty": r["empty_n"]}
+        for r in rows
+    ])
+
+
+@app.get("/system-status", response_class=RedirectResponse)
+async def system_status_page_redirect():
+    # Alte Reiter-URL (bis v3.5.0: eigener "Systemstatus"-Reiter) -- Scan- und
+    # Suche-Verlauf sind seither Teil von /verlauf; "Letzte Sicherung" steht
+    # weiterhin (unverändert) in den Einstellungen unter "Sicherung & Umzug".
+    return RedirectResponse("/verlauf", status_code=307)
+
+
+def _scan_und_suche_context(conn) -> dict:
     import json as _json
     from datetime import timedelta
 
     import psutil
 
-    conn = connection.get_connection()
     rows = conn.execute(
         "SELECT * FROM scan_log ORDER BY started_at DESC LIMIT 200"
     ).fetchall()
@@ -1216,7 +1301,6 @@ async def system_status_page(request: Request):
     search_recent = conn.execute(
         "SELECT result_count, duration_ms FROM search_log WHERE ts >= ?", (since,)
     ).fetchall()
-    conn.close()
 
     search_total_30d = len(search_recent)
     search_avg_ms = (
@@ -1228,10 +1312,7 @@ async def system_status_page(request: Request):
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
-    from db import backup as backup_mod
-    return templates.TemplateResponse("system_status.html", {
-        "request":          request,
-        "backup":           backup_mod.summary(),
+    return {
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,
@@ -1239,6 +1320,24 @@ async def system_status_page(request: Request):
         "search_total_30d": search_total_30d,
         "search_avg_ms":    search_avg_ms,
         "search_empty_30d": search_empty_30d,
+    }
+
+
+@app.get("/verlauf", response_class=HTMLResponse)
+async def verlauf_page(
+    request:    Request,
+    project_id: str = Query(default=""),
+    status:     str = Query(default=""),
+    date_from:  str = Query(default=""),
+    date_to:    str = Query(default=""),
+):
+    conn = connection.get_connection()
+    ctx = _scan_und_suche_context(conn)
+    ctx.update(_mcp_log_context(conn, project_id, status, date_from, date_to))
+    conn.close()
+    return templates.TemplateResponse("verlauf.html", {
+        "request": request,
+        **ctx,
     })
 
 

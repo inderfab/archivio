@@ -30,7 +30,7 @@
 
     /* ── Layout ── */
     .container {
-      max-width: 900px;
+      max-width: 1400px;
       margin: 0 auto;
       padding: 0 40px;
     }
@@ -65,6 +65,31 @@
     }
     nav a:hover { color: var(--text); background: var(--bg-2); }
     nav a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
+
+    /* ── "Verwaltung"-Menü: Projekte/Sperrliste/Verlauf/Einstellungen sind
+       Admin-Aufgaben, nicht der Alltag der meisten Nutzer:innen (die nur suchen
+       und einmalig den Helper laden) -- gebündelt statt als eigene Reiter. ── */
+    .nav-dropdown { position: relative; }
+    .nav-dropdown-btn {
+      font-size: 13px; color: var(--text-2); background: none; border: none;
+      font-family: inherit; cursor: pointer;
+      padding: 5px 10px; border-radius: var(--radius);
+      display: inline-flex; align-items: center; gap: 6px;
+    }
+    .nav-dropdown-btn:hover { color: var(--text); background: var(--bg-2); }
+    .nav-dropdown-btn.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
+    .nav-dropdown-menu {
+      display: none; position: absolute; top: calc(100% + 4px); left: 0;
+      background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+      box-shadow: 0 4px 16px rgba(0,0,0,.1); min-width: 168px; padding: 4px; z-index: 50;
+    }
+    .nav-dropdown-menu.open { display: block; }
+    .nav-dropdown-menu a {
+      display: block; font-size: 13px; color: var(--text-2); text-decoration: none;
+      padding: 7px 10px; border-radius: var(--radius);
+    }
+    .nav-dropdown-menu a:hover { color: var(--text); background: var(--bg-2); }
+    .nav-dropdown-menu a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
     .version-badge { font-size: 12px; color: var(--text-3); margin-left: 8px; }
     .nav-scan-pill {
       display: inline-flex; align-items: center; gap: 5px;
@@ -458,8 +483,8 @@
     .problem-docs-summary {
       display: flex; align-items: center; gap: 8px;
       padding: 10px 14px; cursor: pointer; user-select: none;
-      font-size: 12px; font-weight: 600; color: var(--text-2);
-      text-transform: uppercase; letter-spacing: .05em;
+      font-size: 12px; font-weight: 700; color: var(--text);
+      text-transform: uppercase; letter-spacing: .06em;
       list-style: none;
     }
     .problem-docs-summary::-webkit-details-marker { display: none; }
@@ -468,26 +493,24 @@
     .problem-docs-badge {
       background: var(--bg-2); border: 1px solid var(--border);
       border-radius: 10px; padding: 1px 7px;
-      font-size: 12px; font-weight: 700; color: var(--text-3);
+      font-size: 11px; font-weight: 700; color: var(--text-3);
     }
     .problem-docs-list {
-      max-height: 260px; overflow-y: auto;
+      max-height: 260px; overflow-y: auto; overflow-x: hidden;
       border-top: 1px solid var(--border);
       padding: 4px 0;
     }
     .problem-doc-row {
-      display: flex; align-items: baseline; gap: 10px;
-      padding: 5px 14px; font-size: 12px; line-height: 1.4;
+      display: flex; align-items: center; gap: 8px; min-width: 0;
+      padding: 5px 14px; font-size: 11px; line-height: 1.4;
     }
     .problem-doc-row:hover { background: var(--bg-2); }
     .problem-doc-name {
-      flex: 0 0 auto; max-width: 55%; overflow: hidden;
+      flex: 1 1 auto; min-width: 0; overflow: hidden;
       text-overflow: ellipsis; white-space: nowrap;
       font-weight: 500; color: var(--text);
     }
-    .problem-doc-reason { flex: 1; color: var(--text-3); font-size: 12px; }
-    .problem-doc-error .problem-doc-reason { color: #b45309; }
-    .problem-doc-no_text .problem-doc-reason { color: var(--text-3); }
+    .problem-doc-reason { flex-shrink: 0; color: var(--text-3); font-size: 11px; text-decoration: none; }
 
     .section-title {
       font-size: 12px; font-weight: 700; letter-spacing: .06em;
@@ -499,12 +522,47 @@
     .project-entry { border-bottom: 1px solid var(--border); }
     .project-entry:last-child { border-bottom: none; }
 
-    /* Verschachtelte Projekte (tiefer als eine Ebene unter einem Projektordner) */
-    .nested-marker { color: var(--text-3); font-weight: 400; }
+    /* Verschachtelte Projekte (tiefer als eine Ebene unter einem Projektordner) --
+       durchgehender vertikaler Strich über alle Unterordner einer Ebene, mit einem
+       Abzweiger pro Unterprojekt, statt nur einer Einrückung. */
     .nested-rel {
       font-family: "SF Mono","Menlo","Consolas",monospace; font-size: 11px;
       color: var(--text-3);
     }
+    .project-children {
+      margin-left: 17px; padding-left: 17px; border-left: 1px solid var(--border);
+    }
+    .project-children > .project-entry > .project-row { position: relative; }
+    .project-children > .project-entry > .project-row::before {
+      content: ''; position: absolute; left: -17px; top: 50%; transform: translateY(-50%);
+      width: 17px; height: 1px; background: var(--border);
+    }
+
+    /* Kompakte Listenzeile, geteilt zwischen Sperrliste, Projekte (Projektordner,
+       Mail-Konten) und überall sonst, wo eine kurze "Wert + × entfernen"-Zeile
+       gebraucht wird. */
+    .sp-row {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border: 1px solid var(--border); border-radius: var(--radius); margin-bottom: 5px; font-size: 12px;
+    }
+    .sp-row:last-child { margin-bottom: 0; }
+    .sp-row .chip { font-family: ui-monospace, monospace; flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--text); }
+    .sp-row .meta { color: var(--text-3); font-size: 11px; white-space: nowrap; }
+    .sp-row .tag { font-size: 10px; background: #eff6ff; color: #1d4ed8; border-radius: 4px; padding: 2px 6px; white-space: nowrap; text-decoration: none; }
+    .sp-addrow { display: flex; gap: 6px; margin-top: 8px; }
+    .sp-addrow input { flex: 1; font-size: 12px; border: 1px solid var(--border); border-radius: var(--radius); padding: 6px 8px; font-family: inherit; color: var(--text); background: var(--bg); }
+    .norm-icon-btn { border: none; background: none; cursor: pointer; font-size: 12px; padding: 0; opacity: .6; flex-shrink: 0; }
+    .norm-icon-btn:hover { opacity: 1; }
+    .norm-empty { color: var(--text-3); font-size: 12px; font-style: italic; padding: 6px 2px; }
+    .status-dot { width: 9px; height: 9px; border-radius: 50%; flex-shrink: 0; display: inline-block; }
+    .status-dot.ok { background: #16a34a; }
+    .status-dot.bad { background: #dc2626; }
+    .status-dot.neutral { background: #9ca3af; }
+    .test-result { font-size: 13px; }
+    .test-ok  { color: #166534; }
+    .test-err { color: #991b1b; }
+    .norm-add-panel { border-top: 1px solid var(--border); margin-top: 10px; padding-top: 10px; display: none; }
+    .norm-add-panel.open { display: block; }
 
     /* Projekte ausserhalb aller konfigurierten Projektordner */
     .section-title.orphan-title { border-bottom-color: #e6a817; color: #92400e; }
@@ -557,6 +615,12 @@
       transition: background .15s, color .15s, border-color .15s;
     }
     .archive-toggle.on { background: #374151; border-color: #374151; color: #fff; }
+
+    .mcp-block-badge {
+      width: 20px; height: 20px; border-radius: 50%; flex-shrink: 0;
+      background: #fee2e2; color: #991b1b; font-size: 11px; text-decoration: none;
+      display: flex; align-items: center; justify-content: center; margin-left: -6px;
+    }
 
     .project-name  { font-weight: 600; font-size: 14px; color: var(--accent); }
     .project-meta  { font-size: 12px; color: var(--text-2); margin-top: 2px; }
@@ -912,16 +976,17 @@
     }
     .section-help-btn:hover { background: var(--bg); border-color: #9ca3af; color: var(--text); }
     .section-help-panel {
-      display: none; position: absolute; top: 100%; right: 16px; margin-top: 8px; z-index: 40;
-      width: 320px; max-width: 80vw;
-      background: #111827; color: #fff; font-size: 12px; font-weight: 400;
-      text-transform: none; letter-spacing: normal; line-height: 1.6;
-      padding: 12px 14px; border-radius: 8px; box-shadow: 0 8px 24px rgba(0,0,0,.25);
+      display: none; position: absolute; top: 100%; right: 0; margin-top: 8px; z-index: 40;
+      width: 420px; max-width: min(92vw, 420px);
+      background: var(--bg); color: var(--text); font-size: 13.5px; font-weight: 400;
+      text-transform: none; letter-spacing: normal; line-height: 1.65;
+      padding: 16px 18px; border-radius: 10px; border: 1px solid var(--border);
+      box-shadow: 0 10px 32px rgba(0,0,0,.16);
     }
     .section-help-panel.open { display: block; }
-    .section-help-panel p { margin: 0 0 8px; }
+    .section-help-panel p { margin: 0 0 10px; }
     .section-help-panel p:last-child { margin-bottom: 0; }
-    .section-help-panel strong { color: #fff; }
+    .section-help-panel strong { color: var(--text); }
   </style>
 </head>
 <body>
@@ -933,14 +998,24 @@
         <img src="/static/logo.svg" class="logo-icon" alt="">
         <span class="logo-text">Archivio</span>
       </a>
+      {% set verwaltung_pfade = ['/dashboard', '/sperrliste', '/verlauf', '/dashboard/settings'] %}
       <nav>
         <a href="/" class="{{ 'active' if request.url.path == '/' else '' }}">Suche</a>
-        <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Dashboard</a>
         <a href="/dashboard/helper" class="{{ 'active' if request.url.path == '/dashboard/helper' else '' }}">Helper</a>
-        <a href="/norms" class="{{ 'active' if request.url.path == '/norms' else '' }}">Normen</a>
-        <a href="/mcp-log" class="{{ 'active' if request.url.path == '/mcp-log' else '' }}">MCP</a>
-        <a href="/system-status" class="{{ 'active' if request.url.path == '/system-status' else '' }}">Systemstatus</a>
-        <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
+        <div class="nav-dropdown">
+          <button type="button"
+                  class="nav-dropdown-btn {{ 'active' if request.url.path in verwaltung_pfade else '' }}"
+                  onclick="toggleNavDropdown(event)">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="20" y2="17"></line></svg>
+            Verwaltung
+          </button>
+          <div class="nav-dropdown-menu" id="nav-verwaltung-menu">
+            <a href="/dashboard" class="{{ 'active' if request.url.path == '/dashboard' else '' }}">Projekte</a>
+            <a href="/sperrliste" class="{{ 'active' if request.url.path == '/sperrliste' else '' }}">Sperrliste</a>
+            <a href="/verlauf" class="{{ 'active' if request.url.path == '/verlauf' else '' }}">Verlauf</a>
+            <a href="/dashboard/settings" class="{{ 'active' if request.url.path == '/dashboard/settings' else '' }}">Einstellungen</a>
+          </div>
+        </div>
         <span class="version-badge" id="nav-version"></span>
         <span id="nav-scan-status"
               hx-get="/api/scan/nav-status"
@@ -995,6 +1070,19 @@ function toggleSectionHelp(btn) {
 document.addEventListener('click', function(e) {
   if (!e.target.closest('.section-help-btn') && !e.target.closest('.section-help-panel')) {
     document.querySelectorAll('.section-help-panel.open').forEach(function(p) { p.classList.remove('open'); });
+  }
+});
+
+function toggleNavDropdown(e) {
+  e.stopPropagation();
+  var menu = document.getElementById('nav-verwaltung-menu');
+  var isOpen = menu.classList.contains('open');
+  document.querySelectorAll('.nav-dropdown-menu.open').forEach(function(m) { m.classList.remove('open'); });
+  if (!isOpen) menu.classList.add('open');
+}
+document.addEventListener('click', function(e) {
+  if (!e.target.closest('.nav-dropdown')) {
+    document.querySelectorAll('.nav-dropdown-menu.open').forEach(function(m) { m.classList.remove('open'); });
   }
 });
 
