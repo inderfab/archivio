@@ -1,0 +1,27 @@
+# Archivio
+
+> Archivio ist eine lokale Dokumentenverwaltung und Volltextsuche für Architekturbüros. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche. Archivio läuft vollständig lokal auf einem Mac im Büro, ohne Cloud-Dienst und ohne eigene KI — Daten verlassen das Büro nicht.
+
+## Was Archivio macht
+
+- Volltextsuche über PDFs, Pläne, Mails, Tabellen und Bilder aus allen Projekten, unabhängig von Ordnerstruktur oder Dateiformat.
+- Foto-Galerie mit Sterne-Bewertung und Tags, Auswahl direkt zu einem Kontaktbogen zusammenstellen oder als Kopien in einen Ordner exportieren.
+- Archivio-Link: Dateien im Büro per klickbarem Link statt per E-Mail-Anhang teilen, damit alle dieselbe Originaldatei öffnen statt veralteter Kopien.
+- Optionale MCP-Schnittstelle, über die sich ein externer KI-Assistent (z. B. Claude) pro Projekt einzeln und manuell mit Archivio verbinden lässt, um Suchanfragen zu stellen — ohne dass Dateien manuell hochgeladen werden müssen und ohne vollständigen Server-Zugriff.
+
+## Zielgruppe
+
+Architekturbüros und vergleichbare Planungsbüros, die grosse Mengen an Projektdateien (Pläne, Mails, Dokumente, Fotos) über mehrere Jahre und Projekte hinweg durchsuchbar machen wollen, ohne die Daten in eine Cloud zu geben.
+
+## Plattform & Preis
+
+- Betriebssystem: macOS
+- Preis: kostenlos
+- Betrieb: vollständig lokal, kein Cloud-Konto nötig
+
+## Wichtige Seiten
+
+- Startseite und Übersicht: https://bauchat.ch/
+- Erstinstallation: https://bauchat.ch/installation.html
+- Merkblatt zum Umgang mit Daten: https://bauchat.ch/merkblatt.html
+- Haftungsausschluss: https://bauchat.ch/haftungsausschluss.html
