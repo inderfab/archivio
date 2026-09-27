@@ -220,6 +220,29 @@
     .cta-merkblatt a { color: #666; }
     .cta-merkblatt a:hover { color: #111; }
 
+    .dl-form { display: none; }
+    .dl-form.open { display: block; }
+    .dl-form-hint {
+      font-size: 13px;
+      color: #999;
+      max-width: 360px;
+      margin: 0 auto 16px;
+    }
+    .dl-email-input {
+      display: block;
+      width: 100%;
+      max-width: 320px;
+      margin: 0 auto 12px;
+      font-size: 15px;
+      padding: 12px 16px;
+      border: 1.5px solid #d0d0d0;
+      border-radius: 6px;
+      outline: none;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+    .dl-email-input:focus { border-color: #111; }
+
     /* ── Footer ── */
     footer {
       border-top: 1px solid #e8e8e8;
@@ -313,9 +336,17 @@
 
     <section class="cta-section">
       <h2>Starte jetzt und finde all Deine Dateien:</h2>
-      <button class="btn-download" id="btn-dl" onclick="downloadLatest()">
-        Herunterladen
-      </button>
+
+      <div id="dl-initial">
+        <button class="btn-download" onclick="showEmailForm()">Herunterladen</button>
+      </div>
+
+      <form id="dl-form" class="dl-form" onsubmit="return submitEmailForm(event)">
+        <p class="dl-form-hint">Für Update-Benachrichtigungen bei grösseren Versionen. Kein Newsletter, jederzeit mit einem Klick abmeldbar.</p>
+        <input type="email" id="dl-email" class="dl-email-input" placeholder="E-Mail-Adresse" required>
+        <button type="submit" class="btn-download" id="btn-dl">Herunterladen</button>
+      </form>
+
       <p class="hero-meta">macOS &nbsp;·&nbsp; Kostenlos</p>
     </section>
   </main>
@@ -348,6 +379,40 @@
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(payload)
       }).catch(function() {});
+    }
+
+    // TODO Fabio: nach Deploy von tools/email-signup-apps-script.gs die
+    // Web-App-URL hier UND in abmelden.html (dieselbe Konstante) eintragen.
+    var EMAIL_ENDPOINT_URL = 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE';
+
+    function showEmailForm() {
+      document.getElementById('dl-initial').style.display = 'none';
+      document.getElementById('dl-form').classList.add('open');
+      document.getElementById('dl-email').focus();
+    }
+
+    function submitEmailForm(evt) {
+      evt.preventDefault();
+      var emailInput = document.getElementById('dl-email');
+      var email = emailInput.value.trim();
+      var emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRe.test(email)) {
+        emailInput.reportValidity();
+        return false;
+      }
+
+      // Speichern läuft parallel und darf den Download nie blockieren oder verzögern
+      if (EMAIL_ENDPOINT_URL.indexOf('PASTE_') === -1) {
+        fetch(EMAIL_ENDPOINT_URL, {
+          method: 'POST',
+          mode: 'no-cors',
+          headers: { 'Content-Type': 'text/plain' },
+          body: JSON.stringify({ email: email })
+        }).catch(function () {});
+      }
+
+      downloadLatest();
+      return false;
     }
 
     function downloadLatest() {
