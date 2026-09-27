@@ -18,7 +18,7 @@
     .hero {
       max-width: 680px;
       margin: 0 auto;
-      padding: 80px 24px 60px;
+      padding: 80px 24px 70px;
       text-align: center;
     }
     .hero-logo {
@@ -48,60 +48,19 @@
       letter-spacing: -0.4px;
       line-height: 1.3;
       color: #111;
-      margin-bottom: 32px;
     }
-
-    /* ── Feature-Liste im Hero ── */
-    .hero-features {
-      list-style: none;
-      text-align: left;
-      max-width: 520px;
-      margin: 0 auto 40px;
-      display: flex;
-      flex-direction: column;
-      gap: 11px;
-    }
-    .hero-features li {
-      font-size: 16px;
-      color: #333;
-      display: flex;
-      align-items: flex-start;
-      gap: 10px;
-      line-height: 1.5;
-    }
-    .hero-check {
-      flex-shrink: 0;
+    .hero-trust-line {
+      margin-top: 22px;
       font-size: 14px;
-      font-weight: 700;
-      color: #111;
-      margin-top: 2px;
-    }
-    .hero-features-title {
-      font-size: 13px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #666;
-      text-align: left;
-      max-width: 520px;
-      margin: 0 auto 12px;
-    }
-    .hero-optional-link {
-      max-width: 520px;
-      margin: -4px auto 40px;
-      text-align: left;
-      font-size: 13px;
-    }
-    .hero-optional-link a { color: #666; }
-    .hero-optional-link a:hover { color: #111; }
-
-    /* ── Buttons ── */
-    .hero-buttons {
-      display: inline-flex;
-      gap: 12px;
-      flex-wrap: wrap;
+      color: #999;
+      display: flex;
+      align-items: center;
       justify-content: center;
+      gap: 7px;
     }
+    .hero-trust-line svg { width: 14px; height: 14px; flex-shrink: 0; stroke: #999; }
+
+    /* ── Buttons (auch im CTA-Block unten verwendet) ── */
     .btn-download {
       display: inline-block;
       background: #111;
@@ -117,70 +76,102 @@
     }
     .btn-download:hover { background: #333; }
     .btn-download:disabled { background: #888; cursor: default; }
-    .btn-docs {
-      display: inline-block;
-      background: transparent;
-      color: #111;
-      font-size: 16px;
-      font-weight: 500;
-      padding: 14px 32px;
-      border-radius: 6px;
-      text-decoration: none;
-      border: 1.5px solid #d0d0d0;
-      transition: border-color 0.15s;
-    }
-    .btn-docs:hover { border-color: #111; }
     .hero-meta {
       margin-top: 16px;
       font-size: 13px;
       color: #999;
     }
 
-    /* ── Newsletter ── */
-    .newsletter {
-      margin-top: 28px;
-      display: flex;
-      gap: 8px;
-      justify-content: center;
-      flex-wrap: wrap;
-    }
-    .newsletter input[type="email"] {
-      font-size: 15px;
-      padding: 11px 16px;
-      border: 1.5px solid #d0d0d0;
-      border-radius: 6px;
-      outline: none;
-      width: 240px;
-      transition: border-color 0.15s;
-    }
-    .newsletter input[type="email"]:focus { border-color: #111; }
-    .newsletter button {
-      font-size: 15px;
-      font-weight: 500;
-      padding: 11px 20px;
-      border-radius: 6px;
-      border: none;
-      background: #111;
-      color: #fff;
-      cursor: pointer;
-      transition: background 0.15s;
-      white-space: nowrap;
-    }
-    .newsletter button:hover { background: #333; }
-    .newsletter button:disabled { background: #888; cursor: default; }
-
-    /* ── Demo-Video ── */
-    .demo-video {
-      max-width: 960px;
-      margin: 0 auto 80px;
+    /* ── Feature-Sektionen (Zigzag) ── */
+    .feature-section {
+      display: grid;
+      grid-template-columns: 45% 55%;
+      gap: 56px;
+      align-items: center;
+      max-width: 1100px;
+      margin: 110px auto;
       padding: 0 24px;
     }
-    .demo-video video {
-      width: 100%;
-      border-radius: 10px;
-      box-shadow: 0 8px 40px rgba(0,0,0,0.12);
-      display: block;
+    .hero + .feature-section { margin-top: 55px; }
+    .feature-section.reverse { grid-template-columns: 55% 45%; }
+    .feature-section.reverse .feature-text { order: 2; }
+    .feature-section.reverse .feature-visual { order: 1; }
+    .feature-text h2 {
+      font-size: clamp(26px, 3vw, 34px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      margin-bottom: 16px;
     }
+    .feature-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #666;
+      background: #f2f2f2;
+      border-radius: 4px;
+      padding: 3px 8px;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    .feature-text p {
+      font-size: 16px;
+      color: #333;
+      max-width: 460px;
+    }
+    .feature-text p.feature-text-option {
+      margin-top: 12px;
+      font-size: 13.5px;
+      color: #666;
+    }
+    .feature-visual { min-width: 0; }
+    .scale-wrap {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+    .scale-wrap iframe {
+      position: absolute;
+      top: 0; left: 0;
+      border: 0;
+      transform-origin: top left;
+      pointer-events: none;
+    }
+
+    @media (max-width: 767px) {
+      .feature-section {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        margin: 72px auto;
+      }
+      .feature-section .feature-text,
+      .feature-section.reverse .feature-text { order: -1; }
+      .feature-section .feature-visual,
+      .feature-section.reverse .feature-visual { order: 1; }
+      .feature-text p { max-width: none; }
+    }
+
+    /* ── Abschluss & CTA ── */
+    .cta-section {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 40px 24px 90px;
+      text-align: center;
+    }
+    .cta-section h2 {
+      font-size: clamp(24px, 3vw, 30px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 24px;
+    }
+    .cta-merkblatt {
+      margin-top: 14px;
+      font-size: 13px;
+    }
+    .cta-merkblatt a { color: #666; }
+    .cta-merkblatt a:hover { color: #111; }
 
     /* ── Footer ── */
     footer {
@@ -216,49 +207,78 @@
       <h1>Archivio</h1>
       <p class="hero-sub-title">Die Wissensplattform für Architekturbüros</p>
       <p class="hero-slogan">Jedes Dokument. Jede Mail. Jeder Plan.<br>Sofort gefunden.</p>
+      <p class="hero-trust-line">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        Läuft vollständig lokal, keine KI, keine Cloud.
+      </p>
+    </section>
 
-      <p class="hero-features-title">Läuft vollständig lokal — nichts verlässt Ihr Büro</p>
-      <ul class="hero-features">
-        <li><span class="hero-check">✓</span>Dokumente automatisch vom Datei-Server synchronisiert – kein manuelles Hochladen für die Suche</li>
-        <li><span class="hero-check">✓</span>Mails, Dokumente, Pläne und Normen in einer einzigen Suche</li>
-        <li><span class="hero-check">✓</span>Foto-Galerie mit Bewertung und Filtern</li>
-        <li><span class="hero-check">✓</span>Kein Konto – keine Cloud, alle nur im lokalen Netzwerk</li>
-      </ul>
-
-      <p class="hero-features-title" style="margin-top:28px;">Optionale Anbindung an KI-Anbieter</p>
-      <ul class="hero-features">
-        <li><span class="hero-check">✓</span>Optionale MCP-Schnittstelle an KI-Anwendungen wie Claude</li>
-      </ul>
-      <p class="hero-optional-link"><a href="merkblatt.html">→ Merkblatt: Was mit Ihren Daten passiert</a></p>
-
-      <div class="hero-buttons">
-        <button class="btn-download" id="btn-dl" onclick="downloadLatest()">
-          Herunterladen
-        </button>
-        <a class="btn-docs" href="docs.html">Anleitung</a>
+    <section class="feature-section">
+      <div class="feature-text">
+        <h2>Alle Dateien in einer Suche</h2>
+        <p>PDFs, Pläne, Mails, Tabellen, Bilder — alles an einem Ort durchsuchbar. Kein Ordner durchklicken, kein Dateiname raten: einmal tippen, und der Treffer ist da, egal in welchem Format oder Projektjahr er steckt.</p>
+        <p class="feature-text-option"><strong>Option:</strong> Diverse Filtermöglichkeiten. Zudem Trefferauswahl direkt als zusammengefügtes PDF speichern — Mehrfachauswahl in der Trefferliste, dann Button „Als PDF zusammenfügen", statt Dateien einzeln zu öffnen und manuell zu kombinieren.</p>
+        <p class="cta-merkblatt"><a href="merkblatt.html">→ Merkblatt: Was mit Ihren Daten passiert</a></p>
       </div>
-      <p class="hero-meta">macOS &nbsp;·&nbsp; Kostenlos</p>
-
-      <div class="newsletter">
-        <input type="email" id="nl-email" placeholder="E-Mail für Updates eintragen">
-        <button id="nl-btn" onclick="subscribeNewsletter()">Eintragen</button>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/595;">
+          <iframe src="animations/search.html" data-w="680" style="width:680px;height:595px;" scrolling="no" loading="lazy" title="Volltextsuche – Animation"></iframe>
+        </div>
       </div>
     </section>
 
-    <section class="demo-video">
-      <video autoplay loop muted playsinline>
-        <source src="img/archivio_demo_1.mp4" type="video/mp4">
-      </video>
+    <section class="feature-section reverse">
+      <div class="feature-text">
+        <h2>Fotos, sofort sortiert</h2>
+        <p>Alle Projektfotos in einer Galerie — unabhängig von Ordner und Format. Filterbar nach Projekt und Zeitpunkt, mit Sterne-Bewertung und Tags klassifizierbar. Auswahl direkt zu einem Kontaktbogen zusammenstellen oder als Bild-Kopien in einen Ordner für den Versand speichern.</p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/438;">
+          <iframe src="animations/gallery.html" data-w="680" style="width:680px;height:438px;" scrolling="no" loading="lazy" title="Bildgalerie – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section">
+      <div class="feature-text">
+        <h2>Teilen ohne Kopien zu senden</h2>
+        <p>Statt Dateikopien im Büro herumzusenden: direkt einen klickbaren Link versenden, der die Originaldatei auf dem Server öffnet.</p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/400;">
+          <iframe src="animations/link-share.html" data-w="680" style="width:680px;height:400px;" scrolling="no" loading="lazy" title="Archivio-Link – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section reverse">
+      <div class="feature-text">
+        <h2>Fragen statt suchen<span class="feature-badge">Optional</span></h2>
+        <p>Archivio selbst enthält bewusst keine KI. Über eine optionale Schnittstelle (MCP) lässt es sich mit einem externen KI-Assistenten wie Claude verbinden. Die Verbindung ist pro Projekt einzeln manuell aktivierbar. Die Schnittstelle bindet alle Serverdaten an die KI an, ohne dass man manuell Dateien hochladen muss. Die Schnittstelle erlaubt es den KI-Anbietern, Suchanfragen an Archivio zu stellen. Sie haben keinen kompletten Zugriff auf den Server. Normen und andere Dateien mit Copyright werden automatisch von Archivio blockiert.</p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/440;">
+          <iframe src="animations/mcp.html" data-w="680" style="width:680px;height:440px;" scrolling="no" loading="lazy" title="KI-Schnittstelle (MCP) – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="cta-section">
+      <h2>Starte jetzt und finde all Deine Dateien:</h2>
+      <button class="btn-download" id="btn-dl" onclick="downloadLatest()">
+        Herunterladen
+      </button>
+      <p class="hero-meta">macOS &nbsp;·&nbsp; Kostenlos</p>
     </section>
   </main>
 
   <footer>
     <a href="mailto:info@bauchat.ch">info@bauchat.ch</a>
     <div style="display:flex;gap:24px;align-items:center;">
-      <a href="docs.html">Anleitung</a>
+      <a href="installation.html" style="font-size:12px;">Erstinstallation</a>
       <a href="merkblatt.html">Merkblatt</a>
       <a href="haftungsausschluss.html">Haftungsausschluss</a>
-      <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback" style="display:inline-flex;align-items:center;gap:6px;background:#111;color:#fff;padding:7px 16px;border-radius:6px;font-size:13px;font-weight:500;text-decoration:none;">Feedback senden</a>
+      <a href="mailto:info@bauchat.ch?subject=Archivio%20Feedback">Feedback senden</a>
       <span>© 2026 Archivio</span>
     </div>
   </footer>
@@ -301,28 +321,32 @@
             ? asset.browser_download_url
             : 'https://github.com/inderfab/archivio/releases/latest';
           // Download in verstecktem iframe starten (kein Seitenwechsel)
-          var iframe = document.createElement('iframe');
-          iframe.style.display = 'none';
-          iframe.src = downloadUrl;
-          document.body.appendChild(iframe);
-          // Zur Anleitung weiterleiten
+          var dlFrame = document.createElement('iframe');
+          dlFrame.style.display = 'none';
+          dlFrame.src = downloadUrl;
+          document.body.appendChild(dlFrame);
+          // Zur Erstinstallation weiterleiten
           setTimeout(function() {
-            window.location.href = 'docs.html#setup';
+            window.location.href = 'installation.html';
           }, 1500);
         })
         .catch(function() {
-          window.location.href = 'docs.html#setup';
+          window.location.href = 'installation.html';
         });
     }
 
-    function subscribeNewsletter() {
-      var email = document.getElementById('nl-email').value.trim();
-      if (!email) return;
-      var btn = document.getElementById('nl-btn');
-      btn.disabled = true;
-      _track({ type: 'newsletter', email: email, version: _latestVersion });
-      btn.textContent = '✓ Eingetragen';
-    }
+    // Feature-Animationen: feste 680px-Breite responsiv in ihre Spalte skalieren
+    // (iframes passen ihren Inhalt nicht selbst an, nur die eigene Box).
+    document.querySelectorAll('.scale-wrap').forEach(function (wrap) {
+      var iframe = wrap.querySelector('iframe');
+      var nativeWidth = parseInt(iframe.dataset.w, 10);
+      function resize() {
+        var scale = wrap.clientWidth / nativeWidth;
+        iframe.style.transform = 'scale(' + scale + ')';
+      }
+      new ResizeObserver(resize).observe(wrap);
+      resize();
+    });
   </script>
 </body>
 </html>

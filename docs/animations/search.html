@@ -1,0 +1,363 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Archivio – Volltextsuche</title>
+<style>
+:root {
+  --text:    #1f2937;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --border:  #e5e7eb;
+  --bg:      #ffffff;
+  --bg-2:    #f9fafb;
+  --accent:  #111827;
+  --radius:  6px;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.demo-frame {
+  position: relative;
+  width: 680px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.08);
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* ── Synthetischer Cursor ── */
+.cursor {
+  position: absolute; left: 0; top: 0; width: 22px; height: 22px;
+  z-index: 90; pointer-events: none; will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  opacity: 0;
+}
+.cursor.cursor-b path { fill: #2563eb; }
+.click-ring {
+  position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%; background: rgba(17,24,39,.18);
+  z-index: 89; pointer-events: none; opacity: 0; will-change: transform, opacity;
+}
+.click-ring.ring-b { background: rgba(37,99,235,.2); }
+
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+.badge-eml  { background: #fef3c7; color: #92400e; }
+.badge-xlsx { background: #dcfce7; color: #166534; }
+mark { background: #fef9c3; color: var(--text); border-radius: 2px; padding: 0 1px; }
+
+</style>
+<style>
+  .toolbar { display: flex; gap: 12px; position: relative; z-index: 3; }
+  .dd-wrap { position: relative; flex: 0 0 160px; }
+  .dd-trigger {
+    width: 100%; display: flex; align-items: center; justify-content: space-between; gap: 6px;
+    padding: 11px 12px; font-size: 14px; font-weight: 600; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text);
+  }
+  .dd-trigger svg { width: 14px; height: 14px; flex-shrink: 0; stroke: var(--text-3); }
+  .dd-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; width: 220px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0,0,0,.12);
+    padding: 4px; z-index: 10;
+    opacity: 0; pointer-events: none;
+    transform: translateY(-4px);
+    transition: opacity .18s ease, transform .18s ease;
+  }
+  .dd-menu.open { opacity: 1; transform: translateY(0); }
+  .dd-item { padding: 8px 10px; font-size: 13px; border-radius: 4px; color: var(--text); }
+  .dd-item.hovered { background: var(--bg-2); }
+
+  .search-input-wrap { flex: 1 1 auto; position: relative; }
+  .search-input-demo {
+    width: 100%; height: 44px;
+    padding: 0 18px; font-size: 17px; font-family: inherit;
+    border: 2px solid var(--border); border-radius: var(--radius);
+    color: var(--text); background: var(--bg);
+    box-shadow: 0 1px 4px rgba(0,0,0,.06);
+    display: flex; align-items: center;
+    white-space: nowrap; overflow: hidden;
+  }
+  .search-caret {
+    display: inline-block; width: 1px; height: 18px; background: var(--text);
+    margin-left: 1px; vertical-align: -3px;
+    animation: caret-blink 1s steps(1) infinite;
+  }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+
+  .result-count {
+    font-size: 13px; color: var(--text-3);
+    padding: 16px 0 8px; border-bottom: 1px solid var(--border); margin-bottom: 4px;
+    opacity: 0;
+  }
+  .loading-bar-wrap { height: 2px; background: var(--border); border-radius: 2px; margin: 18px 0 0; overflow: hidden; opacity: 0; }
+  .loading-bar { height: 100%; width: 0%; background: var(--accent); }
+
+  .results { opacity: 0; }
+  .result { padding: 14px 0; border-bottom: 1px solid var(--border); position: relative; }
+  .result:last-child { border-bottom: none; }
+  .result.muted { opacity: .45; }
+  .result-header { display: flex; align-items: center; gap: 8px; margin-bottom: 4px; }
+  .result-title { font-size: 14px; font-weight: 600; color: var(--accent); }
+  .result-meta { display: flex; gap: 14px; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  .result-excerpt { font-size: 13px; color: var(--text-2); line-height: 1.55; }
+
+  .reveal-btns {
+    position: absolute; right: 0; top: 10px;
+    display: flex; flex-direction: column; gap: 6px;
+    opacity: 0;
+  }
+  .reveal-btn {
+    font-size: 12px; font-family: inherit; white-space: nowrap;
+    padding: 5px 12px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text);
+    box-shadow: 0 1px 3px rgba(0,0,0,.08);
+  }
+  .reveal-btn.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+  .result.hovered { background: var(--bg-2); margin: 0 -12px; padding-left: 12px; padding-right: 12px; border-radius: 6px; }
+  .result.hovered .reveal-btns { opacity: 1; }
+
+  .finder-window {
+    position: absolute; right: 24px; bottom: 24px; width: 340px;
+    background: #f6f6f6; border: 1px solid #d1d1d1; border-radius: 8px;
+    box-shadow: 0 16px 40px rgba(0,0,0,.22);
+    opacity: 0; transform: translateY(10px) scale(.98);
+    z-index: 20;
+  }
+  .finder-titlebar { display: flex; align-items: center; gap: 6px; padding: 8px 10px; border-bottom: 1px solid #ddd; }
+  .finder-dot { width: 10px; height: 10px; border-radius: 50%; }
+  .finder-titlebar-label { flex: 1; text-align: center; font-size: 11px; color: #555; font-weight: 600; margin-right: 26px; }
+  .finder-row { display: flex; align-items: center; gap: 8px; padding: 10px 12px; font-size: 12px; color: #333; }
+  .finder-file-icon { width: 22px; height: 22px; flex-shrink: 0; }
+  .finder-filename { padding: 1px 5px; border-radius: 3px; }
+  .finder-filename.selected { background: #2563eb; color: #fff; }
+</style>
+</head>
+<body>
+
+<div class="demo-frame" id="frame" style="min-height:500px;">
+  <div class="toolbar">
+    <div class="dd-wrap">
+      <button class="dd-trigger" id="dd-trigger">
+        <span id="dd-label">Alle Projekte</span>
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="dd-menu" id="dd-menu">
+        <div class="dd-item">280 Neubau Zollikon</div>
+        <div class="dd-item" id="dd-item-target">300 Musterhaus</div>
+        <div class="dd-item">219 Sanierung Altstadt</div>
+        <div class="dd-item">142 Umbau Bahnhofstr.</div>
+      </div>
+    </div>
+    <div class="search-input-wrap">
+      <div class="search-input-demo"><span id="typed-text"></span><span class="search-caret" id="caret"></span></div>
+    </div>
+  </div>
+
+  <div class="loading-bar-wrap" id="loading-wrap"><div class="loading-bar" id="loading-bar"></div></div>
+  <div class="result-count" id="result-count">5 Treffer</div>
+
+  <div class="results" id="results">
+    <div class="result" id="result-1">
+      <div class="result-header"><span class="badge badge-pdf">PDF</span><span class="result-title">300_GR_OG_Treppenhaus.pdf</span></div>
+      <div class="result-meta"><span>03_Pläne</span><span>300 Musterhaus</span></div>
+      <div class="result-excerpt">… Belag Treppenhaus: <mark>Beton</mark>-Werkstein-<mark>Platten</mark>, geschliffen …</div>
+      <div class="reveal-btns">
+        <button class="reveal-btn">Im Finder zeigen</button>
+        <button class="reveal-btn primary">Datei öffnen</button>
+      </div>
+    </div>
+    <div class="result">
+      <div class="result-header"><span class="badge badge-eml">EML</span><span class="result-title">RE: Materialwahl Treppenhaus</span></div>
+      <div class="result-meta"><span>Sanitärplaner → Projektleiter</span><span>300 Musterhaus</span></div>
+      <div class="result-excerpt">… ob wir im <mark>Treppenhaus</mark> effektiv <mark>Beton</mark>-<mark>Platten</mark> verlegen oder doch Naturstein …</div>
+    </div>
+    <div class="result">
+      <div class="result-header"><span class="badge badge-xlsx">XLSX</span><span class="result-title">300_Materialliste_Innenausbau.xlsx</span></div>
+      <div class="result-meta"><span>Position: Bodenbelag Treppenhaus</span><span>300 Musterhaus</span></div>
+      <div class="result-excerpt">Material „<mark>Beton</mark>-<mark>Platten</mark> geschliffen" · Hersteller: Muster AG</div>
+    </div>
+    <div class="result muted">
+      <div class="result-header"><span class="badge badge-pdf">PDF</span><span class="result-title">300_Baubeschrieb_Rohbau.pdf</span></div>
+      <div class="result-meta"><span>02_Baubeschrieb</span><span>300 Musterhaus</span></div>
+      <div class="result-excerpt">… allgemeine Angaben zum Rohbau …</div>
+    </div>
+    <div class="result muted">
+      <div class="result-header"><span class="badge badge-eml">EML</span><span class="result-title">Baubesprechung KW34 – Protokoll</span></div>
+      <div class="result-meta"><span>Bauleitung</span><span>300 Musterhaus</span></div>
+      <div class="result-excerpt">… Traktanden der Sitzung vom …</div>
+    </div>
+  </div>
+
+  <div class="finder-window" id="finder-window">
+    <div class="finder-titlebar">
+      <div class="finder-dot" style="background:#ff5f57;"></div>
+      <div class="finder-dot" style="background:#febc2e;"></div>
+      <div class="finder-dot" style="background:#28c840;"></div>
+      <div class="finder-titlebar-label">03_Pläne</div>
+    </div>
+    <div class="finder-row">
+      <svg class="finder-file-icon" viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#fee2e2"/><path d="M15 2v5h5"/></svg>
+      <span class="finder-filename selected">300_GR_OG_Treppenhaus.pdf</span>
+    </div>
+  </div>
+
+  <div class="click-ring" id="click-ring"></div>
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24" fill="none">
+    <path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/>
+  </svg>
+</div>
+
+<script>
+// Gemeinsame Timeline-Helfer für die bauchat.ch-Feature-Animationen (SVG/CSS/JS,
+// kein Video). Jede Animation treibt ihre eigene requestAnimationFrame-Schleife;
+// diese Datei stellt nur die Interpolations-Bausteine bereit.
+
+function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+function fadeIn(t, start, dur) { return clamp01((t - start) / dur); }
+function fadeOut(t, start, dur) { return 1 - fadeIn(t, start, dur); }
+
+// Cursor, der sich entlang fester Wegpunkte {t,x,y} bewegt (ease-in-out zwischen
+// je zwei Punkten) und an definierten Zeitpunkten einen Klick-Puls auslöst.
+function makeCursor(cursorEl, ringEl, waypoints, clicks) {
+  function posAt(t) {
+    if (t <= waypoints[0].t) return waypoints[0];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i], b = waypoints[i + 1];
+      if (t >= a.t && t <= b.t) {
+        var span = b.t - a.t;
+        var f = span > 0 ? easeInOutCubic(clamp01((t - a.t) / span)) : 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      }
+    }
+    return waypoints[waypoints.length - 1];
+  }
+  return {
+    render: function (t, visibleFrom, visibleTo) {
+      var pos = posAt(t);
+      var vis = fadeIn(t, visibleFrom, 0.2) * fadeOut(t, visibleTo, 0.3);
+      cursorEl.style.opacity = vis;
+      cursorEl.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      var ringOpacity = 0, ringScale = 0.4, rx = 0, ry = 0;
+      (clicks || []).forEach(function (c) {
+        var dt = t - c.t;
+        if (dt >= -0.02 && dt <= 0.4) {
+          var f = clamp01(dt / 0.4);
+          ringOpacity = 1 - f; ringScale = 0.4 + f * 1.3; rx = c.x; ry = c.y;
+        }
+      });
+      ringEl.style.opacity = ringOpacity;
+      ringEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px) scale(' + ringScale + ')';
+    }
+  };
+}
+
+function loopPlayer(loopSeconds, renderFn) {
+  var startTs = null;
+  var SPEED = 0.8; // ca. 25% langsamer
+  function tick(ts) {
+    if (startTs === null) startTs = ts;
+    var elapsed = ((ts - startTs) / 1000 * SPEED) % loopSeconds;
+    renderFn(elapsed);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+</script>
+<script>
+(function(){
+  var frame = document.getElementById('frame');
+  var ddMenu = document.getElementById('dd-menu');
+  var ddLabel = document.getElementById('dd-label');
+  var ddItemTarget = document.getElementById('dd-item-target');
+  var typedText = document.getElementById('typed-text');
+  var caret = document.getElementById('caret');
+  var loadingWrap = document.getElementById('loading-wrap');
+  var loadingBar = document.getElementById('loading-bar');
+  var resultCount = document.getElementById('result-count');
+  var results = document.getElementById('results');
+  var result1 = document.getElementById('result-1');
+  var finderWindow = document.getElementById('finder-window');
+
+  var QUERY = 'Treppenhaus Beton Platten';
+  var MS_PER_CHAR = 55;
+
+  // Feste Koordinaten innerhalb des 680px-Rahmens (24px Innenabstand) --
+  // hart codiert statt gemessen, weil das Layout selbst hier definiert wird.
+  var P_TRIGGER = {x: 130, y: 35};
+  var P_DD_ITEM = {x: 150, y: 90};
+  var P_INPUT   = {x: 320, y: 46};
+  var P_BUTTON  = {x: 610, y: 158};
+
+  var cursor = makeCursor(
+    document.getElementById('cursor'),
+    document.getElementById('click-ring'),
+    [
+      {t: 0.00, x: P_TRIGGER.x, y: P_TRIGGER.y},
+      {t: 1.00, x: P_DD_ITEM.x, y: P_DD_ITEM.y},
+      {t: 1.30, x: P_INPUT.x,   y: P_INPUT.y},
+      {t: 4.50, x: P_INPUT.x,   y: P_INPUT.y},
+      {t: 5.00, x: P_BUTTON.x,  y: P_BUTTON.y},
+      {t: 8.30, x: P_BUTTON.x,  y: P_BUTTON.y}
+    ],
+    [
+      {t: 1.15, x: P_DD_ITEM.x, y: P_DD_ITEM.y},
+      {t: 5.15, x: P_BUTTON.x,  y: P_BUTTON.y}
+    ]
+  );
+
+  var LOOP = 8.70;
+
+  function render(t){
+    cursor.render(t, 0, 8.0);
+
+    var ddOpen = (t >= 0.0 && t < 1.0);
+    ddMenu.classList.toggle('open', ddOpen);
+    ddItemTarget.classList.toggle('hovered', t >= 0.55 && t < 1.0);
+    ddLabel.textContent = (t >= 1.0) ? '300 Musterhaus' : 'Alle Projekte';
+
+    var typeStart = 1.5;
+    var charsShown = 0;
+    if (t >= typeStart) charsShown = Math.min(QUERY.length, Math.floor((t - typeStart) * 1000 / MS_PER_CHAR));
+    typedText.textContent = QUERY.slice(0, charsShown);
+    caret.style.display = (t >= 1.3 && t < 6.3) ? 'inline-block' : 'none';
+
+    var loadOpacity = fadeIn(t, 3.2, 0.1) * fadeOut(t, 3.5, 0.15);
+    loadingWrap.style.opacity = loadOpacity;
+    loadingBar.style.width = (clamp01((t - 3.2) / 0.3) * 100) + '%';
+
+    var resultsOpacity = fadeIn(t, 3.5, 0.5);
+    resultCount.style.opacity = resultsOpacity;
+    results.style.opacity = resultsOpacity;
+
+    result1.classList.toggle('hovered', t >= 4.6 && t < 6.6);
+
+    var ffOpacity = fadeIn(t, 5.3, 0.3) * fadeOut(t, 7.6, 0.4);
+    finderWindow.style.opacity = ffOpacity;
+    finderWindow.style.transform = 'translateY(' + (10 - fadeIn(t,5.3,0.3)*10) + 'px) scale(' + (0.98 + fadeIn(t,5.3,0.3)*0.02) + ')';
+
+    frame.style.opacity = fadeIn(t, 0, 0.25) * fadeOut(t, 7.6, 0.7);
+  }
+
+  loopPlayer(LOOP, render);
+})();
+</script>
+
+</body>
+</html>

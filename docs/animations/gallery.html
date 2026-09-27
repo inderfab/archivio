@@ -1,0 +1,495 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Archivio – Bildgalerie</title>
+<style>
+:root {
+  --text:    #1f2937;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --border:  #e5e7eb;
+  --bg:      #ffffff;
+  --bg-2:    #f9fafb;
+  --accent:  #111827;
+  --radius:  6px;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.demo-frame {
+  position: relative;
+  width: 680px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.08);
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* ── Synthetischer Cursor ── */
+.cursor {
+  position: absolute; left: 0; top: 0; width: 22px; height: 22px;
+  z-index: 90; pointer-events: none; will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  opacity: 0;
+}
+.cursor.cursor-b path { fill: #2563eb; }
+.click-ring {
+  position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%; background: rgba(17,24,39,.18);
+  z-index: 89; pointer-events: none; opacity: 0; will-change: transform, opacity;
+}
+.click-ring.ring-b { background: rgba(37,99,235,.2); }
+
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+.badge-eml  { background: #fef3c7; color: #92400e; }
+.badge-xlsx { background: #dcfce7; color: #166534; }
+mark { background: #fef9c3; color: var(--text); border-radius: 2px; padding: 0 1px; }
+
+</style>
+<style>
+  .demo-frame { min-height: 420px; }
+  .filter-bar { display: flex; align-items: center; gap: 10px; height: 40px; position: relative; z-index: 5; }
+  .project-chip {
+    font-size: 13px; font-weight: 600; padding: 7px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg-2); color: var(--text);
+  }
+  .tag-filter-wrap { position: relative; }
+  .tag-filter-btn, .star-filter-group {
+    font-size: 13px; font-family: inherit; padding: 7px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text-2);
+    display: flex; align-items: center; gap: 6px;
+  }
+  .tag-filter-btn.active { color: var(--text); border-color: #9ca3af; background: var(--bg-2); font-weight: 600; }
+  .tf-chevron { width: 12px; height: 12px; flex-shrink: 0; stroke: var(--text-3); }
+  .tag-filter-menu {
+    position: absolute; top: calc(100% + 4px); left: 0; width: 170px; z-index: 20;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 8px 24px rgba(0,0,0,.12); padding: 4px;
+    opacity: 0; pointer-events: none; transform: translateY(-4px);
+    transition: opacity .15s ease, transform .15s ease;
+  }
+  .tag-filter-menu.open { opacity: 1; transform: translateY(0); }
+  .tag-filter-item { padding: 8px 10px; font-size: 13px; border-radius: 4px; color: var(--text); }
+  .tag-filter-item.hovered { background: var(--bg-2); }
+  .star-filter-group { gap: 1px; padding: 6px 10px; }
+  .sf-star { width: 15px; height: 15px; fill: none; stroke: var(--text-3); stroke-width: 1.6; }
+  .sf-star.filled { fill: #d97706; stroke: none; }
+  .filter-spacer { flex: 1; }
+
+  .photo-grid {
+    display: grid; grid-template-columns: repeat(4, 145px); gap: 10px;
+    margin-top: 16px; opacity: 0; transform: scale(.97); transform-origin: top left;
+  }
+  .tile {
+    position: relative; width: 145px; height: 104px; border-radius: 8px; overflow: hidden;
+    background: linear-gradient(135deg, var(--c1), var(--c2));
+  }
+  .tile:nth-child(1)  { --c1:#cbd5e1; --c2:#94a3b8; }
+  .tile:nth-child(2)  { --c1:#e5e7eb; --c2:#9ca3af; }
+  .tile:nth-child(3)  { --c1:#d6d3d1; --c2:#a8a29e; }
+  .tile:nth-child(4)  { --c1:#fde68a; --c2:#d97706; }
+  .tile:nth-child(5)  { --c1:#bfdbfe; --c2:#60a5fa; }
+  .tile:nth-child(6)  { --c1:#e5e7eb; --c2:#6b7280; }
+  .tile:nth-child(7)  { --c1:#fecaca; --c2:#ef4444; }
+  .tile:nth-child(8)  { --c1:#d1fae5; --c2:#34d399; }
+  .tile:nth-child(9)  { --c1:#e9d5ff; --c2:#a78bfa; }
+  .tile:nth-child(10) { --c1:#fed7aa; --c2:#fb923c; }
+  .tile:nth-child(11) { --c1:#cffafe; --c2:#22d3ee; }
+  .tile:nth-child(12) { --c1:#e5e7eb; --c2:#9ca3af; }
+
+  .tile-badge {
+    position: absolute; top: 6px; left: 6px; font-size: 9px; font-weight: 700;
+    background: rgba(0,0,0,.45); color: #fff; padding: 2px 6px; border-radius: 4px;
+  }
+  .tile-stars {
+    position: absolute; left: 6px; bottom: 6px; display: flex; gap: 1px;
+    background: rgba(0,0,0,.35); border-radius: 4px; padding: 2px 4px;
+    opacity: 0;
+  }
+  .tile-stars .star { width: 13px; height: 13px; fill: none; stroke: #fff; stroke-width: 1.6; filter: drop-shadow(0 1px 1px rgba(0,0,0,.5)); }
+  .tile-stars .star.filled { fill: #fff; stroke: none; }
+  .tile-tag {
+    position: absolute; right: 6px; bottom: 6px; font-size: 10px; font-weight: 600;
+    background: rgba(255,255,255,.92); color: var(--text); padding: 2px 7px; border-radius: 10px;
+    opacity: 0;
+  }
+  .tile-check {
+    position: absolute; top: 6px; right: 6px; width: 20px; height: 20px; border-radius: 50%;
+    background: #111827; display: flex; align-items: center; justify-content: center;
+    opacity: 0;
+  }
+  .tile-check svg { width: 12px; height: 12px; stroke: #fff; stroke-width: 2.5; fill: none; }
+
+  .tile-tag-add {
+    position: absolute; right: 6px; bottom: 6px; width: 20px; height: 20px; border-radius: 50%;
+    background: rgba(255,255,255,.92); display: flex; align-items: center; justify-content: center;
+    opacity: 0; box-shadow: 0 1px 3px rgba(0,0,0,.15);
+  }
+  .tile-tag-add svg { width: 11px; height: 11px; stroke: var(--text); stroke-width: 2.2; fill: none; }
+
+  .tag-popover {
+    position: absolute; left: 25px; top: 308px; width: 190px; z-index: 40;
+    display: flex; align-items: center; gap: 6px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 8px;
+    box-shadow: 0 8px 22px rgba(0,0,0,.16); padding: 7px; opacity: 0;
+  }
+  .tag-popover-input {
+    flex: 1; min-width: 0; font-size: 12px; color: var(--text);
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 5px;
+    padding: 6px 8px; white-space: nowrap; overflow: hidden;
+  }
+  .tag-popover-input .placeholder { color: var(--text-3); }
+  .tag-input-caret {
+    display: inline-block; width: 1px; height: 12px; background: var(--text);
+    margin-left: 1px; vertical-align: -2px; animation: tag-caret-blink 1s steps(1) infinite;
+  }
+  @keyframes tag-caret-blink { 50% { opacity: 0; } }
+  .tag-popover-confirm {
+    width: 24px; height: 24px; border-radius: 50%; flex-shrink: 0;
+    background: var(--accent); display: flex; align-items: center; justify-content: center;
+    opacity: .3;
+  }
+  .tag-popover-confirm.active { opacity: 1; }
+  .tag-popover-confirm svg { width: 13px; height: 13px; stroke: #fff; stroke-width: 2.5; fill: none; }
+
+  .action-btn {
+    position: absolute; font-size: 12px; font-weight: 600; font-family: inherit;
+    padding: 7px 14px; border-radius: var(--radius); cursor: default;
+    background: var(--accent); color: #fff; opacity: 0;
+  }
+
+  .contact-sheet {
+    position: absolute; left: 50%; top: 50%; width: 420px;
+    transform: translate(-50%,-50%) scale(.96); background: #fff;
+    border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 20px 50px rgba(0,0,0,.22);
+    padding: 20px; opacity: 0; z-index: 30;
+  }
+  .cs-eyebrow { font-size: 10px; font-weight: 700; text-transform: uppercase; letter-spacing: .06em; color: var(--text-3); margin-bottom: 6px; }
+  .cs-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 14px; }
+  .cs-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .cs-date { font-size: 11px; color: var(--text-3); }
+  .cs-grid { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
+  .cs-tile { height: 90px; border-radius: 6px; background: linear-gradient(135deg, var(--c1), var(--c2)); }
+  .cs-copy-btn {
+    display: block; width: 100%; margin-top: 14px; font-size: 12px; font-weight: 600; font-family: inherit;
+    padding: 8px; border: 1px solid var(--border); border-radius: var(--radius);
+    background: var(--bg); color: var(--text);
+  }
+</style>
+</head>
+<body>
+
+<div class="demo-frame" id="frame">
+  <div class="filter-bar">
+    <div class="project-chip">300 Musterhaus</div>
+    <div class="tag-filter-wrap">
+      <button class="tag-filter-btn" id="tag-filter">
+        <span id="tag-filter-label">Alle Tags</span>
+        <svg class="tf-chevron" viewBox="0 0 24 24" fill="none" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 9 6 6 6-6"/></svg>
+      </button>
+      <div class="tag-filter-menu" id="tag-filter-menu">
+        <div class="tag-filter-item" id="tfi-all">Alle Tags</div>
+        <div class="tag-filter-item" id="tfi-fassade">Fassade</div>
+        <div class="tag-filter-item">Innenausbau</div>
+        <div class="tag-filter-item">Baustelle</div>
+      </div>
+    </div>
+    <div class="star-filter-group" id="star-filter">
+      <svg class="sf-star" id="sfs1" viewBox="0 0 24 24"><path d="M12 2l3 6.5 7 1-5.2 5 1.3 7-6.1-3.4L5.9 21.5l1.3-7L2 9.5l7-1z"/></svg>
+      <svg class="sf-star" id="sfs2" viewBox="0 0 24 24"><path d="M12 2l3 6.5 7 1-5.2 5 1.3 7-6.1-3.4L5.9 21.5l1.3-7L2 9.5l7-1z"/></svg>
+      <svg class="sf-star" id="sfs3" viewBox="0 0 24 24"><path d="M12 2l3 6.5 7 1-5.2 5 1.3 7-6.1-3.4L5.9 21.5l1.3-7L2 9.5l7-1z"/></svg>
+      <svg class="sf-star" id="sfs4" viewBox="0 0 24 24"><path d="M12 2l3 6.5 7 1-5.2 5 1.3 7-6.1-3.4L5.9 21.5l1.3-7L2 9.5l7-1z"/></svg>
+      <span style="font-size:11px;color:var(--text-3);margin-left:4px;">+</span>
+    </div>
+    <div class="filter-spacer"></div>
+  </div>
+
+  <div class="photo-grid" id="grid">
+    <div class="tile" id="t0"></div>
+    <div class="tile" id="t1"><div class="tile-stars" id="stars1"></div></div>
+    <div class="tile" id="t2"><div class="tile-badge">01_Baustelle</div></div>
+    <div class="tile" id="t3"><div class="tile-stars" id="stars3"></div><div class="tile-tag" id="tag3">Fassade</div><div class="tile-check" id="check3"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div></div>
+    <div class="tile" id="t4"><div class="tile-stars" id="stars4"></div><div class="tile-tag-add" id="tag-add-4"><svg viewBox="0 0 24 24"><path d="M12 5v14M5 12h14"/></svg></div><div class="tile-tag" id="tag4">Fassade</div><div class="tile-check" id="check4"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div></div>
+    <div class="tile" id="t5"><div class="tile-badge">02_Muster</div></div>
+    <div class="tile" id="t6"><div class="tile-stars" id="stars6"></div><div class="tile-tag" id="tag6">Fassade</div><div class="tile-check" id="check6"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div></div>
+    <div class="tile" id="t7"><div class="tile-stars" id="stars7"></div></div>
+    <div class="tile" id="t8"><div class="tile-badge">04_Fassade</div></div>
+    <div class="tile" id="t9"><div class="tile-stars" id="stars9"></div><div class="tile-tag" id="tag9">Fassade</div></div>
+    <div class="tile" id="t10"><div class="tile-stars" id="stars10"></div></div>
+    <div class="tile" id="t11"></div>
+  </div>
+
+  <div class="tag-popover" id="tag-popover-4">
+    <div class="tag-popover-input"><span id="tag-input-text" class="placeholder">Tag eingeben…</span><span class="tag-input-caret" id="tag-input-caret" style="display:none;"></span></div>
+    <div class="tag-popover-confirm" id="tag-confirm-4"><svg viewBox="0 0 24 24"><path d="M4 12l5 5L20 6"/></svg></div>
+  </div>
+
+  <button class="action-btn" id="btn-select" style="left:16px; top:165px;">Sichtbare wählen</button>
+  <button class="action-btn" id="btn-export" style="left:16px; top:165px;">Kontaktbogen erstellen</button>
+
+  <div class="contact-sheet" id="contact-sheet">
+    <div class="cs-eyebrow">Kontaktbogen</div>
+    <div class="cs-header">
+      <span class="cs-title">300 Musterhaus — Fassade</span>
+      <span class="cs-date">27.09.2026</span>
+    </div>
+    <div class="cs-grid">
+      <div class="cs-tile" style="--c1:#fde68a;--c2:#d97706;"></div>
+      <div class="cs-tile" style="--c1:#bfdbfe;--c2:#60a5fa;"></div>
+      <div class="cs-tile" style="--c1:#fecaca;--c2:#ef4444;"></div>
+    </div>
+    <button class="cs-copy-btn">Fotos in Ordner kopieren</button>
+  </div>
+
+  <div class="click-ring" id="click-ring"></div>
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24" fill="none">
+    <path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/>
+  </svg>
+</div>
+
+<script>
+// Gemeinsame Timeline-Helfer für die bauchat.ch-Feature-Animationen (SVG/CSS/JS,
+// kein Video). Jede Animation treibt ihre eigene requestAnimationFrame-Schleife;
+// diese Datei stellt nur die Interpolations-Bausteine bereit.
+
+function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+function fadeIn(t, start, dur) { return clamp01((t - start) / dur); }
+function fadeOut(t, start, dur) { return 1 - fadeIn(t, start, dur); }
+
+// Cursor, der sich entlang fester Wegpunkte {t,x,y} bewegt (ease-in-out zwischen
+// je zwei Punkten) und an definierten Zeitpunkten einen Klick-Puls auslöst.
+function makeCursor(cursorEl, ringEl, waypoints, clicks) {
+  function posAt(t) {
+    if (t <= waypoints[0].t) return waypoints[0];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i], b = waypoints[i + 1];
+      if (t >= a.t && t <= b.t) {
+        var span = b.t - a.t;
+        var f = span > 0 ? easeInOutCubic(clamp01((t - a.t) / span)) : 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      }
+    }
+    return waypoints[waypoints.length - 1];
+  }
+  return {
+    render: function (t, visibleFrom, visibleTo) {
+      var pos = posAt(t);
+      var vis = fadeIn(t, visibleFrom, 0.2) * fadeOut(t, visibleTo, 0.3);
+      cursorEl.style.opacity = vis;
+      cursorEl.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      var ringOpacity = 0, ringScale = 0.4, rx = 0, ry = 0;
+      (clicks || []).forEach(function (c) {
+        var dt = t - c.t;
+        if (dt >= -0.02 && dt <= 0.4) {
+          var f = clamp01(dt / 0.4);
+          ringOpacity = 1 - f; ringScale = 0.4 + f * 1.3; rx = c.x; ry = c.y;
+        }
+      });
+      ringEl.style.opacity = ringOpacity;
+      ringEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px) scale(' + ringScale + ')';
+    }
+  };
+}
+
+function loopPlayer(loopSeconds, renderFn) {
+  var startTs = null;
+  var SPEED = 0.8; // ca. 25% langsamer
+  function tick(ts) {
+    if (startTs === null) startTs = ts;
+    var elapsed = ((ts - startTs) / 1000 * SPEED) % loopSeconds;
+    renderFn(elapsed);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+</script>
+<script>
+(function(){
+  var frame = document.getElementById('frame');
+  var grid = document.getElementById('grid');
+  var tagFilter = document.getElementById('tag-filter');
+  var tagFilterLabel = document.getElementById('tag-filter-label');
+  var tagFilterMenu = document.getElementById('tag-filter-menu');
+  var tfiFassade = document.getElementById('tfi-fassade');
+  var btnSelect = document.getElementById('btn-select');
+  var btnExport = document.getElementById('btn-export');
+  var contactSheet = document.getElementById('contact-sheet');
+
+  function starRow(elId, filledCount){
+    var el = document.getElementById(elId);
+    var stars = [];
+    for (var i = 0; i < 5; i++){
+      var s = document.createElementNS('http://www.w3.org/2000/svg','svg');
+      s.setAttribute('viewBox','0 0 24 24'); s.setAttribute('class','star' + (i < filledCount ? ' filled' : ''));
+      var p = document.createElementNS('http://www.w3.org/2000/svg','path');
+      p.setAttribute('d','M12 2l3 6.5 7 1-5.2 5 1.3 7-6.1-3.4L5.9 21.5l1.3-7L2 9.5l7-1z');
+      s.appendChild(p); el.appendChild(s); stars.push(s);
+    }
+    return el;
+  }
+  // Bewertungen bewusst über nicht benachbarte Kacheln mit unterschiedlichen
+  // Farben verteilt (nicht einfach die ersten paar) — 1x1, 2x2, 1x3, 3x4 Sterne;
+  // Fassade-Tag auf 4 verstreuten Kacheln, 3 davon zugleich 4-Sterne-bewertet.
+  var stars1  = starRow('stars1', 3);   // grau   – 3★, kein Tag
+  var stars3  = starRow('stars3', 4);   // gelb   – 4★ + Fassade
+  var stars4  = starRow('stars4', 4);   // hellblau – 4★ + Fassade (ausführlich gezeigt)
+  var stars6  = starRow('stars6', 4);   // rot    – 4★ + Fassade
+  var stars7  = starRow('stars7', 1);   // grün   – 1★
+  var stars9  = starRow('stars9', 2);   // orange – 2★ + Fassade (aber < 3★)
+  var stars10 = starRow('stars10', 2);  // cyan   – 2★
+
+  // Feste Koordinaten innerhalb des 680px-Rahmens, an Tile 4 (Zeile 2, Spalte 1)
+  // ausgerichtet und per getBoundingClientRect nachgemessen.
+  var P_TILE4     = {x: 97,  y: 247};
+  var P_TAG_ADD   = {x: 154, y: 283};
+  var P_POPOVER   = {x: 67,  y: 330};
+  var P_CONFIRM   = {x: 196, y: 330};
+  var P_STAR_F    = {x: 319, y: 45};
+  var P_TAG_F     = {x: 213, y: 45};
+  var P_TAG_ITEM  = {x: 250, y: 112};
+  var P_ACTBTN    = {x: 84,  y: 182};
+
+  var cursor = makeCursor(
+    document.getElementById('cursor'),
+    document.getElementById('click-ring'),
+    [
+      {t: 1.0,  x: P_TILE4.x,   y: P_TILE4.y},
+      {t: 1.6,  x: P_TILE4.x,   y: P_TILE4.y},
+      {t: 1.9,  x: P_TILE4.x,   y: P_TILE4.y},
+      {t: 2.1,  x: P_TAG_ADD.x, y: P_TAG_ADD.y},
+      {t: 2.3,  x: P_TAG_ADD.x, y: P_TAG_ADD.y},
+      {t: 2.5,  x: P_POPOVER.x, y: P_POPOVER.y},
+      {t: 3.1,  x: P_POPOVER.x, y: P_POPOVER.y},
+      {t: 3.35, x: P_CONFIRM.x, y: P_CONFIRM.y},
+      {t: 4.4,  x: P_CONFIRM.x, y: P_CONFIRM.y},
+      {t: 4.8,  x: P_STAR_F.x,  y: P_STAR_F.y},
+      {t: 5.1,  x: P_STAR_F.x,  y: P_STAR_F.y},
+      {t: 5.8,  x: P_TAG_F.x,   y: P_TAG_F.y},
+      {t: 6.1,  x: P_TAG_F.x,   y: P_TAG_F.y},
+      {t: 6.35, x: P_TAG_ITEM.x,y: P_TAG_ITEM.y},
+      {t: 7.0,  x: P_ACTBTN.x,  y: P_ACTBTN.y},
+      {t: 11.0, x: P_ACTBTN.x,  y: P_ACTBTN.y}
+    ],
+    [
+      {t: 1.9,  x: P_TILE4.x,   y: P_TILE4.y},
+      {t: 2.25, x: P_TAG_ADD.x, y: P_TAG_ADD.y},
+      {t: 3.4,  x: P_CONFIRM.x, y: P_CONFIRM.y},
+      {t: 4.95, x: P_STAR_F.x,  y: P_STAR_F.y},
+      {t: 6.05, x: P_TAG_F.x,   y: P_TAG_F.y},
+      {t: 6.45, x: P_TAG_ITEM.x,y: P_TAG_ITEM.y},
+      {t: 7.3,  x: P_ACTBTN.x,  y: P_ACTBTN.y},
+      {t: 8.0,  x: P_ACTBTN.x,  y: P_ACTBTN.y}
+    ]
+  );
+
+  var LOOP = 10.9;
+
+  var TAG_TEXT = 'Fassade';
+  var TAG_MS_PER_CHAR = 70;
+  var tagAdd4 = document.getElementById('tag-add-4');
+  var tagPopover4 = document.getElementById('tag-popover-4');
+  var tagInputText = document.getElementById('tag-input-text');
+  var tagInputCaret = document.getElementById('tag-input-caret');
+  var tagConfirm4 = document.getElementById('tag-confirm-4');
+
+  function render(t){
+    cursor.render(t, 1.0, 10.5);
+
+    grid.style.opacity = fadeIn(t, 0, 0.8);
+    grid.style.transform = 'scale(' + (0.97 + fadeIn(t,0,0.8)*0.03) + ')';
+
+    // Tile 4 (hellblau): Bewertung per Klick — ausführlich gezeigt
+    stars4.style.opacity = fadeIn(t, 1.9, 0.15);
+
+    // Tile 4: eigenen Tag vergeben — Kachel anklicken, tippen, mit Häkchen bestätigen
+    tagAdd4.style.opacity = fadeIn(t, 1.0, 0.2) * fadeOut(t, 2.25, 0.15);
+    tagPopover4.style.opacity = fadeIn(t, 2.25, 0.15) * fadeOut(t, 3.5, 0.15);
+    var typeStart = 2.5;
+    var charsShown = t >= typeStart ? Math.min(TAG_TEXT.length, Math.floor((t - typeStart) * 1000 / TAG_MS_PER_CHAR)) : 0;
+    if (charsShown > 0) {
+      tagInputText.textContent = TAG_TEXT.slice(0, charsShown);
+      tagInputText.classList.remove('placeholder');
+    } else {
+      tagInputText.textContent = 'Tag eingeben…';
+      tagInputText.classList.add('placeholder');
+    }
+    tagInputCaret.style.display = (t >= typeStart && t < 3.45) ? 'inline-block' : 'none';
+    tagConfirm4.classList.toggle('active', charsShown > 0);
+    document.getElementById('tag4').style.opacity = fadeIn(t, 3.5, 0.2);
+
+    // Übrige bewertete/getaggte Kacheln: gleicher Ablauf kompakt, gestaffelt,
+    // ohne jeden Zwischenschritt einzeln zu zeigen — bewusst über das ganze Grid verteilt.
+    stars1.style.opacity  = fadeIn(t, 3.6,  0.2);
+    stars3.style.opacity  = fadeIn(t, 3.75, 0.2);
+    document.getElementById('tag3').style.opacity = fadeIn(t, 3.9, 0.2);
+    stars6.style.opacity  = fadeIn(t, 4.05, 0.2);
+    document.getElementById('tag6').style.opacity = fadeIn(t, 4.2, 0.2);
+    stars9.style.opacity  = fadeIn(t, 4.35, 0.2);
+    document.getElementById('tag9').style.opacity = fadeIn(t, 4.5, 0.2);
+    stars7.style.opacity  = fadeIn(t, 4.65, 0.2);
+    stars10.style.opacity = fadeIn(t, 4.8,  0.2);
+
+    // Stern-Filter: Schwelle auf 3 setzen (erste 3 Sterne ausgefüllt)
+    var starClickT = 4.95;
+    for (var i = 1; i <= 4; i++){
+      document.getElementById('sfs' + i).classList.toggle('filled', t >= starClickT && i <= 3);
+    }
+    // 1. Filterschritt: nur noch Kacheln mit ≥3★ sichtbar (t1, t3, t4, t6) — unterschiedliche Farben
+    var keepAfterStars = {1:1, 3:1, 4:1, 6:1};
+    var f1 = fadeIn(t, 5.1, 0.6);
+    for (var i = 0; i <= 11; i++){
+      if (keepAfterStars[i]) continue;
+      var el = document.getElementById('t' + i);
+      el.style.opacity = 1 - f1;
+      el.style.transform = 'scale(' + (1 - f1*0.15) + ') translateY(' + (f1*8) + 'px)';
+    }
+
+    // Tag-Filter-Dropdown: öffnen, "Fassade" auswählen, schliessen
+    var menuOpen = (t >= 6.05 && t < 6.45);
+    tagFilterMenu.classList.toggle('open', menuOpen);
+    tfiFassade.classList.toggle('hovered', t >= 6.3 && t < 6.45);
+    tagFilter.classList.toggle('active', t >= 6.45);
+    tagFilterLabel.textContent = (t >= 6.45) ? 'Fassade' : 'Alle Tags';
+
+    // 2. Filterschritt: zusätzlich nach Tag "Fassade" — t1 hat den Tag nicht, fällt raus
+    var f2 = fadeIn(t, 6.5, 0.5);
+    var elT1 = document.getElementById('t1');
+    elT1.style.opacity = 1 - f2;
+    elT1.style.transform = 'scale(' + (1 - f2*0.15) + ') translateY(' + (f2*8) + 'px)';
+
+    // Auswahl-Häkchen auf den 3 verbleibenden Treffern (t3, t4, t6)
+    [3,4,6].forEach(function(i){ document.getElementById('check'+i).style.opacity = fadeIn(t,7.15,0.2); });
+
+    // Aktions-Button: erst "Sichtbare wählen", danach "Kontaktbogen erstellen"
+    btnSelect.style.opacity = fadeIn(t, 6.95, 0.15) * fadeOut(t, 7.5, 0.15);
+    btnExport.style.opacity = fadeIn(t, 7.5, 0.15) * fadeOut(t, 9.2, 0.2);
+
+    // Kontaktbogen-Vorschau (gelb/hellblau/rot passend zu t3/t4/t6)
+    var csOpacity = fadeIn(t, 7.9, 0.3) * fadeOut(t, 10.4, 0.4);
+    contactSheet.style.opacity = csOpacity;
+    contactSheet.style.transform = 'translate(-50%,-50%) scale(' + (0.96 + fadeIn(t,7.9,0.3)*0.04) + ')';
+
+    frame.style.opacity = fadeIn(t, 0, 0.25) * fadeOut(t, 10.4, 0.5);
+  }
+
+  loopPlayer(LOOP, render);
+})();
+</script>
+
+</body>
+</html>

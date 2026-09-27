@@ -1,0 +1,275 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Archivio – KI-Schnittstelle (MCP)</title>
+<style>
+:root {
+  --text:    #1f2937;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --border:  #e5e7eb;
+  --bg:      #ffffff;
+  --bg-2:    #f9fafb;
+  --accent:  #111827;
+  --radius:  6px;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.demo-frame {
+  position: relative;
+  width: 680px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.08);
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* ── Synthetischer Cursor ── */
+.cursor {
+  position: absolute; left: 0; top: 0; width: 22px; height: 22px;
+  z-index: 90; pointer-events: none; will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  opacity: 0;
+}
+.cursor.cursor-b path { fill: #2563eb; }
+.click-ring {
+  position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%; background: rgba(17,24,39,.18);
+  z-index: 89; pointer-events: none; opacity: 0; will-change: transform, opacity;
+}
+.click-ring.ring-b { background: rgba(37,99,235,.2); }
+
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+.badge-eml  { background: #fef3c7; color: #92400e; }
+.badge-xlsx { background: #dcfce7; color: #166534; }
+mark { background: #fef9c3; color: var(--text); border-radius: 2px; padding: 0 1px; }
+
+</style>
+<style>
+  .demo-frame { min-height: 440px; }
+  .chat-window { position: relative; height: 380px; }
+
+  .bubble {
+    position: absolute; max-width: 380px; font-size: 13px; line-height: 1.5;
+    padding: 10px 14px; border-radius: 10px; opacity: 0;
+  }
+  .bubble.user {
+    right: 0; background: var(--accent); color: #fff; border-bottom-right-radius: 3px;
+  }
+  .bubble.assistant {
+    left: 0; background: var(--bg-2); border: 1px solid var(--border); color: var(--text);
+    border-bottom-left-radius: 3px;
+  }
+
+  .step-row {
+    position: absolute; left: 0; display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-2); opacity: 0;
+  }
+  .step-row svg { width: 14px; height: 14px; flex-shrink: 0; stroke: var(--text-3); fill: none; }
+  .step-row strong { color: var(--text); font-weight: 700; }
+
+  .pdf-tile {
+    display: flex; align-items: center; gap: 8px; margin-top: 10px;
+    background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+    padding: 8px 10px; transition: background .1s;
+  }
+  .pdf-tile.hovered { background: var(--bg-2); border-color: #9ca3af; }
+  .pdf-tile svg { width: 20px; height: 20px; flex-shrink: 0; }
+  .pdf-name { font-size: 12px; font-weight: 600; color: var(--text); }
+  .pdf-meta { font-size: 11px; color: var(--text-3); }
+
+  .input-bar {
+    position: absolute; left: 0; right: 0; bottom: 0; height: 44px;
+    border: 2px solid var(--border); border-radius: var(--radius);
+    display: flex; align-items: center; padding: 0 16px; font-size: 14px; color: var(--text);
+    background: var(--bg); box-shadow: 0 1px 4px rgba(0,0,0,.06);
+  }
+  .input-text-wrap { flex: 1; min-width: 0; white-space: nowrap; overflow: hidden; padding-right: 36px; }
+  .input-caret {
+    display: inline-block; width: 1px; height: 16px; background: var(--text);
+    margin-left: 1px; vertical-align: -3px; animation: caret-blink 1s steps(1) infinite;
+  }
+  @keyframes caret-blink { 50% { opacity: 0; } }
+  .send-btn {
+    position: absolute; right: 10px; top: 50%; transform: translateY(-50%);
+    width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
+    display: flex; align-items: center; justify-content: center;
+  }
+  .send-btn svg { width: 13px; height: 13px; stroke: #fff; fill: none; stroke-width: 2; }
+</style>
+</head>
+<body>
+
+<div class="demo-frame" id="frame" style="padding:24px;">
+  <div class="chat-window">
+    <div class="bubble user" id="bubble-user" style="top:0;"></div>
+
+    <div class="step-row" id="step1" style="top:66px;">
+      <svg viewBox="0 0 24 24" stroke-width="1.8"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>
+      <span><strong>Archivio</strong> durchsucht Projekte 300, 301, 309 …</span>
+    </div>
+    <div class="step-row" id="step2" style="top:96px;">
+      <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M21 10V7a2 2 0 0 0-2-2h-5l-2-2H5a2 2 0 0 0-2 2v10a2 2 0 0 0 2 2h5"/><path d="M14 21v-5a2 2 0 0 1 2-2h5"/></svg>
+      <span><strong>Archivio</strong> fügt die Dateien zu einem PDF zusammen …</span>
+    </div>
+
+    <div class="bubble assistant" id="bubble-final" style="top:130px;">
+      <div>Fertig — 4 Treppenhauspläne zusammengefasst.</div>
+      <div class="pdf-tile" id="pdf-tile">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#fee2e2"/><path d="M15 2v5h5"/></svg>
+        <div>
+          <div class="pdf-name">Treppenhauspläne_alle_Projekte.pdf</div>
+          <div class="pdf-meta">4 Seiten</div>
+        </div>
+      </div>
+    </div>
+
+    <div class="input-bar" id="input-bar">
+      <div class="input-text-wrap"><span id="typed-text"></span><span class="input-caret" id="caret"></span></div>
+      <div class="send-btn" id="send-btn"><svg viewBox="0 0 24 24"><path d="M5 12h14M13 6l6 6-6 6"/></svg></div>
+    </div>
+  </div>
+
+  <div class="click-ring" id="click-ring"></div>
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24" fill="none">
+    <path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/>
+  </svg>
+</div>
+
+<script>
+// Gemeinsame Timeline-Helfer für die bauchat.ch-Feature-Animationen (SVG/CSS/JS,
+// kein Video). Jede Animation treibt ihre eigene requestAnimationFrame-Schleife;
+// diese Datei stellt nur die Interpolations-Bausteine bereit.
+
+function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+function fadeIn(t, start, dur) { return clamp01((t - start) / dur); }
+function fadeOut(t, start, dur) { return 1 - fadeIn(t, start, dur); }
+
+// Cursor, der sich entlang fester Wegpunkte {t,x,y} bewegt (ease-in-out zwischen
+// je zwei Punkten) und an definierten Zeitpunkten einen Klick-Puls auslöst.
+function makeCursor(cursorEl, ringEl, waypoints, clicks) {
+  function posAt(t) {
+    if (t <= waypoints[0].t) return waypoints[0];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i], b = waypoints[i + 1];
+      if (t >= a.t && t <= b.t) {
+        var span = b.t - a.t;
+        var f = span > 0 ? easeInOutCubic(clamp01((t - a.t) / span)) : 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      }
+    }
+    return waypoints[waypoints.length - 1];
+  }
+  return {
+    render: function (t, visibleFrom, visibleTo) {
+      var pos = posAt(t);
+      var vis = fadeIn(t, visibleFrom, 0.2) * fadeOut(t, visibleTo, 0.3);
+      cursorEl.style.opacity = vis;
+      cursorEl.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      var ringOpacity = 0, ringScale = 0.4, rx = 0, ry = 0;
+      (clicks || []).forEach(function (c) {
+        var dt = t - c.t;
+        if (dt >= -0.02 && dt <= 0.4) {
+          var f = clamp01(dt / 0.4);
+          ringOpacity = 1 - f; ringScale = 0.4 + f * 1.3; rx = c.x; ry = c.y;
+        }
+      });
+      ringEl.style.opacity = ringOpacity;
+      ringEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px) scale(' + ringScale + ')';
+    }
+  };
+}
+
+function loopPlayer(loopSeconds, renderFn) {
+  var startTs = null;
+  var SPEED = 0.8; // ca. 25% langsamer
+  function tick(ts) {
+    if (startTs === null) startTs = ts;
+    var elapsed = ((ts - startTs) / 1000 * SPEED) % loopSeconds;
+    renderFn(elapsed);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+</script>
+<script>
+(function(){
+  var frame = document.getElementById('frame');
+  var typedText = document.getElementById('typed-text');
+  var caret = document.getElementById('caret');
+  var inputBar = document.getElementById('input-bar');
+  var bubbleUser = document.getElementById('bubble-user');
+  var step1 = document.getElementById('step1');
+  var step2 = document.getElementById('step2');
+  var bubbleFinal = document.getElementById('bubble-final');
+  var pdfTile = document.getElementById('pdf-tile');
+
+  var QUERY = 'Erstell mir ein PDF mit je einem Treppenhausplan pro Projekt aus allen Archivprojekten';
+  var MS_PER_CHAR = 38;
+  var TYPE_START = 0.3;
+  var TYPE_END = 3.8; // muss QUERY.length * MS_PER_CHAR (ms) + TYPE_START abdecken
+
+  var P_SEND = {x: 606, y: 400};
+  var P_PDF  = {x: 140, y: 205};
+
+  var cursor = makeCursor(
+    document.getElementById('cursor'), document.getElementById('click-ring'),
+    [
+      {t: 0.0, x: P_SEND.x, y: P_SEND.y},
+      {t: 3.4, x: P_SEND.x, y: P_SEND.y},
+      {t: 8.8, x: P_PDF.x,  y: P_PDF.y},
+      {t: 12.0, x: P_PDF.x,  y: P_PDF.y}
+    ],
+    [{t: 3.6, x: P_SEND.x, y: P_SEND.y}]
+  );
+
+  var LOOP = 12.8;
+
+  function render(t){
+    cursor.render(t, 0.0, 12.0);
+
+    var charsShown = 0;
+    if (t >= TYPE_START && t < TYPE_END) charsShown = Math.min(QUERY.length, Math.floor((t - TYPE_START) * 1000 / MS_PER_CHAR));
+    else if (t >= TYPE_END) charsShown = QUERY.length;
+    typedText.textContent = (t < TYPE_END) ? QUERY.slice(0, charsShown) : '';
+    caret.style.display = (t < TYPE_END) ? 'inline-block' : 'none';
+    inputBar.style.opacity = fadeOut(t, TYPE_END - 0.1, 0.15);
+
+    bubbleUser.textContent = QUERY;
+    bubbleUser.style.opacity = fadeIn(t, TYPE_END, 0.2);
+
+    // Zwischenschritte deutlich langsamer/länger sichtbar, damit man sie gut lesen kann
+    step1.style.opacity = fadeIn(t, 4.1, 0.2);
+    step1.style.filter = (t >= 5.1) ? 'opacity(.5)' : 'none';
+
+    step2.style.opacity = fadeIn(t, 5.4, 0.2) * (t >= 5.4 ? 1 : 0);
+    step2.style.filter = (t >= 6.4) ? 'opacity(.5)' : 'none';
+
+    bubbleFinal.style.opacity = fadeIn(t, 6.8, 0.25);
+    pdfTile.classList.toggle('hovered', t >= 8.8 && t < 9.9);
+
+    frame.style.opacity = fadeIn(t, 0, 0.25) * fadeOut(t, 11.5, 0.7);
+  }
+
+  loopPlayer(LOOP, render);
+})();
+</script>
+
+</body>
+</html>

@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Archivio – Datei-Link statt E-Mail-Anhang</title>
+<style>
+:root {
+  --text:    #1f2937;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --border:  #e5e7eb;
+  --bg:      #ffffff;
+  --bg-2:    #f9fafb;
+  --accent:  #111827;
+  --radius:  6px;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.demo-frame {
+  position: relative;
+  width: 680px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.08);
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* ── Synthetischer Cursor ── */
+.cursor {
+  position: absolute; left: 0; top: 0; width: 22px; height: 22px;
+  z-index: 90; pointer-events: none; will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  opacity: 0;
+}
+.cursor.cursor-b path { fill: #2563eb; }
+.click-ring {
+  position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%; background: rgba(17,24,39,.18);
+  z-index: 89; pointer-events: none; opacity: 0; will-change: transform, opacity;
+}
+.click-ring.ring-b { background: rgba(37,99,235,.2); }
+
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+.badge-eml  { background: #fef3c7; color: #92400e; }
+.badge-xlsx { background: #dcfce7; color: #166534; }
+mark { background: #fef9c3; color: var(--text); border-radius: 2px; padding: 0 1px; }
+
+</style>
+<style>
+  .demo-frame { min-height: 400px; display: flex; }
+  .link-col { position: relative; width: 296px; flex-shrink: 0; }
+  .link-divider { width: 1px; background: var(--border); margin: 0 20px; flex-shrink: 0; }
+  .col-title { font-size: 13px; font-weight: 700; color: var(--text); margin-bottom: 18px; }
+
+  .actor-row { display: flex; align-items: flex-start; gap: 10px; position: relative; min-height: 46px; padding-top: 4px; }
+  .avatar {
+    width: 30px; height: 30px; border-radius: 50%; flex-shrink: 0;
+    background: var(--bg-2); border: 1px solid var(--border);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 11px; font-weight: 700; color: var(--text-2);
+  }
+  .actor-label { font-size: 11px; color: var(--text-3); position: absolute; left: 40px; top: -14px; }
+
+  .file-chip {
+    display: flex; align-items: flex-start; gap: 8px;
+    background: var(--bg-2); border: 1px solid var(--border); border-radius: 8px; padding: 7px 10px;
+  }
+  .file-chip svg { width: 20px; height: 20px; flex-shrink: 0; margin-top: 1px; }
+  .file-chip-info { display: flex; flex-direction: column; gap: 5px; }
+  .file-chip-name { font-size: 11.5px; color: var(--text); white-space: nowrap; }
+  .file-chip.copy2 { opacity: 0; }
+
+  .ctx-menu {
+    position: absolute; left: 40px; top: 36px; width: 180px; z-index: 10;
+    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius);
+    box-shadow: 0 8px 20px rgba(0,0,0,.14); padding: 4px; opacity: 0;
+  }
+  .ctx-item { font-size: 12px; padding: 7px 9px; border-radius: 4px; color: var(--text); }
+  .ctx-item.hovered { background: var(--bg-2); }
+  .toast {
+    position: absolute; left: 40px; top: -14px; font-size: 10px; font-weight: 700;
+    color: #166534; opacity: 0;
+  }
+
+  .fly-track { position: relative; height: 130px; }
+  .fly-group {
+    position: absolute; left: 26px; top: 0;
+    display: flex; align-items: center; gap: 9px; opacity: 0;
+  }
+  .fly-icon { width: 30px; height: 30px; flex-shrink: 0; }
+  .fly-label { font-size: 12px; font-weight: 600; color: var(--text-2); white-space: nowrap; }
+
+  .label-tag {
+    align-self: flex-start;
+    font-size: 10px; font-weight: 700; padding: 2px 7px; border-radius: 4px;
+    background: var(--bg-2); color: var(--text-3);
+  }
+  .label-tag.warn { background: #fee2e2; color: #991b1b; }
+  .label-tag.ok   { background: #dcfce7; color: #166534; }
+</style>
+</head>
+<body>
+
+<div class="demo-frame" id="frame" style="padding:24px;">
+  <div class="link-col">
+    <div class="col-title">Bisher: Dateikopie per Mail versenden</div>
+
+    <div class="actor-row">
+      <div class="actor-label">Ich</div>
+      <div class="avatar">I</div>
+      <div class="file-chip" id="l-file-chip">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#dcfce7"/><path d="M15 2v5h5"/></svg>
+        <div class="file-chip-info"><span class="file-chip-name">300_GR_OG_Bad.pdf</span><span class="label-tag ok">Original</span></div>
+      </div>
+    </div>
+
+    <div class="fly-track">
+      <div class="fly-group" id="l-fly-group">
+        <svg class="fly-icon" viewBox="0 0 24 24" fill="none" stroke="#6b7280" stroke-width="1.6">
+          <path d="M3 6h18v12H3z"/><path d="m3 6 9 7 9-7"/>
+        </svg>
+        <span class="fly-label">Als Anhang senden</span>
+      </div>
+    </div>
+
+    <div class="actor-row">
+      <div class="actor-label">Mitarbeiter</div>
+      <div class="avatar">M</div>
+      <div class="file-chip copy2" id="l-copy2">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#b91c1c" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#fee2e2"/><path d="M15 2v5h5"/></svg>
+        <div class="file-chip-info">
+          <span class="file-chip-name">300_GR_OG_Bad_Kopie.pdf</span>
+          <span class="label-tag warn" id="l-copy-tag">Kopie</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="link-divider"></div>
+
+  <div class="link-col">
+    <div class="col-title">Neu: Archivio-Link teilen</div>
+
+    <div class="actor-row">
+      <div class="actor-label">Ich</div>
+      <div class="avatar">I</div>
+      <div class="file-chip" id="r-file-chip-ich">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#dcfce7"/><path d="M15 2v5h5"/></svg>
+        <div class="file-chip-info"><span class="file-chip-name">300_GR_OG_Bad.pdf</span><span class="label-tag ok">Original</span></div>
+      </div>
+      <span class="toast" id="r-toast">Kopiert ✓</span>
+      <div class="ctx-menu" id="r-ctx">
+        <div class="ctx-item" id="r-ctx-item">Archivio-Link kopieren</div>
+      </div>
+    </div>
+
+    <div class="fly-track">
+      <div class="fly-group" id="r-fly-group">
+        <svg class="fly-icon" viewBox="0 0 24 24" fill="none" stroke="#2563eb" stroke-width="1.8">
+          <path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/>
+          <path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/>
+        </svg>
+        <span class="fly-label">Als Link senden</span>
+      </div>
+    </div>
+
+    <div class="actor-row">
+      <div class="actor-label">Mitarbeiter</div>
+      <div class="avatar">M</div>
+      <div class="file-chip" id="r-file-chip" style="opacity:0;">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#166534" stroke-width="1.5"><path d="M6 2h9l5 5v15H6z" fill="#dcfce7"/><path d="M15 2v5h5"/></svg>
+        <div class="file-chip-info">
+          <span class="file-chip-name">300_GR_OG_Bad.pdf</span>
+          <span class="label-tag ok" id="r-orig-tag">Original</span>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div class="click-ring" id="ring-ich-l"></div>
+  <svg class="cursor" id="cursor-ich-l" viewBox="0 0 24 24" fill="none"><path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/></svg>
+
+  <div class="click-ring" id="ring-ich-r"></div>
+  <svg class="cursor" id="cursor-ich-r" viewBox="0 0 24 24" fill="none"><path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/></svg>
+</div>
+
+<script>
+// Gemeinsame Timeline-Helfer für die bauchat.ch-Feature-Animationen (SVG/CSS/JS,
+// kein Video). Jede Animation treibt ihre eigene requestAnimationFrame-Schleife;
+// diese Datei stellt nur die Interpolations-Bausteine bereit.
+
+function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+function fadeIn(t, start, dur) { return clamp01((t - start) / dur); }
+function fadeOut(t, start, dur) { return 1 - fadeIn(t, start, dur); }
+
+// Cursor, der sich entlang fester Wegpunkte {t,x,y} bewegt (ease-in-out zwischen
+// je zwei Punkten) und an definierten Zeitpunkten einen Klick-Puls auslöst.
+function makeCursor(cursorEl, ringEl, waypoints, clicks) {
+  function posAt(t) {
+    if (t <= waypoints[0].t) return waypoints[0];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i], b = waypoints[i + 1];
+      if (t >= a.t && t <= b.t) {
+        var span = b.t - a.t;
+        var f = span > 0 ? easeInOutCubic(clamp01((t - a.t) / span)) : 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      }
+    }
+    return waypoints[waypoints.length - 1];
+  }
+  return {
+    render: function (t, visibleFrom, visibleTo) {
+      var pos = posAt(t);
+      var vis = fadeIn(t, visibleFrom, 0.2) * fadeOut(t, visibleTo, 0.3);
+      cursorEl.style.opacity = vis;
+      cursorEl.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      var ringOpacity = 0, ringScale = 0.4, rx = 0, ry = 0;
+      (clicks || []).forEach(function (c) {
+        var dt = t - c.t;
+        if (dt >= -0.02 && dt <= 0.4) {
+          var f = clamp01(dt / 0.4);
+          ringOpacity = 1 - f; ringScale = 0.4 + f * 1.3; rx = c.x; ry = c.y;
+        }
+      });
+      ringEl.style.opacity = ringOpacity;
+      ringEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px) scale(' + ringScale + ')';
+    }
+  };
+}
+
+function loopPlayer(loopSeconds, renderFn) {
+  var startTs = null;
+  var SPEED = 0.8; // ca. 25% langsamer
+  function tick(ts) {
+    if (startTs === null) startTs = ts;
+    var elapsed = ((ts - startTs) / 1000 * SPEED) % loopSeconds;
+    renderFn(elapsed);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+</script>
+<script>
+(function(){
+  var frame = document.getElementById('frame');
+  var lFlyGroup = document.getElementById('l-fly-group');
+  var lCopy2 = document.getElementById('l-copy2');
+  var lCopyTag = document.getElementById('l-copy-tag');
+
+  var rCtx = document.getElementById('r-ctx');
+  var rCtxItem = document.getElementById('r-ctx-item');
+  var rToast = document.getElementById('r-toast');
+  var rFlyGroup = document.getElementById('r-fly-group');
+  var rFileChip = document.getElementById('r-file-chip');
+
+  var P_L_FILE = {x: 86,  y: 81};
+  var P_R_FILE = {x: 423, y: 81};
+  var P_R_ITEM = {x: 492, y: 113};
+
+  var cursorL = makeCursor(document.getElementById('cursor-ich-l'), document.getElementById('ring-ich-l'),
+    [{t:0.0,x:20,y:32},{t:0.5,x:P_L_FILE.x,y:P_L_FILE.y},{t:2.3,x:P_L_FILE.x,y:P_L_FILE.y}],
+    [{t:0.55,x:P_L_FILE.x,y:P_L_FILE.y}]
+  );
+  var cursorR = makeCursor(document.getElementById('cursor-ich-r'), document.getElementById('ring-ich-r'),
+    [{t:0.0,x:396,y:32},{t:0.5,x:P_R_FILE.x,y:P_R_FILE.y},{t:0.7,x:P_R_ITEM.x,y:P_R_ITEM.y},{t:1.05,x:P_R_ITEM.x,y:P_R_ITEM.y}],
+    [{t:0.55,x:P_R_FILE.x,y:P_R_FILE.y},{t:1.05,x:P_R_ITEM.x,y:P_R_ITEM.y}]
+  );
+
+  var LOOP = 5.5;
+
+  function render(t){
+    cursorL.render(t, 0.0, 2.3);
+    cursorR.render(t, 0.0, 1.3);
+
+    // Links: Mail-Weg — Icon + Beschriftung fahren gemeinsam runter
+    var lVisible = fadeIn(t, 0.6, 0.2) * fadeOut(t, 2.3, 0.15);
+    var travel = clamp01((t - 1.5) / 0.8);
+    lFlyGroup.style.opacity = lVisible;
+    lFlyGroup.style.transform = 'translateY(' + (travel * 100) + 'px)';
+    lCopy2.style.opacity = fadeIn(t, 2.35, 0.2);
+    var pulse = (t >= 2.35 && t < 4.4) ? (0.5 + 0.5 * Math.sin((t - 2.35) * Math.PI * 2 / 0.9)) : 0;
+    lCopyTag.style.background = t >= 2.35 ? ('rgba(254,202,202,' + (0.7 + pulse*0.3) + ')') : '';
+
+    // Rechts: Archivio-Link-Weg — Kontextmenü, dann Icon + Beschriftung synchron runter
+    rCtx.style.opacity = fadeIn(t, 0.55, 0.15) * fadeOut(t, 1.05, 0.15);
+    rCtxItem.classList.toggle('hovered', t >= 0.7 && t < 1.05);
+    rToast.style.opacity = fadeIn(t, 1.05, 0.1) * fadeOut(t, 1.5, 0.3);
+    var rVisible = fadeIn(t, 1.15, 0.2) * fadeOut(t, 2.3, 0.15);
+    rFlyGroup.style.opacity = rVisible;
+    rFlyGroup.style.transform = 'translateY(' + (travel * 100) + 'px)';
+    rFileChip.style.opacity = fadeIn(t, 2.35, 0.2);
+
+    frame.style.opacity = fadeIn(t, 0, 0.25) * fadeOut(t, 4.7, 0.6);
+  }
+
+  loopPlayer(LOOP, render);
+})();
+</script>
+
+</body>
+</html>
