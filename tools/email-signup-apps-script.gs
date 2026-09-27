@@ -1,28 +1,24 @@
 /**
- * Apps Script für bauchat.ch — ERWEITERUNG des bestehenden Scripts, nicht neu
- * aufsetzen. Ersetzt den kompletten Code deines aktuellen Scripts (das an
- * SHEET_ID gebunden ist und bisher "download" und "newsletter" verarbeitet).
+ * Apps Script für bauchat.ch — verarbeitet Download-Zählung, E-Mail-Anmeldung
+ * beim Download und Abmeldung, alles im selben Sheet (SHEET_ID unten).
  *
- * Was neu dazukommt: "email-signup" (E-Mail-Pflicht beim Download-Formular)
- * und "unsubscribe" (Abmelde-Link in der Update-Mail). "download" bleibt
- * unverändert bestehen. "newsletter" ist raus, da dieses Feature auf der
- * Website nicht mehr existiert — die alte "Newsletter"-Tabelle darf trotzdem
- * unangetastet stehen bleiben, es wird nur nichts mehr reingeschrieben.
+ * Dieses Script läuft im Apps-Script-Projekt, das über "Erweiterungen →
+ * Apps Script" direkt am Google Sheet hängt (Bereitstellungs-ID
+ * AKfycby3IWoq8oU-gZPvwclyks_AubvfkMmxrJvQ1P2P1zplYEBfxbVr8oo31AUc1JTnvhlnQg,
+ * exakt diese URL steht in docs/index.html als _TRACKING_URL und in
+ * docs/abmelden.html als TRACKING_URL — beide synchron halten, falls sich
+ * die Bereitstellung mal ändert).
  *
- * Einrichtung:
- * 1. Im selben Google Sheet eine neue Tabelle (Tab) anlegen, Name genau:
- *      Email-Updates
- *    Erste Zeile als Kopfzeile:
- *      E-Mail | Zeitstempel | Token | Status
- * 2. Im Apps-Script-Editor den kompletten bisherigen Code durch diesen hier
- *    ersetzen (SHEET_ID unten auf deinen bestehenden Wert prüfen/anpassen).
- * 3. "Bereitstellen" → "Bereitstellungen verwalten" → Stift-Symbol bei der
- *    bestehenden Web-App-Bereitstellung → "Version: Neue Version" → Bereitstellen.
- *    WICHTIG: über "Bereitstellungen verwalten" (nicht "Neue Bereitstellung"),
- *    damit die bestehende URL gleich bleibt — die Website muss dann nicht
- *    angepasst werden, sie zeigt schon auf diese URL (_TRACKING_URL).
- * 4. Beim ersten Aufruf nach dem Update fragt Google evtl. erneut nach
- *    Berechtigungen (Mail versenden) — einmal bestätigen.
+ * Tabellen im Sheet:
+ * - "Downloads"      -- bestehend, unverändert (Zeitstempel, Version, Land)
+ * - "Newsletter"      -- alt/unbenutzt, darf unangetastet stehen bleiben
+ * - "Email-Updates"   -- neu, für die E-Mail-Pflicht beim Download.
+ *   Kopfzeile: E-Mail | Zeitstempel | Token | Status
+ *
+ * Nach jeder Code-Änderung hier: "Bereitstellen" → "Bereitstellungen
+ * verwalten" → Stift-Symbol bei der Web-App-Zeile → "Version: Neue Version"
+ * → Bereitstellen (NICHT "Neue Bereitstellung", sonst ändert sich die URL
+ * und die Website muss erneut angepasst werden).
  */
 
 const SHEET_ID = '10CZANjdWeDwINhRh9u5zdkPyl6ORUbgtUFWTndSlLO0';
