@@ -62,8 +62,8 @@
   </footer>
 
   <script>
-    // Muss mit EMAIL_ENDPOINT_URL in index.html übereinstimmen.
-    var EMAIL_ENDPOINT_URL = 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE';
+    // Dieselbe Apps-Script-Web-App wie auf index.html (dort _TRACKING_URL).
+    var TRACKING_URL = 'https://script.google.com/macros/s/AKfycbxXHYI5XyzKuH08YUP_jhTUunXRfLcC4wPJwUobE4gyZXJ-24HN5moHUDW9Eio81y8ZQg/exec';
 
     var params = new URLSearchParams(window.location.search);
     var token = params.get('token');
@@ -94,16 +94,11 @@
       btn.disabled = true;
       btn.textContent = 'Wird bearbeitet…';
 
-      if (EMAIL_ENDPOINT_URL.indexOf('PASTE_') !== -1) {
-        renderDone();
-        return;
-      }
-
-      fetch(EMAIL_ENDPOINT_URL, {
+      fetch(TRACKING_URL, {
         method: 'POST',
         mode: 'no-cors',
-        headers: { 'Content-Type': 'text/plain' },
-        body: JSON.stringify({ action: 'unsubscribe', token: token })
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ type: 'unsubscribe', token: token })
       })
         .catch(function () {})
         .then(renderDone);

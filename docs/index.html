@@ -381,10 +381,6 @@
       }).catch(function() {});
     }
 
-    // TODO Fabio: nach Deploy von tools/email-signup-apps-script.gs die
-    // Web-App-URL hier UND in abmelden.html (dieselbe Konstante) eintragen.
-    var EMAIL_ENDPOINT_URL = 'PASTE_APPS_SCRIPT_WEB_APP_URL_HERE';
-
     function showEmailForm() {
       document.getElementById('dl-initial').style.display = 'none';
       document.getElementById('dl-form').classList.add('open');
@@ -402,14 +398,7 @@
       }
 
       // Speichern läuft parallel und darf den Download nie blockieren oder verzögern
-      if (EMAIL_ENDPOINT_URL.indexOf('PASTE_') === -1) {
-        fetch(EMAIL_ENDPOINT_URL, {
-          method: 'POST',
-          mode: 'no-cors',
-          headers: { 'Content-Type': 'text/plain' },
-          body: JSON.stringify({ email: email })
-        }).catch(function () {});
-      }
+      _track({ type: 'email-signup', email: email });
 
       downloadLatest();
       return false;
