@@ -1,27 +1,27 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
   <url>
-    <loc>https://bauchat.ch/</loc>
+    <loc>https://architools.ch/</loc>
     <changefreq>monthly</changefreq>
     <priority>1.0</priority>
   </url>
   <url>
-    <loc>https://bauchat.ch/installation.html</loc>
+    <loc>https://architools.ch/installation.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.6</priority>
   </url>
   <url>
-    <loc>https://bauchat.ch/merkblatt.html</loc>
+    <loc>https://architools.ch/merkblatt.html</loc>
     <changefreq>yearly</changefreq>
     <priority>0.3</priority>
   </url>
   <url>
-    <loc>https://bauchat.ch/haftungsausschluss.html</loc>
+    <loc>https://architools.ch/haftungsausschluss.html</loc>
     <changefreq>yearly</changefreq>
     <priority>0.2</priority>
   </url>
   <url>
-    <loc>https://bauchat.ch/docs.html</loc>
+    <loc>https://architools.ch/docs.html</loc>
     <changefreq>monthly</changefreq>
     <priority>0.5</priority>
   </url>

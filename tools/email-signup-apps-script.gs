@@ -1,5 +1,5 @@
 /**
- * Apps Script für bauchat.ch — verarbeitet Download-Zählung, E-Mail-Anmeldung
+ * Apps Script für architools.ch — verarbeitet Download-Zählung, E-Mail-Anmeldung
  * beim Download und Abmeldung, alles im selben Sheet (SHEET_ID unten).
  *
  * Dieses Script läuft im Apps-Script-Projekt, das über "Erweiterungen →

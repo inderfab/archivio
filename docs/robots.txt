@@ -1,4 +1,4 @@
 User-agent: *
 Allow: /
 
-Sitemap: https://bauchat.ch/sitemap.xml
+Sitemap: https://architools.ch/sitemap.xml

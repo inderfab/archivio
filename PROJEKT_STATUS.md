@@ -15,7 +15,7 @@ Cloud. Läuft auf einem Mac im Büronetz, indexiert Dateien vom NAS und Mails pe
 
 - **Stack:** Python 3.13 (eingebettet), FastAPI, SQLite + FTS5, HTMX + Jinja2, rumps (Menubar-App)
 - **Repo:** https://github.com/inderfab/archivio (GitHub-User: `inderfab`)
-- **Website:** https://bauchat.ch (GitHub Pages aus `docs/`, Custom Domain)
+- **Website:** https://architools.ch (GitHub Pages aus `docs/`, Custom Domain)
 - **Dateiidentität:** SHA256-Hash (nicht Pfad) → Duplikate/Verschiebungen werden erkannt. **Wichtig:** dadurch kann *ein* Dokument mehrere Pfade in verschiedenen Projekten haben.
 
 ---
@@ -428,11 +428,11 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 ---
 
-## 13. Website bauchat.ch
+## 13. Website architools.ch
 
 - GitHub Pages aus `main:/docs` (statisches HTML: `index.html`, `docs.html`, `img/`, `CNAME`).
 - **`docs/.nojekyll`** vorhanden (seit v3.0.x) → Pages liefert statisch aus, **kein Jekyll-Build** mehr → keine flaky „page build failed"-Mails bei jedem Push.
-- Custom Domain `bauchat.ch` (A-Records bei Hostpoint → GitHub Pages).
+- Custom Domain `architools.ch` (A/AAAA-Records bei Hostpoint → GitHub Pages). Bis 2026-09-28 lief die Seite unter `bauchat.ch` (Hostpoint-Weiterleitung dorthin eingerichtet, siehe DNS-Zone); `info@bauchat.ch` existiert nicht mehr, Kontaktadresse ist jetzt `info@architools.ch`.
 
 ---
 

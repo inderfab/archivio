@@ -21,7 +21,7 @@ Architekturbüros und vergleichbare Planungsbüros, die grosse Mengen an Projekt
 
 ## Wichtige Seiten
 
-- Startseite und Übersicht: https://bauchat.ch/
-- Erstinstallation: https://bauchat.ch/installation.html
-- Merkblatt zum Umgang mit Daten: https://bauchat.ch/merkblatt.html
-- Haftungsausschluss: https://bauchat.ch/haftungsausschluss.html
+- Startseite und Übersicht: https://architools.ch/
+- Erstinstallation: https://architools.ch/installation.html
+- Merkblatt zum Umgang mit Daten: https://architools.ch/merkblatt.html
+- Haftungsausschluss: https://architools.ch/haftungsausschluss.html
