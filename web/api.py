@@ -173,6 +173,17 @@ async def version():
     return JSONResponse({"version": v, "helper_version": hv})
 
 
+@router.get("/license/status")
+async def license_status():
+    """Rein informativ fuer den dezenten Hinweis im Header -- die eigentliche
+    Pruefung passiert lokal beim Start und einmal taeglich (siehe scanner/license.py).
+    Solange das Feature nicht aktiviert ist, liefert das immer status="missing" und
+    die UI zeigt entsprechend nichts an."""
+    from scanner import license as license_mod
+    check = license_mod.get_cached_check()
+    return JSONResponse({"status": check.status, "message": check.message})
+
+
 @router.get("/status")
 async def status():
     conn  = connection.get_connection()

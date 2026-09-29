@@ -1472,6 +1472,7 @@ async def settings_page(
         }]
     fda_missing = await _fda_missing_check()
     from db import backup as backup_mod
+    from scanner import license as license_mod
     return templates.TemplateResponse("settings.html", {
         "request":     request,
         "cfg":         cfg,
@@ -1479,6 +1480,8 @@ async def settings_page(
         "fda_missing": fda_missing,
         "backup":      backup_mod.summary(),
         "missing_passwords": backup_mod.missing_password_accounts(cfg),
+        "license_ui_visible": license_mod.ui_visible(),
+        "license_check": license_mod.get_cached_check(),
     })
 
 
@@ -1784,7 +1787,19 @@ async def settings_save(request: Request):
         "scanner":       {"num_workers": num_workers},
         "rubrica": {"enabled": rubrica_enabled},
     }
+
+    # Lizenz — Feld existiert nur im Formular, wenn die Sektion sichtbar ist
+    # (siehe license.ui_visible()); sonst nicht in "updates" aufnehmen, sonst
+    # wuerde ein Speichern ohne sichtbare Lizenz-Sektion einen bestehenden
+    # Schluessel mit einem leeren String ueberschreiben.
+    if "license_key" in form:
+        updates["license"] = {"key": form.get("license_key", "").strip()}
+
     settings.save(updates)
+
+    if "license_key" in form:
+        from scanner import license as license_mod
+        license_mod.refresh_check()
 
     return RedirectResponse("/dashboard/settings?saved=1", status_code=303)
 

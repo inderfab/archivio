@@ -91,6 +91,7 @@
     .nav-dropdown-menu a:hover { color: var(--text); background: var(--bg-2); }
     .nav-dropdown-menu a.active { color: var(--text); font-weight: 600; background: var(--bg-2); }
     .version-badge { font-size: 12px; color: var(--text-3); margin-left: 8px; }
+    .nav-license-hint { font-size: 12px; color: #b45309; margin-left: 8px; }
     .nav-scan-pill {
       display: inline-flex; align-items: center; gap: 5px;
       font-size: 12px; font-weight: 500;
@@ -1017,6 +1018,7 @@
           </div>
         </div>
         <span class="version-badge" id="nav-version"></span>
+        <span id="nav-license-hint" class="nav-license-hint" style="display:none;"></span>
         <span id="nav-scan-status"
               hx-get="/api/scan/nav-status"
               hx-trigger="load, every 5s"
@@ -1027,6 +1029,14 @@
           var el=document.getElementById('nav-version');
           if(el&&d.version) el.textContent='v'+d.version;
         });
+        // Dezenter Hinweis, nie blockierend -- bleibt unsichtbar solange das
+        // Lizenzsystem nicht aktiviert ist (status kommt dann immer als "missing").
+        fetch('/api/license/status').then(r=>r.json()).then(function(d){
+          if (d.status !== 'grace' && d.status !== 'expired' && d.status !== 'invalid') return;
+          var el = document.getElementById('nav-license-hint');
+          el.textContent = d.message || 'Lizenz prüfen';
+          el.style.display = 'inline';
+        }).catch(function(){});
       </script>
     </div>
   </div>

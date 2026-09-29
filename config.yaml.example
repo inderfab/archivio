@@ -60,4 +60,10 @@ rubrica:
 logging:
   level: INFO
 
+# Lizenzsystem: aktuell inaktiv (siehe scanner/license.py::LICENSE_UI_ENABLED),
+# das Feld existiert bereits, damit spaeter nichts am Kernsystem nachgeruestet
+# werden muss.
+license:
+  key: ""
+
 projects: []

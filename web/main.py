@@ -56,12 +56,18 @@ def _scheduler_loop():
     mcp_log_cleaned_today: str | None = None
     search_log_cleaned_today: str | None = None
     backup_ran_today: str | None = None
+    license_checked_today: str | None = None
     log.info("Scheduler-Loop gestartet")
     while True:
         try:
             from config import settings
 
             today = datetime.now().strftime("%Y-%m-%d")
+
+            if license_checked_today != today:
+                license_checked_today = today
+                from scanner import license as license_mod
+                license_mod.refresh_check()
             if mcp_log_cleaned_today != today:
                 mcp_log_cleaned_today = today
                 from scanner.mcp_log import cleanup_old
@@ -234,6 +240,11 @@ def _startvorbereitung() -> None:
         _start_zustand["laeuft"] = False
         dauer = time.time() - _start_zustand["seit"]
         logging.getLogger(__name__).info("Startvorbereitung abgeschlossen (%.0f s)", dauer)
+
+    # Lizenzpruefung beim Start -- rein lokal, kein Netzwerkzugriff. Ein Fehler
+    # hier darf den Serverstart nie gefaehrden (siehe license._safe_check).
+    from scanner import license as license_mod
+    license_mod.refresh_check()
 
     # Erst jetzt die Dienste starten, die die Datenbank benutzen.
     threading.Thread(target=_scheduler_loop, daemon=True).start()

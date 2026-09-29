@@ -210,6 +210,38 @@
       </div>
     </div>
 
+    {# ── Lizenz — nur sichtbar, wenn LICENSE_UI_ENABLED oder ARCHIVIO_DEBUG_LICENSE=1 ── #}
+    {% if license_ui_visible %}
+    <div class="settings-section">
+      <div class="settings-section-header">
+        Lizenz
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Der Lizenzschlüssel wird per E-Mail zugestellt und hier eingetragen. Die Prüfung läuft vollständig lokal, ohne Netzwerkzugriff.</p>
+        </div>
+      </div>
+      <div class="settings-body">
+        <div class="field">
+          <span class="field-prefix">Schlüssel</span>
+          <input type="text" name="license_key" placeholder="ARCH-XXXX-XXXX-XXXX-..."
+            value="{{ cfg.get('license', {}).get('key', '') }}">
+        </div>
+        {% if license_check and license_check.status != 'missing' %}
+          <p style="font-size:13px; margin-top:10px; color: {{ '#166534' if license_check.status == 'valid' else '#b45309' if license_check.status == 'grace' else '#991b1b' }};">
+            {% if license_check.status == 'valid' %}
+              Gültig bis {{ license_check.gueltig_bis }}
+            {% else %}
+              {{ license_check.message }}
+            {% endif %}
+          </p>
+        {% endif %}
+        <div style="padding-top:14px;">
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
+        </div>
+      </div>
+    </div>
+    {% endif %}
+
   </form>
 
   <div class="settings-grid2">
