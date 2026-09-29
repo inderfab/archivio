@@ -178,8 +178,12 @@ async def license_status():
     """Rein informativ fuer den dezenten Hinweis im Header -- die eigentliche
     Pruefung passiert lokal beim Start und einmal taeglich (siehe scanner/license.py).
     Solange das Feature nicht aktiviert ist, liefert das immer status="missing" und
-    die UI zeigt entsprechend nichts an."""
+    die UI zeigt entsprechend nichts an -- unabhaengig davon, was noch in config.yaml
+    steht (z.B. Testreste), sonst wuerde ein liegen gebliebener Testschluessel den
+    Hinweis auch bei echten Nutzern ohne aktives Feature sichtbar machen."""
     from scanner import license as license_mod
+    if not license_mod.ui_visible():
+        return JSONResponse({"status": "missing", "message": None})
     check = license_mod.get_cached_check()
     return JSONResponse({"status": check.status, "message": check.message})
 
