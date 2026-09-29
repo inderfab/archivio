@@ -116,6 +116,28 @@ done
 # entitlements.plist ist ein Build-Zeit-Artefakt fuer die Signierung (sign_lib.sh), gehoert
 # nicht in Resources/config/ (Python-Settings-Modul) hinein.
 rm -f "$APP/Contents/Resources/config/entitlements.plist"
+
+# Lizenz-Geheimnis: steckt NIE als Klartext im (oeffentlichen!) Git-Repo -- dort bleibt in
+# scanner/license.py nur der Platzhalter stehen. Hier, nur in der kopierten Datei im
+# gebauten Bundle, wird er durch das echte Geheimnis ersetzt (gleiches Muster wie
+# ARCHIVIO_SIGN_APP/-INSTALLER weiter unten: Umgebungsvariable, sonst macOS-Schluesselbund,
+# sonst bleibt der Platzhalter -- die App funktioniert auch dann unveraendert, siehe
+# scanner/license.py::LICENSE_UI_ENABLED).
+LICENSE_SECRET="${ARCHIVIO_LICENSE_SECRET:-}"
+if [ -z "$LICENSE_SECRET" ]; then
+  LICENSE_SECRET=$(security find-generic-password -a "$USER" -s "archivio-license-secret" -w 2>/dev/null || true)
+fi
+LICENSE_FILE="$APP/Contents/Resources/scanner/license.py"
+if [ -n "$LICENSE_SECRET" ]; then
+  if grep -q 'LICENSE_SECRET_B64 = "REPLACE_WITH_REAL_SECRET_AFTER_KEYGEN"' "$LICENSE_FILE"; then
+    sed -i '' "s|LICENSE_SECRET_B64 = \"REPLACE_WITH_REAL_SECRET_AFTER_KEYGEN\"|LICENSE_SECRET_B64 = \"$LICENSE_SECRET\"|" "$LICENSE_FILE"
+    echo "✓ Lizenz-Geheimnis eingebettet (aus $( [ -n "$ARCHIVIO_LICENSE_SECRET" ] && echo "Umgebungsvariable" || echo "Schluesselbund" ))"
+  else
+    echo "⚠️  LICENSE_SECRET_B64-Platzhalter nicht gefunden — Lizenz-Geheimnis NICHT eingebettet"
+  fi
+else
+  echo "⚠️  ARCHIVIO_LICENSE_SECRET nicht gesetzt und nicht im Schluesselbund — Platzhalter bleibt (Lizenzpruefung bleibt inaktiv/wirkungslos)"
+fi
 # Nur einzelne, für den Nutzer relevante Admin-Skripte — NICHT den ganzen scripts/-Ordner
 # (der auch Build-/Dev-Tooling wie build_server_app.sh selbst enthält).
 mkdir -p "$APP/Contents/Resources/scripts"
