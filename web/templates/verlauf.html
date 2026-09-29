@@ -42,6 +42,8 @@
   .vf-row > summary::-webkit-details-marker { display: none; }
   .vf-dt { font-family: ui-monospace, monospace; color: var(--text-3); flex: 0 0 46px; white-space: nowrap; }
   .vf-obj { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .vf-metric { flex: 0 0 auto; color: var(--text-3); white-space: nowrap; }
+  @media (max-width: 760px) { .vf-metric { display: none; } }
   .vf-dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
   .vf-dot.g { background: #16a34a; } .vf-dot.y { background: #d97706; } .vf-dot.r { background: #dc2626; }
   .vf-detail { padding: 0 2px 8px 54px; font-size: 10.5px; color: var(--text-2); line-height: 1.6; }
@@ -64,6 +66,8 @@
     <summary>
       <span class="vf-dt">{{ s.started_at|fmt_ts }}</span>
       <span class="vf-obj">{{ s.project_name or '—' }}</span>
+      <span class="vf-metric">{{ s.duration_s|fmt_duration }}</span>
+      <span class="vf-metric">{{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}%){% endif %} · {{ s.peak_cpu_pct|round|int }}% CPU</span>
       <span class="vf-dot {{ 'g' if s.status == 'done' else ('y' if s.status == 'cancelled' else 'r') }}"></span>
     </summary>
     <div class="vf-detail">
@@ -231,6 +235,8 @@
             <summary>
               <span class="vf-dt">{{ g.ts_start|fmt_ts }}</span>
               <span class="vf-obj">Sammel-Scan · {{ g.count }} Projekte</span>
+              <span class="vf-metric">{{ g.total_duration_s|fmt_duration }}</span>
+              <span class="vf-metric">{{ g.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (g.peak_memory_mb / total_ram_mb * 100)|round(1) }}%){% endif %} · {{ g.peak_cpu_pct|round|int }}% CPU</span>
               <span class="vf-dot {{ 'g' if g.status == 'done' else ('y' if g.status == 'cancelled' else 'r') }}"></span>
             </summary>
             {% for s in g.entries %}{{ render_scan(s) }}{% endfor %}
