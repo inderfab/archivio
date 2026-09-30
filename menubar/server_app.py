@@ -449,6 +449,12 @@ class ArchivioServer(rumps.App):
         )
         bridge.register_url_handler(log)
         bridge.ensure_quick_action_installed(log)
+        # Muss ueber events.before_start laufen: das Status-Item (nsstatusitem)
+        # existiert erst waehrend App.run(), direkt bevor die blockierende Event-Loop
+        # anlaeuft -- nicht schon hier in __init__ (siehe register_drop_target-Docstring).
+        rumps.events.before_start.register(
+            lambda: bridge.register_drop_target(self, self._on_file_dropped, log)
+        )
         threading.Thread(target=self._boot, daemon=True).start()
 
     def _boot(self):
@@ -513,6 +519,18 @@ class ArchivioServer(rumps.App):
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])
+
+    def _open_upload_page(self, path: str) -> None:
+        from urllib.parse import quote
+        subprocess.run(["open", f"http://127.0.0.1:8000/dashboard/upload?src={quote(path)}"])
+
+    def _on_file_dropped(self, paths: list[str]) -> None:
+        """Callback für bridge.register_drop_target() -- eine Datei aufs
+        Menüleisten-Icon gezogen. Bei mehreren Dateien auf einmal (selten) je einen
+        eigenen Browser-Tab, statt die Auswahl auf eine zu beschränken."""
+        log.info("Datei-Drop aufs Menüleisten-Icon: %s", paths)
+        for p in paths:
+            self._open_upload_page(p)
 
     def toggle_autostart(self, sender):
         new_state = sender.state != 1

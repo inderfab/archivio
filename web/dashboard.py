@@ -6,6 +6,7 @@ import gc
 import json
 import logging
 import os
+import re
 import threading
 import time
 import unicodedata
@@ -18,7 +19,7 @@ from pydantic import BaseModel
 
 from config import settings
 from db import connection
-from scanner.walker import scan_project
+from scanner.walker import scan_project, process_file, suggest_project_for_file, suggest_destination_folder
 from web.shared import templates
 
 router = APIRouter(prefix="/dashboard")
@@ -976,23 +977,16 @@ async def mail_scan_status(request: Request):
 
 # ── Ordner-Browser ────────────────────────────────────────────────────────────
 
-@router.get("/browse", response_class=HTMLResponse)
-async def browse(
-    request:    Request,
-    path:       str = Query(...),
-    project_id: int = Query(...),
-    depth:      int = Query(0),
-):
+def _list_browse_level(path: str) -> tuple[list[dict], str]:
+    """Kern von browse() (eine Ebene auflisten, mit Ignoriert-/Ausgeschlossen-/Projekt-
+    Markierung) -- ohne HTTP-Zeug, wiederverwendbar fuer die eigentliche Route UND fuer
+    das Vorab-Rendern mehrerer Spalten auf einmal (upload_page, Datei-Drop)."""
     conn = connection.get_connection()
     ignored = {
-        r["path"] for r in conn.execute(
-            "SELECT path FROM ignored_paths WHERE project_id=?", (project_id,)
-        ).fetchall()
+        r["path"] for r in conn.execute("SELECT path FROM ignored_paths").fetchall()
     }
     project_paths = {
-        r["path"] for r in conn.execute(
-            "SELECT path FROM projects WHERE active=1"
-        ).fetchall()
+        r["path"] for r in conn.execute("SELECT path FROM projects WHERE active=1").fetchall()
     }
     conn.close()
 
@@ -1024,7 +1018,18 @@ async def browse(
     except OSError as exc:
         log.warning("Fehler beim Lesen von %s: %s", path, exc)
         error_msg = f"Ordner konnte nicht gelesen werden: {exc}"
+    return subdirs, error_msg
 
+
+@router.get("/browse", response_class=HTMLResponse)
+async def browse(
+    request:    Request,
+    path:       str = Query(...),
+    project_id: int = Query(...),
+    depth:      int = Query(0),
+    selected:   str = Query(""),
+):
+    subdirs, error_msg = _list_browse_level(path)
     return templates.TemplateResponse("_dashboard_browse.html", {
         "request":      request,
         "subdirs":      subdirs,
@@ -1032,6 +1037,7 @@ async def browse(
         "current_path": path,
         "project_id":   project_id,
         "depth":        depth,
+        "selected":     selected,
     })
 
 
@@ -1057,6 +1063,13 @@ async def folder_detail(
         "SELECT id FROM projects WHERE path=? AND active=1", (path,)
     ).fetchone()
     conn.close()
+
+    # Defensive Absicherung: der uebergebene Pfad sollte durch die aufrufende
+    # Spalten-Ansicht immer ein Ordner sein (sie listet nur is_dir()-Eintraege), aber
+    # ohne diese Pruefung wuerde eine Datei (falls sie doch je hierher gelangt) trotzdem
+    # den "Diesen Ordner als eigenes Projekt"-Button zeigen, was keinen Sinn ergibt.
+    if not os.path.isdir(path):
+        return HTMLResponse("", status_code=204)
 
     file_count = 0
     try:
@@ -1121,6 +1134,242 @@ async def remove_project_from_path(
         "archivio:browseProjectChanged": {"path": path, "is_project": False},
     })
     return resp
+
+
+# ── Datei-Drop aufs Menüleisten-Icon: Ziel-Auswahl-Seite ─────────────────────────
+# Wird vom Helper geöffnet, nachdem eine Datei auf das Archivio-Icon gezogen wurde
+# (src = Pfad der Datei am Ausgangsort, meist Schreibtisch). Zeigt einen automatischen
+# Ablage-Vorschlag (Volltext-Abgleich gegen bereits indexierte Projekte, kein KI/
+# Embedding, siehe scanner.walker.suggest_project_for_file) und erlaubt, ihn über die
+# bestehende Mehrspalten-Ordneransicht (_dashboard_browse.html, unverändert) anzupassen.
+
+def _find_owning_project(conn, folder_path: str) -> dict | None:
+    """Findet das Projekt, dessen Pfad der laengste Praefix von folder_path ist --
+    noetig, weil ein Zielordner auch ein Unterordner eines Projekts sein kann, nicht
+    nur die Projektwurzel selbst (z.B. 'Unterordner als eigenes Projekt'). Bewusst OHNE
+    active=1: der Ordner auf dem NAS existiert unabhaengig davon, ob Archivio dieses
+    Projekt gerade scannt -- ein pausiertes/archiviertes Projekt bleibt trotzdem ein
+    gueltiger Ablageort (process_file() indexiert es unabhaengig vom active-Flag)."""
+    rows = conn.execute("SELECT id, name, path FROM projects").fetchall()
+    best = None
+    for r in rows:
+        p = r["path"]
+        if folder_path == p or folder_path.startswith(p + "/"):
+            if best is None or len(p) > len(best["path"]):
+                best = dict(r)
+    return best
+
+
+def _unique_upload_dest(dest_dir: Path, filename: str) -> Path:
+    """Verhindert Ueberschreiben bei Namenskollision im Zielordner."""
+    target = dest_dir / filename
+    if not target.exists():
+        return target
+    stem, suffix = Path(filename).stem, Path(filename).suffix
+    i = 2
+    while True:
+        candidate = dest_dir / f"{stem} ({i}){suffix}"
+        if not candidate.exists():
+            return candidate
+        i += 1
+
+
+_UPLOAD_PROJEKTNUMMER = re.compile(r"^(\d+)\s")
+
+
+def _render_filename_template(template: str, *, project_name: str | None, original_name: str) -> str:
+    """Rendert das in den Einstellungen konfigurierte Namensmuster (Platzhalter
+    {projektnummer}/{dateiname}/{datum}) zu einem konkreten Dateinamen-Vorschlag --
+    Endung bleibt immer die urspruengliche, wird nicht Teil des Musters."""
+    stem = Path(original_name).stem
+    suffix = Path(original_name).suffix
+    m = _UPLOAD_PROJEKTNUMMER.match(project_name or "")
+    projektnummer = m.group(1) if m else ""
+    rendered = (
+        template
+        .replace("{projektnummer}", projektnummer)
+        .replace("{dateiname}", stem)
+        .replace("{datum}", datetime.now().strftime("%y%m%d"))
+    )
+    return rendered + suffix
+
+
+def _prerender_browse_columns(request: Request, start_path: str, dest_path: str) -> str:
+    """Rendert die Spalten-Ansicht server-seitig direkt bis zum vorgeschlagenen
+    Zielordner aufgeklappt -- fuer den Datei-Drop-Upload, damit man sofort sieht, wo
+    die Datei landen wuerde, statt erst "Anderen Ordner wählen" klicken zu muessen.
+    Nutzt genau dieselbe Auflistung/Vorlage wie das normale, klick-basierte Aufklappen
+    (_list_browse_level + _dashboard_browse.html), nur mehrfach im Voraus statt einmal
+    pro Klick."""
+    try:
+        rel_parts = Path(dest_path).relative_to(start_path).parts
+    except ValueError:
+        rel_parts = ()
+
+    html_parts: list[str] = []
+    template = templates.get_template("_dashboard_browse.html")
+    current = start_path
+    for depth, part in enumerate(rel_parts):
+        subdirs, error_msg = _list_browse_level(current)
+        child_path = str(Path(current) / part)
+        html_parts.append(template.render({
+            "request":      request,
+            "subdirs":      subdirs,
+            "error_msg":    error_msg,
+            "current_path": current,
+            "project_id":   0,
+            "depth":        depth,
+            "selected":     child_path,
+        }))
+        current = child_path
+    return "".join(html_parts)
+
+
+@router.get("/upload", response_class=HTMLResponse)
+async def upload_page(request: Request, src: str = Query(...)):
+    src_path = Path(src)
+    if not src_path.is_file():
+        return templates.TemplateResponse("dashboard_upload.html", {
+            "request": request, "error": f"Datei nicht gefunden: {src}",
+        })
+
+    conn = connection.get_connection()
+    suggested = None
+    suggested_dest = None
+    try:
+        ids = suggest_project_for_file(conn, src_path)
+        if ids:
+            # Bewusst OHNE active=1 -- siehe suggest_project_for_file()/
+            # _find_owning_project(): ein pausiertes Projekt bleibt ein gueltiges Ziel.
+            row = conn.execute(
+                "SELECT id, name, path FROM projects WHERE id=?", (ids[0],)
+            ).fetchone()
+            if row:
+                suggested = dict(row)
+                suggested_dest = suggest_destination_folder(
+                    conn, suggested["id"], src_path.name
+                )
+    finally:
+        conn.close()
+
+    if suggested_dest is None and suggested:
+        suggested_dest = suggested["path"]
+
+    if suggested:
+        start_path = str(Path(suggested["path"]).parent)
+    else:
+        base_folders = settings.get("scanner.base_folders", []) or []
+        start_path = base_folders[0]["path"] if base_folders else ""
+
+    template = settings.get("upload.filename_template", "{dateiname}") or "{dateiname}"
+    filename_suggestion = _render_filename_template(
+        template,
+        project_name=suggested["name"] if suggested else None,
+        original_name=src_path.name,
+    )
+    if filename_suggestion == src_path.name:
+        filename_suggestion = None  # keine Umbenennung vorgeschlagen -- nichts anzuzeigen
+
+    log.info(
+        "Datei-Drop-Vorschlag: %r -> Projekt %s, Ziel %r, Namensvorschlag %r",
+        src_path.name, suggested["name"] if suggested else "(kein Vorschlag)",
+        suggested_dest, filename_suggestion,
+    )
+
+    return templates.TemplateResponse("dashboard_upload.html", {
+        "request":             request,
+        "src":                 str(src_path),
+        "filename":            src_path.name,
+        "filename_suggestion": filename_suggestion,
+        "suggested":           suggested,
+        "suggested_dest":      suggested_dest or "",
+        "start_path":          start_path,
+    })
+
+
+@router.get("/upload-columns", response_class=HTMLResponse)
+async def upload_columns(request: Request, start: str = Query(...), dest: str = Query("")):
+    """Liefert die Spalten-Ansicht separat von upload_page() -- das Aufklappen bis zum
+    Zielordner braucht mehrere Ordner-Auflistungen (teils uebers NAS), was die Seite
+    spuerbar verzoegern wuerde, wenn es den ersten Seitenaufbau blockiert. Die Seite
+    selbst laedt deshalb sofort, dieser Endpunkt wird per htmx direkt danach
+    nachgeladen ("Browser sofort da, Ordnerliste zieht nach")."""
+    if not dest:
+        subdirs, error_msg = _list_browse_level(start)
+        return templates.TemplateResponse("_dashboard_browse.html", {
+            "request": request, "subdirs": subdirs, "error_msg": error_msg,
+            "current_path": start, "project_id": 0, "depth": 0, "selected": "",
+        })
+    html = _prerender_browse_columns(request, start, dest)
+    return HTMLResponse(html)
+
+
+@router.post("/upload", response_class=HTMLResponse)
+async def upload_submit(
+    request:     Request,
+    src:         str = Form(...),
+    dest_folder: str = Form(...),
+    filename:    str = Form(...),
+    keep_copy:   str | None = Form(None),
+):
+    src_path = Path(src)
+    if not src_path.is_file():
+        return HTMLResponse(f"⚠ Ausgangsdatei nicht mehr gefunden: {src}", status_code=404)
+    if not os.path.isdir(dest_folder):
+        return HTMLResponse(f"⚠ Zielordner nicht gefunden: {dest_folder}", status_code=404)
+
+    filename = filename.strip() or src_path.name
+
+    conn = connection.get_connection()
+    try:
+        project = _find_owning_project(conn, dest_folder)
+        if project is None:
+            log.info("Datei-Drop abgelehnt: %r -> %r gehört zu keinem Archivio-Projekt",
+                      src_path.name, dest_folder)
+            return HTMLResponse(
+                "⚠ Dieser Ordner gehört zu keinem Archivio-Projekt — bitte "
+                "einen Ordner innerhalb eines bestehenden Projekts wählen.",
+                status_code=400,
+            )
+
+        target = _unique_upload_dest(Path(dest_folder), filename)
+        dry_run = os.environ.get("ARCHIVIO_UPLOAD_DRY_RUN") == "1"
+
+        if dry_run:
+            log.info(
+                "DRY-RUN Datei-Drop: %r -> %r (Projekt %s, %s, NICHT ausgeführt)",
+                src_path.name, str(target), project["name"],
+                "Kopie" if keep_copy else "verschoben",
+            )
+        else:
+            try:
+                if keep_copy:
+                    import shutil
+                    shutil.copy2(src_path, target)
+                else:
+                    import shutil
+                    shutil.move(str(src_path), str(target))
+            except OSError as exc:
+                log.warning("Datei-Drop fehlgeschlagen: %r -> %r: %s", src_path.name, target, exc)
+                return HTMLResponse(f"⚠ Datei konnte nicht abgelegt werden: {exc}", status_code=500)
+
+            process_file(conn, project["id"], target)
+            log.info("Datei-Drop abgelegt: %r -> %r (Projekt %s, %s)",
+                      src_path.name, str(target), project["name"],
+                      "Kopie" if keep_copy else "verschoben")
+    finally:
+        conn.close()
+
+    return HTMLResponse(f"""<!DOCTYPE html>
+<html lang="de"><head><meta charset="utf-8"><title>Abgelegt</title>
+<style>body{{font-family:-apple-system,sans-serif;display:flex;align-items:center;
+justify-content:center;height:100vh;margin:0;background:#f5f5f5;color:#333;text-align:center;}}
+.hint{{color:#888;font-size:13px;margin-top:8px;}}</style>
+<script>setTimeout(function(){{ window.close(); }}, 900);</script>
+</head><body><div>
+<div>{"🧪 TROCKENLAUF — nichts wurde wirklich verschoben. Wäre abgelegt in" if dry_run else "✓ „" + filename + '" abgelegt in'} {project["name"]}{" (" + str(target) + ")" if dry_run else " — jetzt durchsuchbar."}</div>
+<div class="hint">Dieser Tab kann geschlossen werden.</div>
+</div></body></html>""")
 
 
 @router.post("/ignore-level", response_class=HTMLResponse)
@@ -1778,6 +2027,8 @@ async def settings_save(request: Request):
     # gesetzt) unangetastet, da settings.save() pro Sektion tief mergt statt zu ersetzen.
     rubrica_enabled = form.get("rubrica_enabled") == "1"
 
+    filename_template = form.get("upload_filename_template", "").strip() or "{dateiname}"
+
     updates = {
         "office": {
             "name":     office_name,
@@ -1786,6 +2037,7 @@ async def settings_save(request: Request):
         "scheduler":     {"scan_time": scan_time},
         "scanner":       {"num_workers": num_workers},
         "rubrica": {"enabled": rubrica_enabled},
+        "upload": {"filename_template": filename_template},
     }
 
     # Lizenz — Feld existiert nur im Formular, wenn die Sektion sichtbar ist

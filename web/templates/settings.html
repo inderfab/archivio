@@ -194,6 +194,28 @@
       </div>
     </div>
 
+    {# ── Datei-Ablage (Drag & Drop aufs Menüleisten-Icon) ── #}
+    <div class="settings-section">
+      <div class="settings-section-header">
+        Datei-Ablage
+        <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+        <div class="section-help-panel">
+          <p>Beim Ablegen einer Datei (Drag &amp; Drop aufs Menüleisten-Icon) schlägt Archivio einen neuen Dateinamen nach diesem Muster vor. Platzhalter: <code>{projektnummer}</code>, <code>{dateiname}</code> (ursprünglicher Name ohne Endung), <code>{datum}</code> (Format JJMMTT). Die Dateiendung wird immer automatisch angehängt.</p>
+          <p>Beispiel: <code>{projektnummer}_{dateiname}_{datum}</code> ergibt „211_Grundriss_260930.pdf". Leer oder nur <code>{dateiname}</code> = keine Umbenennung vorgeschlagen.</p>
+        </div>
+      </div>
+      <div class="settings-body">
+        <div class="field">
+          <span class="field-prefix">Namensmuster</span>
+          <input type="text" name="upload_filename_template" placeholder="{dateiname}"
+            value="{{ cfg.get('upload', {}).get('filename_template', '{dateiname}') }}">
+        </div>
+        <div style="padding-top:14px;">
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
+        </div>
+      </div>
+    </div>
+
     {# ── Rubrica (Mail-Konten stehen jetzt bei Projekte, im Mail-Bereich) ── #}
     <div class="settings-section">
       <div class="settings-section-header">Rubrica</div>

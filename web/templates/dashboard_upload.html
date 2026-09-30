@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Datei ablegen{% endblock %}
+
+{% block content %}
+<style>
+  .upload-page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 64px; }
+  .upload-page h1 { font-size: 20px; font-weight: 700; margin-bottom: 20px; }
+  .upload-field { margin-bottom: 16px; }
+  .upload-field label { display: block; font-size: 12px; color: var(--text-2); margin-bottom: 4px; }
+  .upload-field input[type=text] {
+    max-width: 480px; width: 100%; padding: 7px 9px; font-size: 13px; font-family: inherit;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text);
+  }
+  .upload-dest-path { color: var(--text-2); font-size: 12px; word-break: break-all; margin-bottom: 8px; }
+  .upload-browser .browser-body { display: flex; height: 400px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; }
+  .upload-browser .browse-cols { display: flex; flex: 1; overflow-x: auto; }
+  .upload-browser .browse-col { max-height: none; }
+  .upload-browser .browse-check { display: none; }
+  .upload-browser-loading { padding: 16px; font-size: 13px; color: var(--text-3); }
+  .upload-copy-row { margin: 14px 0; font-size: 13px; display: flex; align-items: center; gap: 6px; }
+  .upload-error { color: #c0392b; font-size: 14px; }
+  .upload-actions { margin-top: 20px; display: flex; gap: 10px; }
+</style>
+
+<div class="upload-page">
+  <h1>Datei ablegen</h1>
+
+  {% if error %}
+    <p class="upload-error">⚠ {{ error }}</p>
+  {% else %}
+    <form method="post" action="/dashboard/upload" id="upload-form">
+      <input type="hidden" name="src" value="{{ src }}">
+      <input type="hidden" name="dest_folder" id="dest-folder-input" value="{{ suggested_dest }}">
+
+      <div class="upload-field">
+        <label for="filename">Dateiname</label>
+        <input type="text" name="filename" id="filename" value="{{ filename }}">
+        {% if filename_suggestion %}
+        <div style="font-size:12px; margin-top:4px; color:var(--text-2);">
+          Dateinamen-Vorschlag: <span style="font-family:ui-monospace,monospace;">{{ filename_suggestion }}</span>
+          <button type="button" class="btn" style="padding:2px 8px; font-size:11px; margin-left:6px;"
+                  onclick="document.getElementById('filename').value = {{ filename_suggestion | tojson }};">Übernehmen</button>
+        </div>
+        {% endif %}
+      </div>
+
+      <div class="upload-field">
+        <label>Ziel {% if suggested %}— Vorschlag: <strong>{{ suggested.name }}</strong>{% endif %}</label>
+        <div class="upload-dest-path" id="dest-display">
+          {{ suggested_dest or "Kein Vorschlag gefunden — bitte Ordner wählen." }}
+        </div>
+
+        <div class="upload-browser" id="upload-browser">
+          <div class="browser-body">
+            <div class="browse-cols" id="browse-cols-0">
+              <div class="upload-browser-loading">Ordner werden geladen…</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="upload-copy-row">
+        <input type="checkbox" name="keep_copy" id="keep_copy">
+        <label for="keep_copy">Kopie am ursprünglichen Ort behalten</label>
+      </div>
+
+      <div class="upload-actions">
+        <button type="submit" class="btn btn-primary" id="upload-submit-btn"
+                {% if not suggested_dest %}disabled{% endif %}>Ablegen</button>
+        <button type="button" class="btn" onclick="cancelUpload()">Abbrechen</button>
+      </div>
+    </form>
+  {% endif %}
+</div>
+
+<script>
+  var _uploadStartPath  = {{ start_path | tojson }};
+  var _uploadDestPath   = {{ suggested_dest | tojson }};
+
+  // htmx.js laedt mit "defer" (siehe base.html) -- erst nach DOMContentLoaded
+  // garantiert verfuegbar, deshalb hier drin statt direkt im Skript-Body ausloesen.
+  document.addEventListener('DOMContentLoaded', function () {
+    if (!_uploadStartPath) return;
+    // Seite selbst laedt sofort (ohne auf NAS-Ordnerlisten zu warten) -- die Spalten
+    // werden direkt danach separat nachgeladen ("Browser sofort da, Liste zieht nach").
+    var url = '/dashboard/upload-columns?start=' + encodeURIComponent(_uploadStartPath);
+    if (_uploadDestPath) url += '&dest=' + encodeURIComponent(_uploadDestPath);
+    htmx.ajax('GET', url, { target: '#browse-cols-0', swap: 'innerHTML' }).then(function () {
+      // Erst nach dem Nachladen zur ausgewaehlten, rechtesten Spalte scrollen, damit
+      // man das Ziel sofort sieht statt es erst heranscrollen zu muessen.
+      var cols = document.getElementById('browse-cols-0');
+      if (cols) cols.scrollLeft = cols.scrollWidth;
+    });
+  });
+
+  // Überschreibt NICHT die gleichnamigen Funktionen aus dashboard.html -- diese Seite
+  // ist eigenständig (kein dashboard.html-Kontext), _dashboard_browse.html wird hier
+  // unverändert eingebettet, ruft dieselben Funktionsnamen per Inline-onclick aber mit
+  // anderem Verhalten auf (Ziel setzen statt Detail-Panel öffnen).
+  function clearFromDepth(projectId, depth) {
+    document.querySelectorAll('#browse-cols-' + projectId + ' [data-depth]').forEach(function(el) {
+      if (parseInt(el.dataset.depth) >= depth) el.remove();
+    });
+  }
+
+  function toggleBrowseCheck() { /* Mehrfachauswahl hier nicht relevant */ }
+
+  function selectEntry(el, projectId, path) {
+    document.querySelectorAll('.browse-entry').forEach(function(e) { e.classList.remove('selected'); });
+    el.classList.add('selected');
+    document.getElementById('dest-folder-input').value = path;
+    document.getElementById('dest-display').textContent = path;
+    document.getElementById('upload-submit-btn').disabled = false;
+  }
+
+  function cancelUpload() {
+    // window.close() funktioniert nur bei per Skript geoeffneten Tabs -- dieser Tab
+    // wurde per "open <url>" (Helper) geoeffnet, der Browser blockiert das Schliessen
+    // daher meist aus Sicherheitsgruenden. Deshalb immer auch einen klaren
+    // "kann geschlossen werden"-Zustand zeigen, falls das Schliessen nicht klappt.
+    document.body.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100vh;' +
+      'font-family:-apple-system,sans-serif;color:#333;text-align:center;">' +
+      '<div><div>Abgebrochen — es wurde nichts abgelegt.</div>' +
+      '<div style="color:#888;font-size:13px;margin-top:8px;">Dieser Tab kann geschlossen werden.</div>' +
+      '</div></div>';
+    window.close();
+  }
+
+  document.getElementById('upload-form') && document.getElementById('upload-form').addEventListener('submit', function(evt) {
+    var btn = document.getElementById('upload-submit-btn');
+    btn.disabled = true;
+    btn.textContent = 'Wird abgelegt…';
+  });
+</script>
+{% endblock %}

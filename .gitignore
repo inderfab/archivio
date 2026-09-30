@@ -10,6 +10,7 @@ __pycache__/
 config.yaml
 backup_state.json
 dist/
+logs/
 
 internal/
 

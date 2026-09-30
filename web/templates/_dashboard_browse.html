@@ -4,7 +4,7 @@
   {% elif subdirs %}
     {% for d in subdirs %}
     <div
-      class="browse-entry {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }} {{ 'browse-is-project' if d.is_project else 'browse-has-subproject' if d.has_subproject else '' }}"
+      class="browse-entry {{ 'selected' if selected and d.path == selected else '' }} {{ 'ignored' if d.ignored else '' }} {{ 'excluded' if d.excluded and not d.ignored else '' }} {{ 'browse-is-project' if d.is_project else 'browse-has-subproject' if d.has_subproject else '' }}"
       data-path="{{ d.path }}"
       data-excluded="{{ 'true' if d.excluded else 'false' }}"
       data-has-children="{{ 'true' if d.has_children else 'false' }}"

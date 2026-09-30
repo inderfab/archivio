@@ -369,6 +369,105 @@ def start_local_server(app_name: str, log, config_provider=None, link_action_pro
         )
 
 
+def register_drop_target(app, on_drop, log) -> None:
+    """Ersetzt den von rumps automatisch erzeugten Status-Button durch eine eigene
+    NSView, die Drag&Drop-Datei-Ablagen entgegennimmt -- Dropbox-artig, Datei aufs Icon
+    ziehen statt Menü öffnen. `on_drop(paths: list[str])` wird mit den abgelegten
+    Datei-Pfaden aufgerufen (Haupt-Thread, via die AppKit-Runloop).
+
+    NSStatusItem-Buttons selbst bieten keine Möglichkeit, nachträglich Drag&Drop-
+    Callbacks anzuhängen (kein generischer draggingDestinationDelegate für beliebige
+    NSView-Instanzen) -- nur eine komplett eigene View kann NSDraggingDestination
+    direkt implementieren. Die eigene View zeichnet deshalb das App-Icon selbst nach
+    und muss den Linksklick manuell abfangen, um weiterhin das gewohnte Menü zu zeigen
+    (das übernimmt sonst automatisch der ersetzte Button).
+
+    Muss über rumps.events.before_start registriert werden (siehe Aufrufer) --
+    app._nsapp/initializeStatusBar() existieren erst waehrend App.run(), nicht vorher.
+    Schlägt eine Vorbedingung fehl (z.B. pyobjc-Import), wird NUR eine Warnung
+    geloggt und die App läuft normal mit dem Standard-Button weiter -- Drag&Drop ist
+    ein Zusatz, darf den Start nie gefährden."""
+    try:
+        import objc
+        from AppKit import (
+            NSView, NSDragOperationCopy, NSPasteboardTypeFileURL, NSRectFill,
+            NSCompositingOperationSourceOver,
+        )
+        from Foundation import NSURL, NSMakeRect, NSZeroRect
+
+        class DropView(NSView):
+            def initWithFrame_(self, frame):
+                self = objc.super(DropView, self).initWithFrame_(frame)
+                if self is None:
+                    return None
+                self.registerForDraggedTypes_([NSPasteboardTypeFileURL])
+                self._icon = None
+                self._ns_menu = None
+                return self
+
+            def setIcon_(self, icon):
+                self._icon = icon
+
+            def setNsMenu_(self, menu):
+                self._ns_menu = menu
+
+            def drawRect_(self, rect):
+                if self._icon is not None:
+                    size = self._icon.size()
+                    x = (rect.size.width - size.width) / 2.0
+                    y = (rect.size.height - size.height) / 2.0
+                    self._icon.drawAtPoint_fromRect_operation_fraction_(
+                        (x, y), NSZeroRect, NSCompositingOperationSourceOver, 1.0
+                    )
+                else:
+                    from AppKit import NSColor
+                    NSColor.darkGrayColor().set()
+                    NSRectFill(rect)
+
+            def draggingEntered_(self, sender):
+                return NSDragOperationCopy
+
+            def draggingUpdated_(self, sender):
+                return NSDragOperationCopy
+
+            def prepareForDragOperation_(self, sender):
+                return True
+
+            def performDragOperation_(self, sender):
+                pboard = sender.draggingPasteboard()
+                items = pboard.readObjectsForClasses_options_([NSURL], None)
+                paths = []
+                if items:
+                    for url in items:
+                        p = url.path()
+                        if p:
+                            paths.append(str(p))
+                if paths:
+                    try:
+                        on_drop(paths)
+                    except Exception as e:
+                        log.warning("on_drop-Callback fehlgeschlagen: %s", e)
+                return True
+
+            def concludeDragOperation_(self, sender):
+                pass
+
+            def mouseDown_(self, event):
+                if self._ns_menu is not None:
+                    self._ns_menu.popUpMenuPositioningItem_atLocation_inView_(None, (0, 0), self)
+
+        status_item = app._nsapp.nsstatusitem
+        thickness = status_item.statusBar().thickness()
+        frame = NSMakeRect(0, 0, thickness + 6, thickness)
+        drop_view = DropView.alloc().initWithFrame_(frame)
+        drop_view.setIcon_(getattr(app, "_icon_nsimage", None))
+        drop_view.setNsMenu_(app.menu._menu)
+        status_item.setView_(drop_view)
+        log.info("Datei-Drop auf Menüleisten-Icon aktiviert")
+    except Exception as e:
+        log.warning("Datei-Drop auf Menüleisten-Icon nicht verfügbar: %s", e)
+
+
 def register_url_handler(log) -> None:
     try:
         from Foundation import NSAppleEventManager, NSObject

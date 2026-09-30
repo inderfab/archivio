@@ -60,6 +60,11 @@ rubrica:
 logging:
   level: INFO
 
+# Datei-Drop aufs Menüleisten-Icon: Namensmuster fuer den Umbenennungs-Vorschlag.
+# Platzhalter {projektnummer}/{dateiname}/{datum} (JJMMTT), siehe Einstellungen-Seite.
+upload:
+  filename_template: "{dateiname}"
+
 # Lizenzsystem: aktuell inaktiv (siehe scanner/license.py::LICENSE_UI_ENABLED),
 # das Feld existiert bereits, damit spaeter nichts am Kernsystem nachgeruestet
 # werden muss.
