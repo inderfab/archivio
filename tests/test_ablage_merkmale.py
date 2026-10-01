@@ -2,7 +2,7 @@ import pytest
 
 from config import settings
 from scanner.ablage import merkmale as mk
-from scanner.ablage.merkmale import bkp_woerter_aus_ordnern, hat_index, merkmale, stamm, typ
+from scanner.ablage.merkmale import bkp_woerter_aus_ordnern, hat_index, merkmale, stamm, typ, vorgaenger_name
 
 
 def keys(name, **kw):
@@ -56,15 +56,17 @@ def test_projektnummer_regex_konfigurierbar(monkeypatch):
 
 # ── BKP-Bezeichnungen lernen ───────────────────────────────────────────────────
 
+def _belege(label, code, n=3, pnr=None):
+    return [(label, f'["{code}"]' if code else "[]", pnr)] * n
+
+
 def test_bkp_bezeichnungen_aus_ordnern_gelernt():
-    woerter = bkp_woerter_aus_ordnern([
-        ("baumeisterarbeiten", '["211"]'),
-        ("gipserarbeiten", '["271"]'),
-        ("spenglerarbeiten", '["222"]'),
-        ("spenglerarbeiten blitzschutz bedachungsarbeiten", '["222","223","224"]'),
-        ("baugrubenaushub rodungen demontagen", '["201-209"]'),    # Bereich → ignoriert
-        ("tueren in holz", '["273.4"]'),
-    ])
+    woerter = bkp_woerter_aus_ordnern(
+        _belege("baumeisterarbeiten", "211") + _belege("gipserarbeiten", "271")
+        + _belege("spenglerarbeiten", "222")
+        + [("spenglerarbeiten blitzschutz bedachungsarbeiten", '["222","223","224"]', None)] * 3
+        + _belege("baugrubenaushub rodungen demontagen", "201-209")      # Bereich → ignoriert
+        + _belege("tueren in holz", "273.4"))
     assert woerter["baumeisterarbeiten"] == "211"
     assert woerter["spenglerarbeiten"] == "222"
     assert "baugrubenaushub" not in woerter
@@ -73,8 +75,28 @@ def test_bkp_bezeichnungen_aus_ordnern_gelernt():
     assert "bkp:271" not in merkmale("Offerte Gipserarbeiten Wohnung.pdf")
 
 
+def test_bkp_lernen_braucht_belege():
+    assert "gipserarbeiten" not in bkp_woerter_aus_ordnern(_belege("gipserarbeiten", "271", n=2))
+
+
+def test_bkp_lernen_ignoriert_projektnummern():
+    # Ordner „211_Schnitte" im Projekt 211 trägt die Projektnummer, keinen BKP-Code
+    assert "schnitte" not in bkp_woerter_aus_ordnern(_belege("schnitte", "211", n=5, pnr=211))
+    assert bkp_woerter_aus_ordnern(_belege("baumeisterarbeiten", "211", n=3, pnr=215))["baumeisterarbeiten"] == "211"
+
+
+def test_bkp_lernen_ignoriert_allgemeine_woerter():
+    # „schnitte" steht unter vielen verschiedenen Codes → kein BKP-Wort
+    zeilen = _belege("schnitte", "194", n=3) + _belege("schnitte", "139", n=3) + _belege("schnitte", "200", n=3)
+    assert "schnitte" not in bkp_woerter_aus_ordnern(zeilen)
+    # Vorkommen ohne Code zählen nicht dagegen
+    z2 = _belege("metallbauarbeiten", "272", n=4) + _belege("metallbauarbeiten", None, n=20)
+    assert bkp_woerter_aus_ordnern(z2)["metallbauarbeiten"] == "272"
+    assert "metallbauarbeiten" not in bkp_woerter_aus_ordnern(z2, ausschluss={"metallbauarbeiten"})
+
+
 def test_mehrdeutiges_bkp_wort_faellt_weg():
-    woerter = bkp_woerter_aus_ordnern([("montagebau", '["212"]'), ("montagebau", '["214"]')])
+    woerter = bkp_woerter_aus_ordnern(_belege("montagebau", "212", 3) + _belege("montagebau", "214", 3))
     assert "montagebau" not in woerter
 
 
@@ -233,3 +255,33 @@ def test_typ():
 def test_deterministisch():
     a = merkmale("211_GR_EG_b.pdf")
     assert a == merkmale("211_GR_EG_b.pdf")
+
+
+def test_bushof_plannamen_phase_und_plannummer():
+    k = keys("182_51_202 Zwischengeschoss EG.pdf")
+    assert {"proj:182", "phase:AP", "phasenr:51", "plannr:2", "plannr:20", "geschoss:eg"} <= k
+    assert "plannr:1" in keys("182_51_1xx Situation.pdf") or "plannr:1" in keys("182_51_100 Situation.pdf")
+    # ohne Phasenzahl keine Plannummer
+    assert not any(x.startswith(("plannr:", "phasenr:")) for x in keys("182_Grundriss_202.pdf"))
+    # mit Datum davor
+    assert "plannr:2" in keys("260301_182_51_203 1.Obergeschoss.pdf")
+
+
+def test_vorgaenger_name_strikt_nur_datum():
+    assert vorgaenger_name("250718_211_Emmenhof AT1.pdf") == vorgaenger_name("260101_211_Emmenhof AT1.pdf")
+    assert vorgaenger_name("Plan_2026.04.01.pdf") == vorgaenger_name("Plan.pdf")
+    assert vorgaenger_name("211_GR_EG_b.pdf") != vorgaenger_name("211_GR_EG_c.pdf")     # Index zählt als Unterschied
+    assert vorgaenger_name("Grundriss.pdf") != vorgaenger_name("Grundriss Kopie.pdf")
+    assert vorgaenger_name("Grundriss.pdf") != vorgaenger_name("Grundriss.dwg")
+    assert vorgaenger_name("GRUNDRISS.PDF") == vorgaenger_name("Grundriss.pdf")
+
+
+def test_allgemeine_plan_woerter_nie_bkp():
+    wb = mk.woerterbuch()
+    for w in ("schnitte", "grundrisse", "fassaden", "plaene", "wettbewerb", "ansichten"):
+        assert wb.ist_allgemein(w), w
+    for w in ("baumeisterarbeiten", "gipserarbeiten", "bodenbelaege"):
+        assert not wb.ist_allgemein(w), w
+    zeilen = _belege("schnitte", "194", n=5) + _belege("gipserarbeiten", "271", n=5)
+    r = bkp_woerter_aus_ordnern(zeilen, wb.ist_allgemein)
+    assert "schnitte" not in r and r["gipserarbeiten"] == "271"

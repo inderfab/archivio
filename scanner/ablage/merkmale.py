@@ -52,12 +52,21 @@ class Woerterbuch:
     dokument_endungen: frozenset
     kategorien: dict = field(default_factory=dict)       # name → {schluessel: [woerter]}
     massstaebe: frozenset = frozenset()
+    phasennummern: dict = field(default_factory=dict)    # "51" → "AP"
+    bkp_ausschluss: frozenset = frozenset()
     projektnummer: re.Pattern = field(default_factory=lambda: re.compile(r"\d{3}"))
     bkp_woerter: dict = field(default_factory=dict)      # Wort → BKP-Code, aus den Ordnernamen gelernt
 
+    def ist_allgemein(self, wort: str) -> bool:
+        """Plan-/Phasen-Wörter und die Ausschlussliste: nie als BKP-Bezeichnung lernen."""
+        if wort in self.bkp_ausschluss:
+            return True
+        return any(_passt(k, wort) or (len(k) > 3 and wort.startswith(k))
+                   for kat in ("plantyp", "phase") for ws in self.kategorien.get(kat, {}).values() for k in ws)
+
     def mit_bkp_woertern(self, woerter: dict) -> "Woerterbuch":
         return Woerterbuch(self.stoppwoerter, self.plan_endungen, self.dokument_endungen, self.kategorien,
-                           self.massstaebe, self.projektnummer, dict(woerter))
+                           self.massstaebe, self.phasennummern, self.bkp_ausschluss, self.projektnummer, dict(woerter))
 
 
 def _merge(basis: dict, zusatz: dict) -> dict:
@@ -102,6 +111,8 @@ def _wb_cached(zusatz_key: str) -> Woerterbuch:
         dokument_endungen=frozenset(roh.get("dokument_endungen", [])),
         kategorien=kat,
         massstaebe=frozenset(str(m) for m in roh.get("massstaebe", [])),
+        phasennummern={str(k): str(v) for k, v in (roh.get("phasennummern") or {}).items()},
+        bkp_ausschluss=frozenset(_norm_wort(w) for w in roh.get("bkp_ausschluss", [])),
         projektnummer=pn,
     )
 
@@ -113,30 +124,45 @@ def woerterbuch() -> Woerterbuch:
     return _wb_cached(json.dumps(zusatz, sort_keys=True, default=str))
 
 
-def bkp_woerter_aus_ordnern(zeilen) -> dict[str, str]:
+BKP_MIN_BELEGE = 3        # so oft muss ein Wort mit demselben Code vorkommen
+BKP_MIN_ANTEIL = 0.7      # ... und so groß muss der Anteil dieses Codes unter seinen codierten Vorkommen sein
+
+
+def bkp_woerter_aus_ordnern(zeilen, ausschluss=frozenset()) -> dict[str, str]:
+    # `ausschluss`: Menge oder Funktion(wort) → bool
     """BKP-Bezeichnungen aus den Ordnernamen lernen: `baumeisterarbeiten` → `211`.
 
-    `zeilen`: Paare (label, codes-JSON). Pro Wort gewinnt der häufigste erste Code; Wörter, die zu
-    mehreren Codes gleich oft gehören, gelten als mehrdeutig und fallen weg.
+    `zeilen`: Tripel (label, codes-JSON, projektnummer) je Ordnername und Projekt. Zwei Fallen aus den
+    echten Daten: (1) führende Projektnummern sehen wie BKP-Codes aus (Projekt 211 und BKP 211) —
+    ein Code, der der Projektnummer entspricht, zählt nicht; (2) allgemeine Wörter („schnitte", „pläne")
+    stehen unter vielen verschiedenen Codes. Ein Wort gilt erst ab BKP_MIN_BELEGE Belegen und wenn
+    mindestens BKP_MIN_ANTEIL seiner codierten Vorkommen denselben Code tragen (Vorkommen ohne Code
+    zählen nicht dagegen: „Metallbauarbeiten" steht auch unter „Unternehmer" ohne Nummer).
     """
     import json
     from collections import Counter, defaultdict
-    zaehler: dict[str, Counter] = defaultdict(Counter)
-    for label, codes in zeilen:
+    codes_je_wort: dict[str, Counter] = defaultdict(Counter)
+    for zeile in zeilen:
+        label, codes, pnr = (tuple(zeile) + (None,))[:3]
         try:
             cl = json.loads(codes) if isinstance(codes, str) else list(codes)
         except ValueError:
-            continue
-        if not cl or "-" in cl[0]:
-            continue
-        code = cl[0].split(".")[0]
-        for w in label.split():
+            cl = []
+        code = None
+        if cl and "-" not in cl[0]:
+            basis = cl[0].split(".")[0]
+            if pnr is None or str(basis) != str(pnr):
+                code = basis
+        for w in set(label.split()):
             if len(w) >= 6 and not w.isdigit():
-                zaehler[w][code] += 1
+                if code:
+                    codes_je_wort[w][code] += 1
     res = {}
-    for w, c in zaehler.items():
+    for w, c in codes_je_wort.items():
         top = c.most_common(2)
-        if len(top) == 1 or top[0][1] > top[1][1]:
+        n = top[0][1]
+        if (n >= BKP_MIN_BELEGE and n / sum(c.values()) >= BKP_MIN_ANTEIL and not (ausschluss(w) if callable(ausschluss) else w in ausschluss)
+                and (len(top) == 1 or n > top[1][1])):
             res[w] = top[0][0]
     return res
 
@@ -211,9 +237,10 @@ def hat_index(dateiname: str) -> bool:
     return bool(_INDEX_RE.search(s))
 
 
-def _projektnummer_kandidat(roh_tokens: list[str], pn: re.Pattern, bkp_codes: set[str]) -> str | None:
+def _projektnummer_kandidat(roh_tokens: list[str], pn: re.Pattern, bkp_codes: set[str]) -> tuple[str, int] | None:
     """Erstes Wort, oder das Wort direkt nach einem Datum (`260320_215_WB`): passt es zur
-    Projektnummern-Form und gehört es nicht zu einem BKP-Kontext, ist es der Kandidat."""
+    Projektnummern-Form und gehört es nicht zu einem BKP-Kontext, ist es der Kandidat.
+    Gibt (Nummer, Position im Token-Strom) zurück."""
     def ist_datum(t: str) -> bool:
         return len(t) in (6, 8) and t.isdigit() and bool(datum_im_text(t))
     idx = 1 if roh_tokens and ist_datum(roh_tokens[0]) else 0
@@ -221,8 +248,20 @@ def _projektnummer_kandidat(roh_tokens: list[str], pn: re.Pattern, bkp_codes: se
         return None
     t = roh_tokens[idx]
     if pn.fullmatch(t) and t not in bkp_codes:
-        return t
+        return t, idx
     return None
+
+
+def vorgaenger_name(dateiname: str) -> str:
+    """Schlüssel für die Vorgänger-Erkennung: der Dateiname, bei dem NUR das Datum abgezogen ist
+    (Endung bleibt). `250718_211_Emmenhof.pdf` und `260101_211_Emmenhof.pdf` sind gleich;
+    `…_b.pdf`, `… Kopie.pdf` oder eine andere Endung sind es nicht. Das ist absichtlich strikt
+    (Vorgabe: nur bei identischem Namen ausser Datum fragen, ob archiviert oder überschrieben wird).
+    """
+    n = unicodedata.normalize("NFC", dateiname or "").strip().lower()
+    ext = _endung(n)
+    kern = _ohne_datum(n[: -len(ext)] if ext else n)
+    return " ".join(_tokens(kern)) + ext
 
 
 def _parse_mtime(mtime) -> datetime | None:
@@ -288,10 +327,27 @@ def merkmale(dateiname: str, groesse: int | None = None, mtime=None, text: str |
         m[f"bkp:{c}"] = 1.0
 
     # Projektnummer (nur Kandidat; die Prüfung gegen echte Projekte macht der Projekt-Scorer)
+    phasenr = plannr = None
     if not nur_name.startswith("bkp"):
         kand = _projektnummer_kandidat(roh_tokens, wb.projektnummer, bkp)
-        if kand and (bekannte_projekte is None or kand in bekannte_projekte):
-            m[f"proj:{kand}"] = 1.0
+        if kand:
+            nummer, pos = kand
+            if bekannte_projekte is None or nummer in bekannte_projekte:
+                m[f"proj:{nummer}"] = 1.0
+                # `{prj}_{phase}_{plannr}_{name}`: SIA-Phasenzahl und Plannummer direkt nach der Projektnummer
+                if pos + 1 < len(roh_tokens) and roh_tokens[pos + 1] in wb.phasennummern:
+                    phasenr = roh_tokens[pos + 1]
+                    if pos + 2 < len(roh_tokens) and roh_tokens[pos + 2].isdigit():
+                        plannr = roh_tokens[pos + 2]
+    if phasenr:
+        m[f"phase:{wb.phasennummern[phasenr]}"] = 1.0
+        m[f"phasenr:{phasenr}"] = 1.0
+    if plannr:
+        # Der Ordner heisst oft nach der ersten Ziffer (`182_51_2 Geschosse`); je Projekt anders,
+        # deshalb beide Stufen als Merkmal und die Ordner-Statistik entscheidet.
+        m[f"plannr:{plannr[0]}"] = 1.0
+        if len(plannr) >= 2:
+            m[f"plannr:{plannr[:2]}"] = 1.0
 
     # Kategorien
     for key in _treffer(wb.kategorien.get("phase", {}), roh_tokens):

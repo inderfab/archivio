@@ -26,6 +26,7 @@ _CODE = r"[1-9]\d{2}(?:[._]\d{1,2}(?!\d))?"
 _CODE_ATOM_RE = re.compile(rf"({_CODE})(?![\d])")
 _CODE_SEP_RE = re.compile(r"\s*\+\s*|[_\-]")
 _PRAEFIX_ZAHL_RE = re.compile(r"(\d{1,3}(?:\.\d+)*[A-Za-z]?)(?=[\s_\-]|$)")
+_PRAEFIX_ZIFFER_RE = re.compile(r"(\d{1,2})(?=[\s_\-])")
 _PRAEFIX_BUCHSTABE_RE = re.compile(r"([A-Za-z])(?=[\s_\-])")
 _TRENNER_RE = re.compile(r"^[0-9A-Za-z]{0,3}[\s]*[-–—_=~.*]{3,}\s*$")
 _NICHT_WORT_RE = re.compile(r"[\W_]+")
@@ -99,7 +100,14 @@ def zerlege(name: str) -> Zerlegung:
 
     codes, rest = _codes_lesen(s)
     praefixe: list[str] = []
-    if not codes:
+    if codes:
+        # Projektnummer-Präfixe wie `182_51_2 Geschosse`: nach dem Code kann noch eine Plannummer-
+        # Ziffer als Ordnungspräfix folgen (nur 1–2 Ziffern, sonst wäre es Teil des Labels)
+        m = _PRAEFIX_ZIFFER_RE.match(rest.lstrip(" _-"))
+        if m and rest.lstrip(" _-")[m.end():].lstrip(" _-"):
+            praefixe.append(m.group(1))
+            rest = rest.lstrip(" _-")[m.end():].lstrip(" _-")
+    else:
         for _ in range(3):
             m = _PRAEFIX_ZAHL_RE.match(rest) or _PRAEFIX_BUCHSTABE_RE.match(rest)
             if not m:

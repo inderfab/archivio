@@ -67,6 +67,10 @@ FAELLE = [
     ("139 Baustelleneinrichtungen", ("", "baustelleneinrichtungen", ["139"])),
     ("230 Schrankensystem ESH", ("", "schrankensystem esh", ["230"])),
     ("401_499_Umgebung", ("", "umgebung", ["401-499"])),
+    # Projektnummer-Präfixe der CAD-Export-Ordner (Bushof): Plannummer-Ziffer wird Präfix
+    ("182_51 Ausführung", ("", "ausfuehrung", ["182.51"])),
+    ("182_51_2 Geschosse", ("2", "geschosse", ["182.51"])),
+    ("182_51_1 Situation + Umgebung", ("1", "situation umgebung", ["182.51"])),
     # Datum ist kein Code und kein Präfix
     ("250813_Attika", ("", "250813 attika", [])),
 ]

@@ -126,9 +126,13 @@ def lade_ordner(conn, projekt_ids) -> tuple[dict, dict]:
 
 
 def bkp_woerter(conn) -> dict[str, str]:
-    return mk.bkp_woerter_aus_ordnern(
-        (r["label"], r["codes"]) for r in conn.execute(
-            "SELECT DISTINCT label, codes FROM ablage_ordner WHERE codes <> '[]' AND art = 'normal'"))
+    """Gelernte BKP-Bezeichnungen aus allen Ordnernamen (je Name und Projekt einmal gezählt)."""
+    zeilen = []
+    for r in conn.execute(
+        "SELECT DISTINCT o.project_id, o.name, o.label, o.codes, p.name AS pname, p.path AS ppath "
+        "FROM ablage_ordner o JOIN projects p ON p.id = o.project_id WHERE o.art = 'normal'"):
+        zeilen.append((r["label"], r["codes"], vorlage.projekt_nummer(r["pname"], r["ppath"])))
+    return mk.bkp_woerter_aus_ordnern(zeilen, mk.woerterbuch().ist_allgemein)
 
 
 def neu_aufbauen(conn, jetzt: datetime | None = None) -> dict:

@@ -326,9 +326,13 @@ def main():
     lern_ids = set(genutzt)
     stat_dateien = ({**d, "ordner_id": ordner_id[(d["project_id"], d["ordner"])], "modified_at": d["modified_raw"]}
                     for d in dateien if d["project_id"] in lern_ids and d["ordner"])
-    bkp = mk.bkp_woerter_aus_ordnern(
-        (zerlege(o.rsplit("/", 1)[-1]).label, zerlege(o.rsplit("/", 1)[-1]).codes)
-        for os_ in ordner_proj.values() for o in os_ if zerlege(o.rsplit("/", 1)[-1]).codes)
+    bkp_zeilen = []
+    for pid, os_ in ordner_proj.items():
+        pnr = vorlage.projekt_nummer(by_id[pid]["name"], by_id[pid]["path"]) if pid in by_id else None
+        for name in {o.rsplit("/", 1)[-1] for o in os_}:
+            z = zerlege(name)
+            bkp_zeilen.append((z.label, z.codes, pnr))
+    bkp = mk.bkp_woerter_aus_ordnern(bkp_zeilen, mk.woerterbuch().ist_allgemein)
     wb = mk.woerterbuch().mit_bkp_woertern(bkp)
     t0 = time.perf_counter()
     stat = ablage_index.statistik_berechnen(stat_dateien, ordner, wb, jetzt, nur_vor=stichtag)
