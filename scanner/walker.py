@@ -692,6 +692,8 @@ def scan_project(project_id: int, root: Path,
         _ao_conn = connection.get_connection()
         try:
             schreibe_ordner(_ao_conn, project_id, sammler)
+            from scanner.ablage import vorlage as _vorlage
+            _vorlage.zuordnen(_ao_conn, project_id)      # neue Ordner sofort einem Slot zuordnen
         finally:
             _ao_conn.close()
     except Exception as exc:

@@ -146,5 +146,7 @@ def neu_aufbauen(conn, jetzt: datetime | None = None) -> dict:
         conn.execute("DELETE FROM ablage_stats")
         conn.executemany("INSERT INTO ablage_stats (ebene, key_id, merkmal, gewicht) VALUES (?,?,?,?)", zeilen)
     n = stat.get(("global", 0), {}).get(N, 0.0)
+    from scanner.ablage import kontext
+    kontext.invalidieren()
     log.info("Ablage-Statistik: %d Zeilen, %d Lern-Projekte, Gesamtgewicht %.0f", len(zeilen), len(lern), n)
     return {"zeilen": len(zeilen), "lern_projekte": len(lern), "gesamtgewicht": n}

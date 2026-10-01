@@ -54,6 +54,7 @@ class Woerterbuch:
     massstaebe: frozenset = frozenset()
     phasennummern: dict = field(default_factory=dict)    # "51" → "AP"
     bkp_ausschluss: frozenset = frozenset()
+    absichten: dict = field(default_factory=dict)
     projektnummer: re.Pattern = field(default_factory=lambda: re.compile(r"\d{3}"))
     bkp_woerter: dict = field(default_factory=dict)      # Wort → BKP-Code, aus den Ordnernamen gelernt
 
@@ -66,7 +67,7 @@ class Woerterbuch:
 
     def mit_bkp_woertern(self, woerter: dict) -> "Woerterbuch":
         return Woerterbuch(self.stoppwoerter, self.plan_endungen, self.dokument_endungen, self.kategorien,
-                           self.massstaebe, self.phasennummern, self.bkp_ausschluss, self.projektnummer, dict(woerter))
+                           self.massstaebe, self.phasennummern, self.bkp_ausschluss, self.absichten, self.projektnummer, dict(woerter))
 
 
 def _merge(basis: dict, zusatz: dict) -> dict:
@@ -113,6 +114,7 @@ def _wb_cached(zusatz_key: str) -> Woerterbuch:
         massstaebe=frozenset(str(m) for m in roh.get("massstaebe", [])),
         phasennummern={str(k): str(v) for k, v in (roh.get("phasennummern") or {}).items()},
         bkp_ausschluss=frozenset(_norm_wort(w) for w in roh.get("bkp_ausschluss", [])),
+        absichten={_norm_wort(k): str(v) for k, v in (roh.get("absichten") or {}).items()},
         projektnummer=pn,
     )
 

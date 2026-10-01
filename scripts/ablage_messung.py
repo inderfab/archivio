@@ -30,7 +30,11 @@ sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 from scanner.ablage import index as ablage_index                      # noqa: E402
 from scanner.ablage import merkmale as mk                             # noqa: E402
+from scanner.ablage import ordner as od                               # noqa: E402
+from scanner.ablage import projekt as pj                              # noqa: E402
 from scanner.ablage import vorlage                                    # noqa: E402
+from scanner.ablage.kontext import Kontext, OrdnerInfo, Parameter, Projekt, Slot  # noqa: E402
+from scanner.ablage.vorschlag import ordner_vorschlag                 # noqa: E402
 from scanner.ablage.normalisieren import art_bestimmen, label_pfad, zerlege  # noqa: E402
 
 # ── Eingefrorene alte Logik (feat/datei-drop, scanner/walker.py) ────────────────
@@ -191,16 +195,17 @@ def p95(xs):
     return xs[min(len(xs) - 1, int(len(xs) * 0.95))]
 
 
-def baseline(conn, projekte, test, dateien_by_proj, stichtag_roh, stichtag, ohne_fts):
+def baseline(conn, projekte, test, dateien_by_proj, stichtag_roh, stichtag, ohne_fts, cut_fn=None):
     zeilen = []
     for i, f in enumerate(test, 1):
         if i % 100 == 0:
             print(f"  Basiswert {i}/{len(test)}", file=sys.stderr)
         t0 = time.perf_counter()
+        cut = cut_fn(f) if cut_fn else stichtag
         vorschlag_p = None if ohne_fts and not _ALT_NUMMER.match(Path(f["filename"]).stem) else \
-            alt_projekt(conn, projekte, f, stichtag_roh)
+            alt_projekt(conn, projekte, f, cut)
         dt_p = (time.perf_counter() - t0) * 1000
-        sicht = [d for d in dateien_by_proj[f["project_id"]] if d["mod"] < stichtag and d["id"] != f["id"]]
+        sicht = [d for d in dateien_by_proj[f["project_id"]] if d["mod"] < cut and d["id"] != f["id"]]
         t0 = time.perf_counter()
         vorschlag_o = alt_ordner(sicht, f)
         dt_o = (time.perf_counter() - t0) * 1000
@@ -244,6 +249,282 @@ def merkmals_abdeckung(test, wb, bekannte):
     return "\n".join(zeilen), tokens.most_common(25)
 
 
+
+# ── Neue Logik ─────────────────────────────────────────────────────────────────
+
+def lies_muster(pfad: str | None) -> list[str]:
+    """Relative Ordnerpfade der Vorlage: Ordner (NAS-Pfad) oder Textdatei mit einem Pfad je Zeile."""
+    if not pfad:
+        return []
+    p = Path(pfad)
+    if p.is_dir():
+        return vorlage._lies_baum(str(p))
+    if p.is_file():
+        return [z for z in p.read_text(encoding="utf-8").splitlines() if z.strip()]
+    sys.exit(f"Musterordner nicht gefunden: {pfad}")
+
+
+def baue_kontext(conn, projekte, by_id, dateien, stichtag, muster, jetzt, ohne_fts):
+    """Der Kontext, wie die Engine ihn zum Stichtag gekannt hätte: Struktur komplett (sie existierte),
+    Statistik, Vorgänger und Aktivität nur aus Dateien VOR dem Stichtag."""
+    from collections import Counter as C
+    ctx = Kontext(jetzt=jetzt)
+    for p in by_id.values():
+        vor = [d["mod"] for d in dateien if d["project_id"] == p["id"] and d["mod"] < stichtag]
+        ctx.projekte[p["id"]] = Projekt(p["id"], p["name"], p["path"], vorlage.projekt_nummer(p["name"], p["path"]),
+                                        bool(p["active"]), max(vor) if vor else None)
+    # Slots: aus dem Musterordner (Weg A), sonst aus den Projekten hergeleitet (Weg B)
+    namen: dict[str, C] = defaultdict(C)
+    if muster:
+        for rel in muster:
+            if any(zerlege(t).label == "" for t in rel.split("/")):
+                continue
+            lp = label_pfad(rel)
+            if lp:
+                namen[lp][rel.rsplit("/", 1)[-1]] += 1
+        slot_lps = {lp: 0.0 for lp in namen}
+        aus_vorlage = True
+    else:
+        os_ = ordner_aus_dateien(dateien)
+        pro = {p: {label_pfad(o) for o in s_ if label_pfad(o)} for p, s_ in os_.items() if len(s_) >= vorlage.MIN_ORDNER}
+        slot_lps, _ = vorlage.herleiten(pro)
+        aus_vorlage = False
+        for p, s_ in os_.items():
+            for o in s_:
+                namen[label_pfad(o)][o.rsplit("/", 1)[-1]] += 1
+    slot_id = {}
+    for i, lp in enumerate(sorted(slot_lps), 1):
+        slot_id[lp] = i
+        ctx.slots[i] = Slot(i, lp, lp.rsplit("/", 1)[-1], namen[lp].most_common(1)[0][0], aus_vorlage, slot_lps[lp])
+    # Ordner je Projekt
+    ordner_proj = ordner_aus_dateien(dateien)
+    id_ = 0
+    oid: dict[tuple, int] = {}
+    vor_dateien = [d for d in dateien if d["mod"] < stichtag and d["ordner"]]
+    anzahl: Counter = Counter()
+    neueste: dict[tuple, str] = {}
+    for d in vor_dateien:
+        k = (d["project_id"], d["ordner"])
+        anzahl[k] += 1
+        if d["mod"] > neueste.get(k, ""):
+            neueste[k] = d["mod"]
+    # Struktur ZUM STICHTAG: ein Ordner existierte, wenn in seinem Teilbaum vor T eine Datei lag. Mit der
+    # heutigen vollständigen Struktur wären 93 % der Testdateien „in einen Ordner, den es damals noch
+    # nicht gab" — das passiert beim echten Drop nie (siehe Bericht).
+    existierte: set[tuple] = set()
+    for d in vor_dateien:
+        teile = d["ordner"].split("/")
+        for i in range(1, len(teile) + 1):
+            existierte.add((d["project_id"], "/".join(teile[:i])))
+    for pid, rels in ordner_proj.items():
+        root = by_id[pid]["path"].rstrip("/")
+        for rel in sorted(rels, key=lambda x: (x.count("/"), x)):
+            if (pid, rel) not in existierte:
+                continue
+            id_ += 1
+            oid[(pid, rel)] = id_
+            name = rel.rsplit("/", 1)[-1]
+            z = zerlege(name)
+            art = art_bestimmen(name, z.label)
+            lp = label_pfad(rel)
+            ctx.ordner[id_] = OrdnerInfo(id_, pid, f"{root}/{rel}", rel, name, z.label,
+                                         oid.get((pid, rel.rsplit("/", 1)[0])) if "/" in rel else None, art,
+                                         slot_id.get(lp) if art in ("normal", "archiv") else None,
+                                         anzahl[(pid, rel)], neueste.get((pid, rel)))
+    # Statistik (nur vor dem Stichtag, Alter relativ zum Stichtag) und gelernte BKP-Wörter
+    bkp_zeilen = []
+    for pid, rels in ordner_proj.items():
+        pnr = ctx.projekte[pid].nummer
+        for name in {r.rsplit("/", 1)[-1] for r in rels}:
+            z = zerlege(name)
+            bkp_zeilen.append((z.label, z.codes, pnr))
+    wb = mk.woerterbuch().mit_bkp_woertern(mk.bkp_woerter_aus_ordnern(bkp_zeilen, mk.woerterbuch().ist_allgemein))
+    info = {i: {"slot_id": o.slot_id, "rolle": o.label, "art": o.art, "parent_id": o.parent_id}
+            for i, o in ctx.ordner.items()}
+    stat_dateien = ({**d, "ordner_id": oid.get((d["project_id"], d["ordner"])), "modified_at": d["modified_raw"]}
+                    for d in dateien if d["ordner"])
+    ctx.stats = ablage_index.statistik_berechnen(stat_dateien, info, wb, jetzt, nur_vor=stichtag)
+    # Hooks: Vorgänger aus dem Speicher (strikt, nur Dateien vor T), Volltext aus der DB (ohne Dokumente ab T)
+    vg: dict[str, list] = defaultdict(list)
+    for d in vor_dateien:
+        o = ctx.ordner[oid[(d["project_id"], d["ordner"])]]
+        vg[mk.vorgaenger_name(d["filename"])].append((d["project_id"], o.id, f"{o.path}/{d['filename']}", d["filename"]))
+    ctx.vorgaenger_fn = lambda vname, pid: [t for t in vg.get(vname, []) if pid is None or t[0] == pid]
+    if not ohne_fts:
+        def fts(woerter):
+            q = " OR ".join(f'"{w}"' for w in woerter)
+            try:
+                rows = conn.execute(
+                    "SELECT d.project_id, COUNT(*) AS n FROM chunks_fts JOIN document_chunks dc ON chunks_fts.rowid = dc.id "
+                    "JOIN documents d ON d.id = dc.document_id WHERE chunks_fts MATCH ? AND d.project_id IS NOT NULL "
+                    "AND d.modified_at < ? GROUP BY d.project_id ORDER BY n DESC LIMIT 3", (q, stichtag)).fetchall()
+            except sqlite3.Error:
+                return {}
+            g = sum(r[1] for r in rows) or 1
+            return {r[0]: r[1] / g for r in rows}
+        ctx.fts_fn = fts
+    ctx.fertig()
+    return ctx, wb, oid
+
+
+def chunk_text(conn, doc_id, n=mk.INHALT_ZEICHEN):
+    text = ""
+    for (c,) in conn.execute("SELECT content FROM document_chunks WHERE document_id = ? ORDER BY chunk_index", (doc_id,)):
+        text += (c or "") + "\n"
+        if len(text) >= n:
+            break
+    return text[:n] or None
+
+
+def bewerte_neu(conn, ctx, wb, test, par_basis, ohne_fts, oid):
+    """Pro Testdatei: Projekt-Ranking, Ordner-Scores (nur Statistik) und Vorschläge mit/ohne Vorgänger."""
+    nummern = {str(n) for n in ctx._nummern}
+    res = []
+    for i, f in enumerate(test, 1):
+        if i % 200 == 0:
+            print(f"  Neue Logik {i}/{len(test)}", file=sys.stderr)
+        text = chunk_text(conn, f["id"])
+        datei = pj.DateiInfo(f["filename"], f["filesize"], f["modified_raw"], None, text)
+        datei.merkmale = mk.merkmale(f["filename"], f["filesize"], f["modified_raw"], text, None, wb, nummern)
+        t0 = time.perf_counter()
+        pk = pj.projekt_bestimmen(ctx, datei)
+        dt_p = (time.perf_counter() - t0) * 1000
+        pid = f["project_id"]
+        rel, ziel_neu = f["ordner"], False
+        while rel and (pid, rel) not in oid:         # Ziel gab es zum Stichtag noch nicht → Elternordner
+            rel, ziel_neu = (rel.rsplit("/", 1)[0] if "/" in rel else ""), True
+        wahr = f"{by_pfad(ctx, pid)}/{rel}" if rel else None
+        kands, scores = od.bewerten(ctx, pid, datei.merkmale, par_basis)
+        res.append({"f": f, "datei": datei, "pk": pk, "dt_p": dt_p, "wahr": wahr, "kands": kands, "scores": scores,
+                    "ziel_neu": ziel_neu, "gruppe": top_gruppe(f["ordner"])})
+    return res
+
+
+def by_pfad(ctx, pid):
+    return ctx.projekte[pid].path.rstrip("/")
+
+
+def auswerten_ordner(ctx, zeilen, par, mit_vorgaenger):
+    """Kennzahlen für einen Parametersatz. Zieht Ordner im Archiv und im Wurzelordner aus der Wertung."""
+    out = []
+    for z in zeilen:
+        ctx = z.get("ctx", ctx)
+        if z["wahr"] is None:
+            continue
+        pid = z["f"]["project_id"]
+        wahr_ordner = next((k for k in z["kands"] if k.pfad == z["wahr"]), None)
+        if wahr_ordner is None:
+            out.append({"gruppe": z["gruppe"], "ausser_wertung": True, "ziel_neu": z["ziel_neu"]})
+            continue
+        t0 = time.perf_counter()
+        if mit_vorgaenger:
+            erg = ordner_vorschlag(ctx, z["datei"], pid, par, True)
+            rang = [o["pfad"] for o in erg["optionen"]]
+        else:
+            # Optionen = Zweige der Hierarchie (Statistik allein)
+            probs = od.wahrscheinlichkeiten(z["scores"], par.temperatur)
+            h = od.hierarchie(ctx, pid, z["kands"], probs, par)
+            rang = [k.pfad for k, _ in h["optionen"]]
+            erg = {"fall": h["fall"], "sicher_bis": {"pfad": h["sicher_pfad"], "p": h["sicher_p"]},
+                   "optionen": [{"pfad": k.pfad, "p": p} for k, p in h["optionen"]]}
+        ms = (time.perf_counter() - t0) * 1000
+        sb = erg["sicher_bis"]["pfad"] if erg.get("sicher_bis") else None
+        wurzel = ctx.projekte[pid].path.rstrip("/")
+        tiefe = len([t for t in (sb or "")[len(wurzel):].split("/") if t]) if sb else 0
+        sicher_ok = bool(sb) and (z["wahr"] == sb or z["wahr"].startswith(sb.rstrip("/") + "/"))
+        im_zweig = [bool(r) and (z["wahr"] == r or z["wahr"].startswith(r.rstrip("/") + "/")) for r in rang]
+        tiefe_o1 = len([t for t in rang[0][len(wurzel):].split("/") if t]) if rang else 0
+        out.append({"gruppe": z["gruppe"], "ausser_wertung": False, "ziel_neu": z["ziel_neu"], "fall": erg["fall"],
+                    "top1": bool(rang) and rang[0] == z["wahr"], "top3": z["wahr"] in rang[:3],
+                    "sicher_ok": sicher_ok, "tiefe": tiefe if sicher_ok else 0,
+                    "zweig1": bool(im_zweig) and im_zweig[0], "zweig3": any(im_zweig[:3]), "tiefe_o1": tiefe_o1,
+                    "nutzen": (tiefe if sicher_ok else -NUTZEN_FALSCH)
+                              + 0.5 * (tiefe_o1 if im_zweig and im_zweig[0] else 0),
+                    "ms": ms + z["dt_p"] * 0, "vorschlag": rang[0] if rang else None, "wahr": z["wahr"],
+                    "slot_wahr": wahr_ordner.label_pfad, "slot_vor": next(
+                        (k.label_pfad for k in z["kands"] if rang and k.pfad == rang[0]), "")})
+    return out
+
+
+NUTZEN_FALSCH = 3.0     # ein falsches „sicher bis hier" kostet so viele Ebenen Nutzen wie ein richtiges Ebenen bringt
+
+
+def kennzahlen(zs):
+    zs = [z for z in zs if not z["ausser_wertung"]]
+    n = len(zs)
+    eind = [z for z in zs if z["fall"] == "eindeutig"]
+    return {"n": n, "top1": sum(z["top1"] for z in zs), "top3": sum(z["top3"] for z in zs),
+            "eindeutig": len(eind), "sicher_falsch": sum(not z["top1"] for z in eind),
+            "sicher_ok": sum(z["sicher_ok"] for z in zs),
+            "zweig1": sum(z["zweig1"] for z in zs), "zweig3": sum(z["zweig3"] for z in zs),
+            "tiefe_o1": [z["tiefe_o1"] for z in zs if z["zweig1"]],
+            "tiefe": [z["tiefe"] for z in zs], "nutzen": sum(z["nutzen"] for z in zs) / n if n else 0.0,
+            "faelle": Counter(z["fall"] for z in zs), "ms": [z["ms"] for z in zs]}
+
+
+def tabelle_neu(zs):
+    k = kennzahlen(zs)
+    n, e = k["n"], k["eindeutig"]
+    return (f"| Ordner Top-1 (Option 1 ist genau das Ziel) | {pct(k['top1'], n)} |\n|---|---:|\n"
+            f"| Ordner Top-3 (eine der Optionen ist genau das Ziel) | {pct(k['top3'], n)} |\n"
+            f"| Ziel liegt im Zweig von Option 1 | {pct(k['zweig1'], n)} (mittlere Tiefe der Option {statistics.mean(k['tiefe_o1']) if k['tiefe_o1'] else 0:.1f}) |\n"
+            f"| Ziel liegt im Zweig einer der 3 Optionen | {pct(k['zweig3'], n)} |\n"
+            f"| Anteil „eindeutig\" | {pct(e, n)} ({e}) |\n| davon falsch (sicher-falsch) | {pct(k['sicher_falsch'], e)} ({k['sicher_falsch']}) |\n"
+            f"| `sicher_bis` korrekt | {pct(k['sicher_ok'], n)} |\n"
+            f"| … davon mindestens Ebene 1 / 2 / 3 tief | {pct(sum(t >= 1 for t in k['tiefe']), n)} / {pct(sum(t >= 2 for t in k['tiefe']), n)} / {pct(sum(t >= 3 for t in k['tiefe']), n)} |\n"
+            f"| Nutzen (Tiefe von `sicher_bis` bei richtig, −{NUTZEN_FALSCH:g} bei falsch, plus ½ Tiefe von Option 1 im Zweig), Mittel | {k['nutzen']:.2f} |\n"
+            f"| Fälle | {', '.join(f'{a} {b}' for a, b in k['faelle'].most_common())} |\n"
+            f"| Laufzeit Ordner-Teil | Median {statistics.median(k['ms']) if k['ms'] else 0:.1f} ms · p95 {p95(k['ms']):.1f} ms |")
+
+
+def tabelle_bereiche(zs):
+    gr = defaultdict(list)
+    for z in zs:
+        gr[z["gruppe"]].append(z)
+    zeilen = ["| Bereich | n | Top-1 | Top-3 | eindeutig | sicher-falsch | sicher_bis ok |", "|---|---:|---:|---:|---:|---:|---:|"]
+    for g in sorted(gr, key=lambda g: -len(gr[g])):
+        k = kennzahlen(gr[g])
+        if k["n"]:
+            zeilen.append(f"| {g} | {k['n']} | {pct(k['top1'], k['n'])} | {pct(k['top3'], k['n'])} | "
+                          f"{pct(k['eindeutig'], k['n'])} | {pct(k['sicher_falsch'], k['eindeutig'])} | {pct(k['sicher_ok'], k['n'])} |")
+    return "\n".join(zeilen)
+
+
+def fehlertypen(zs, n=20):
+    c = Counter((z["slot_wahr"] or "(kein Slot)", z["slot_vor"] or "(kein Slot)") for z in zs
+                if not z["ausser_wertung"] and not z["top1"])
+    return ["| wahrer Slot → vorgeschlagener Slot | Anzahl |", "|---|---:|"] + [
+        f"| {a} → {b} | {m} |" for (a, b), m in c.most_common(n)]
+
+
+def neu_bewerten(ctx, zeilen, par):
+    """Scores der Statistik für einen Parametersatz neu berechnen (alpha, namens_gewicht … ändern sie)."""
+    for z in zeilen:
+        z["kands"], z["scores"] = od.bewerten(z.get("ctx", ctx), z["f"]["project_id"], z["datei"].merkmale, par)
+
+
+def kalibrieren(ctx, train, par, grid):
+    """Temperatur-Raster auf der Trainingshälfte: höchster mittlerer Nutzen (tiefes, richtiges `sicher_bis`
+    zählt, ein falsches kostet). Das Ranking selbst hängt nicht von der Temperatur ab."""
+    beste, bester = None, -1e9
+    for t in grid:
+        par.temperatur = t
+        k = kennzahlen(auswerten_ordner(ctx, train, par, False))
+        if k["n"] and k["nutzen"] > bester:
+            beste, bester = t, k["nutzen"]
+    par.temperatur = beste if beste is not None else par.temperatur
+    return par.temperatur
+
+
+def cut_fuer(f, T, tage):
+    """Stand der Statistik für eine Testdatei: Beginn ihres N-Tage-Fensters (mindestens der Stichtag T)."""
+    if tage <= 0:
+        return T.strftime("%Y-%m-%dT%H:%M:%SZ")
+    d = mk._parse_mtime(f["mod"])
+    n = int((d - T).total_seconds() // (tage * 86400))
+    return (T + timedelta(days=n * tage)).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     ap.add_argument("--db", default=os.environ.get("ARCHIVIO_DB"), help="Pfad zur archivio.db (oder ARCHIVIO_DB)")
@@ -255,6 +536,19 @@ def main():
     ap.add_argument("--ab-projektnummer", type=int, default=0, help="nur Projekte ab dieser Nummer (Strut: 184)")
     ap.add_argument("--auch-ohne-nummer", action="store_true", help="auch Ordner ohne führende Projektnummer")
     ap.add_argument("--ohne-fts", action="store_true", help="Basiswert ohne Volltext-Signal (schneller)")
+    ap.add_argument("--musterordner", default=str(Path(__file__).resolve().parent.parent / "tests" / "fixtures" / "musterordner_strut.txt"),
+                    help="Vorlage: Ordner oder Textdatei mit Pfaden (Standard: Fixture). 'keiner' = aus Projekten herleiten")
+    ap.add_argument("--rollend-tage", type=int, default=14,
+                    help="Statistik-Stand der Testdateien alle N Tage erneuern (Produktion rechnet nach jedem Scan neu); 0 = fester Stichtag")
+    ap.add_argument("--stichprobe-art", choices=["gleich", "natuerlich"], default="gleich",
+                    help="gleich = reihum je Top-Ordner (Auftrag); natuerlich = zufällig, wie die Dateien tatsächlich anfallen")
+    ap.add_argument("--delta", type=float, default=None, help="Gewicht Elternordner-Teilbaum")
+    ap.add_argument("--namens-gewicht", type=float, default=None)
+    ap.add_argument("--alpha", type=float, default=None)
+    ap.add_argument("--idf-max", type=float, default=None)
+    ap.add_argument("--prior-k", type=float, default=None)
+    ap.add_argument("--ohne-neu", action="store_true", help="nur Basiswert und Merkmale, keine neue Logik")
+    ap.add_argument("--temperaturen", default="0.5,1,1.5,2,3,4,6,8,12", help="Raster der Softmax-Temperatur")
     ap.add_argument("--ausgabe", default=None, help="Berichtsdatei (Standard: ablage_messung_<datum>.md)")
     args = ap.parse_args()
     if not args.db or not Path(args.db).exists():
@@ -275,7 +569,8 @@ def main():
     for d in dateien:
         by_proj[d["project_id"]].append(d)
     test_alle = [d for d in dateien if d["mod"] >= stichtag]
-    test = stichprobe(test_alle, args.stichprobe, rnd)
+    test = (stichprobe(test_alle, args.stichprobe, rnd) if args.stichprobe_art == "gleich"
+            else rnd.sample(test_alle, min(args.stichprobe, len(test_alle))))
 
     out: list[str] = []
     w = out.append
@@ -296,7 +591,8 @@ def main():
       "geändert), **gegeben das richtige Projekt**. Stufe 2 (`os.walk`) entfällt, siehe Skript. "
       "Die alte Logik liefert nur einen Vorschlag: Top-3 und „sicher-falsch\" gibt es dort nicht.\n")
     if test:
-        zeilen = baseline(conn, projekte, test, by_proj, stichtag, stichtag, args.ohne_fts)
+        zeilen = baseline(conn, projekte, test, by_proj, stichtag, stichtag, args.ohne_fts,
+                          lambda f: cut_fuer(f, T, args.rollend_tage))
         w(tabelle(zeilen))
         ms = [z["ms"] for z in zeilen]
         w(f"\nLaufzeit je Vorschlag: Median {statistics.median(ms):.1f} ms · p95 {p95(ms):.1f} ms"
@@ -367,7 +663,82 @@ def main():
         w("")
 
     w("## Neue Logik\n")
-    w("Folgt in Etappe 5 (Vorstufen, Scoring, Hierarchie-Konfidenz; zwei Läufe mit/ohne Vorgänger-Signal).\n")
+    if args.ohne_neu or not test:
+        w("Übersprungen (`--ohne-neu` oder keine Testdateien).\n")
+    else:
+        muster = [] if args.musterordner == "keiner" else lies_muster(args.musterordner)
+        par = Parameter()
+        for feld, wert in (('delta', args.delta), ('namens_gewicht', args.namens_gewicht), ('alpha', args.alpha),
+                            ('idf_max', args.idf_max), ('prior_k', args.prior_k)):
+            if wert is not None:
+                setattr(par, feld, wert)
+        gruppen: dict[str, list] = defaultdict(list)
+        for f in test:
+            gruppen[cut_fuer(f, T, args.rollend_tage)].append(f)
+        zeilen_neu = []
+        t0 = time.perf_counter()
+        for cut in sorted(gruppen):
+            cut_dt = mk._parse_mtime(cut)
+            ctx_g, wb_g, oid_g = baue_kontext(conn, projekte, by_id, dateien, cut, muster, cut_dt, args.ohne_fts)
+            rows = bewerte_neu(conn, ctx_g, wb_g, gruppen[cut], par, args.ohne_fts, oid_g)
+            for z in rows:
+                z["ctx"] = ctx_g
+            zeilen_neu += rows
+            print(f"  Stand {cut[:10]}: {len(rows)} Dateien, {len(ctx_g.ordner)} Ordner", file=sys.stderr)
+        ctx = zeilen_neu[0]["ctx"]
+        w(f"- Vorlage: {'Musterordner (' + str(len(muster)) + ' Ordner)' if muster else 'aus den Projekten hergeleitet'} → "
+          f"{len(ctx.slots)} Slots; {len(gruppen)} Statistik-Stände "
+          f"({'alle ' + str(args.rollend_tage) + ' Tage erneuert' if args.rollend_tage else 'fester Stichtag'}), "
+          f"Aufbau und Bewertung {time.perf_counter() - t0:.0f} s")
+        # Zeit-Trennung beim Tuning: die frühere Hälfte der Testdateien kalibriert, die spätere wird berichtet
+        zeilen_neu.sort(key=lambda z: z["f"]["mod"])
+        half = len(zeilen_neu) // 2
+        train, held = zeilen_neu[:half], zeilen_neu[half:]
+        grid = [float(x) for x in args.temperaturen.split(",")]
+        t_best = kalibrieren(ctx, train, par, grid)
+        w(f"- Kalibrierung (Trainingshälfte, {len(train)} Dateien, früher als {held[0]['f']['mod'][:10] if held else '–'}): "
+          f"Temperatur **{t_best}** aus {grid}; berichtet wird die spätere Hälfte ({len(held)} Dateien)\n")
+
+        # Projekt
+        def proj_kz(zs):
+            n = len(zs)
+            top1 = sum(1 for z in zs if z["pk"] and z["pk"][0].id == z["f"]["project_id"])
+            top3 = sum(1 for z in zs if any(c.id == z["f"]["project_id"] for c in z["pk"][:3]))
+            sicher = [z for z in zs if z["pk"] and z["pk"][0].p >= par.projekt_sicher]
+            falsch = sum(1 for z in sicher if z["pk"][0].id != z["f"]["project_id"])
+            return n, top1, top3, len(sicher), falsch
+        n, t1, t3, sich, fal = proj_kz(held)
+        w("### Projekt\n")
+        w(f"| Projekt Top-1 | {pct(t1, n)} |\n|---|---:|\n| Projekt Top-3 | {pct(t3, n)} |\n"
+          f"| Projekt „sicher\" (p ≥ {par.projekt_sicher}) | {pct(sich, n)} |\n| davon falsch | {pct(fal, sich)} ({fal}) |\n"
+          f"| Laufzeit Projekt | Median {statistics.median(z['dt_p'] for z in held):.1f} ms · p95 {p95([z['dt_p'] for z in held]):.1f} ms |\n")
+        # Ordner
+        for titel, mv in (("ohne Vorgänger-Signal (Statistik allein)", False), ("mit Vorgänger-Signal", True)):
+            zs = auswerten_ordner(ctx, held, par, mv)
+            w(f"### Ordner {titel} — bei bekanntem Projekt\n")
+            ausser = sum(z["ausser_wertung"] for z in zs)
+            w(f"(aus der Wertung: {ausser} Dateien, die im Archiv oder im Projektwurzelordner liegen)\n")
+            w(tabelle_neu(zs) + "\n")
+            for titel2, flag in (("Ziel existierte schon (Ordner mit Vorgeschichte)", False),
+                                 ("Ziel war neu — Elternordner zählt als Ziel (z. B. neue datierte Sitzung)", True)):
+                sub = [z for z in zs if not z["ausser_wertung"] and z["ziel_neu"] == flag]
+                if sub:
+                    k2 = kennzahlen(sub)
+                    w(f"- *{titel2}*: n={k2['n']} · Top-1 {pct(k2['top1'], k2['n'])} · Top-3 {pct(k2['top3'], k2['n'])} · "
+                      f"eindeutig {pct(k2['eindeutig'], k2['n'])} (sicher-falsch {pct(k2['sicher_falsch'], k2['eindeutig'])}) · "
+                      f"`sicher_bis` ok {pct(k2['sicher_ok'], k2['n'])}")
+            w("")
+            if not mv:
+                w("**Pro Bereich**\n")
+                w(tabelle_bereiche([z for z in zs if not z["ausser_wertung"]]) + "\n")
+                w("**Häufigste Fehlertypen (Top-1 falsch)**\n")
+                w("\n".join(fehlertypen(zs)) + "\n")
+        # Ganze Stichprobe zum Vergleich
+        zs_all = auswerten_ordner(ctx, zeilen_neu, par, False)
+        k = kennzahlen(zs_all)
+        w(f"### Zum Vergleich: ganze Stichprobe, Temperatur {t_best} (teils im Training gesehen)\n")
+        w(f"Top-1 {pct(k['top1'], k['n'])} · Top-3 {pct(k['top3'], k['n'])} · eindeutig {pct(k['eindeutig'], k['n'])} · "
+          f"sicher-falsch {pct(k['sicher_falsch'], k['eindeutig'])}\n")
 
     bericht = "\n".join(out)
     print(bericht)

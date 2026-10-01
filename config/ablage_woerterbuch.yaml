@@ -79,6 +79,15 @@ phasennummern: {22: WB, 31: VP, 32: BP, 33: BG, 41: SUB, 51: AP, 53: REV}
 # Allgemeine Wörter, die nie als BKP-Bezeichnung gelernt werden (zusätzlich zu allen Plantyp-/Phasen-Wörtern)
 bkp_ausschluss: [plaene, plan, fassade, fassaden, details, ansichten, umgebung, grundlagen, skizzen]
 
+# Benannte Absichten für Plan-Ablagen (Auftrag §6.5): ein Plan hat je nach Absicht mehrere etablierte Orte.
+# Schlüssel = Label-Pfad-Ende oder Rolle (normalisiert); der erste passende Eintrag benennt die Option.
+absichten:
+  "cad daten und export/pdf": "Aktueller Stand (CAD-Export)"
+  "cad daten und export": "Aktueller Stand (CAD-Export)"
+  planstaende: "Phasenstand / Planfreeze"
+  fachplaner: "Versand an Fachplaner"
+  unternehmer: "Versand an Unternehmer"
+
 # Plan-Massstäbe, die als blosse Zahl im Namen stehen dürfen (nur mit Plan-Kontext)
 massstaebe: [20, 25, 50, 100, 200, 250, 500, 1000, 2000]
 

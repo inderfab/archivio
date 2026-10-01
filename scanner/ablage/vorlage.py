@@ -191,11 +191,14 @@ def vorlage_entfernen(conn) -> None:
 
 # ── Zuordnung und Neuberechnung ────────────────────────────────────────────────
 
-def zuordnen(conn) -> int:
-    """Setzt `slot_id` jedes Ordners anhand seines Label-Pfads. Gibt die Zahl der Änderungen zurück."""
+def zuordnen(conn, project_id: int | None = None) -> int:
+    """Setzt `slot_id` jedes Ordners anhand seines Label-Pfads (optional nur eines Projekts, so läuft
+    es direkt nach dem Scan). Gibt die Zahl der Änderungen zurück."""
     slot_ids = {r["label_pfad"]: r["id"] for r in conn.execute("SELECT id, label_pfad FROM ablage_slot")}
     aenderungen = []
-    for r in conn.execute("SELECT id, rel_path, art, slot_id FROM ablage_ordner"):
+    sql = "SELECT id, rel_path, art, slot_id FROM ablage_ordner"
+    for r in (conn.execute(sql + " WHERE project_id = ?", (project_id,)) if project_id is not None
+              else conn.execute(sql)):
         neu = slot_ids.get(_lp(r["rel_path"])) if r["art"] in ("normal", "archiv") else None
         if neu != r["slot_id"]:
             aenderungen.append((neu, r["id"]))
