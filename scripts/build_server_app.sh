@@ -153,6 +153,7 @@ chmod +x "$APP/Contents/Resources/scripts/deinstallieren.sh"
 # unabhaengig vom Server, damit sie auch auf einem Rechner ohne Installation
 # benutzbar ist.
 cp scripts/sicherung_pruefen.py "$APP/Contents/Resources/scripts/"
+cp scripts/ablage_log_auswertung.py "$APP/Contents/Resources/scripts/"
 cp -r helper/ArchivioLink.workflow "$APP/Contents/Resources/"
 cp helper/archivio_mcp.py  "$APP/Contents/Resources/"
 cp shared/menubar_bridge.py "$APP/Contents/Resources/"

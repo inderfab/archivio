@@ -75,7 +75,17 @@ projects: []
 
 ablage:
   # Datei-Ablage mit Vorschlag (Drop aufs Menüleisten-Symbol); Einstellungen → Ablage-Struktur
-  musterordner: ""               # Vorlage-Struktur (leer = aus den Projekten ableiten)
-  lernen_ab_projektnummer:       # nur Projekte ab dieser Nummer lernen mit (leer = alle)
-  # archiv_labels: [archiv, alt, old, ueberholt]   # Ordner, die als Archiv gelten
-  # projektnummer_regex: '^\s*(\d+)(?!\d)'
+  musterordner: ""               # Vorlage-Struktur (leer = aus den Projekten ableiten); der Musterordner ist nie ein Ziel
+  lernen_ab_projektnummer:       # nur Projekte ab dieser Nummer lernen mit (leer = alle; Strut: 184)
+  # archiv_labels: [archiv, alt, old, ueberholt]   # Ordner, die als Archiv gelten (normalisierte Namen ohne Ordnungspräfix)
+  # projektnummer_regex: '^\s*(\d+)(?!\d)'        # Projektnummer im Projekt-NAMEN
+  # dateiname_projektnummer: '\d{3}'               # Projektnummer als ganzes Wort im Dateinamen (nach einem Datum oder zuerst)
+  # woerterbuch:                                   # Ergänzung zu config/ablage_woerterbuch.yaml (ersetzt nie)
+  #   doktyp: {submission: [subm]}
+  #   fachplaner: {bauingenieur: [tragwerksplaner]}
+  # Stellschrauben der Engine. Die Standardwerte sind an der Strut-Sicherung gemessen (planung/datei-drop-ablage_messung-nachtrag-1.md);
+  # nicht ohne Daten aus dem Alltag (ablage_log) verändern.
+  # schwelle_sicher: 0.95          # ab dieser Summe gilt ein Ordner im Baum als „sicher bis hier"
+  # projekt_sicher: 0.60           # ab dieser Wahrscheinlichkeit gilt das Projekt als erkannt
+  # temperatur: 3.0
+  # vorgaenger_bonus: 0.0          # Bonus für Ordner mit gleichnamiger früherer Datei (bei Strut gemessen: jeder Bonus schadet)

@@ -2,7 +2,7 @@
 
 > 📌 **Vor der Arbeit lesen:** [`PROJEKT_STATUS.md`](PROJEKT_STATUS.md) — vollständiger
 > Übergabe-Kontext (aktuelle Version, Infrastruktur, Build/Release, Zuverlässigkeit,
-> Scanner/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte).
+> Scanner/Suche/Mail-Details, hart erarbeitete Fallen, offene Punkte). Datei-Drop/Ablage: §19.
 
 ## Stack
 - **Backend**: Python 3.13 im ausgelieferten Bundle (`PYTHON_VERSION` in
@@ -24,6 +24,7 @@
 ```
 archivio/
   scanner/    # Dateiscanner, Hash-Berechnung, Extraktion (PDF, DWG, Mail, …)
+    ablage/   # Datei-Drop: Ordnermodell, Merkmale, Statistik, Vorschlags-Engine (siehe PROJEKT_STATUS §19)
   web/        # FastAPI-App, Routen, Jinja2-Templates
   db/         # Schema, Migrations, DB-Hilfsfunktionen
   config/     # Konfigurationslogik (lädt config.yaml)

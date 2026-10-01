@@ -529,3 +529,106 @@ der Volltextsuche zu vermeiden — Rubrica braucht aber genau den vollen Text.
     der ganze `scripts/`-Ordner (der auch Build-/Dev-Tooling enthält).
 - Tests: `tests/test_rubrica.py` (Disabled-No-op, Insert, Dedup, End-to-End: bereinigter Text in
   `archivio.db` vs. voller Text in `rubrica.db`).
+
+---
+
+## 19. Datei-Ablage (Datei-Drop mit Vorschlag) — seit Server 3.8.0 / Helper 3.3.0
+
+Eine Datei (oder mehrere) aufs Archivio-Symbol der Menüleiste ziehen → Archivio schlägt Projekt und Ordner vor → ein Klick
+oder Enter legt ab. **Ohne KI** (nur Zählen, Regex, Wörterbücher, SQLite), jeder Vorschlag mit Begründung, nie automatisch
+verschieben. Aufträge: `planung/datei-drop-ablage.md` (Auftrag), `planung/datei-drop-ablage_nachtrag-1.md` (gilt vor dem
+Auftrag), Kommentar `planung/datei-drop-ablage_kommentar.md`, Messbericht `planung/datei-drop-ablage_messung-nachtrag-1.md`,
+Abschlussbericht mit Testanleitung `planung/datei-drop-ablage_abschlussbericht.md`.
+
+### Ablauf
+
+```
+Helper (Mitarbeiter-Mac)                 Server                                    Browser
+Drop → Hash (≤200 MB), Textformate        POST /api/ablage/analyse                  /dashboard/ablage?t=<token,…>
+(≤50 MB) hochladen ─────────────────────► Staging, Extraktion (3 s, 3000 Zeichen),
+  Token merken (nur im Speicher)          Vorschlag rechnen, ablage_vorgang
+                                                                                    Vorschlag wählen / suchen / Browser
+                                          POST /{token}/bestaetigen ◄────────────── prüft: Ziel liegt in einem Projekt
+fetch(localhost:44380/ablage/ausfuehren) ◄──────────────────────────────────────── nur {token}
+GET /{token}/entscheid (dest vom Server)  prüft nochmals, verschiebt/kopiert
+POST /{token}/abgelegt ─────────────────► process_file, ablage_log, Statistik +1
+```
+
+Drop direkt am **Server-Mac**: gleiche Engine, ohne Upload (`/analyse-lokal`, `/ausfuehren-lokal`, nur von localhost).
+`ARCHIVIO_UPLOAD_DRY_RUN=1` verschiebt nichts (Helper und Server-Mac).
+
+### Module (`scanner/ablage/`, `shared/ablage_transport.py`, `web/ablage_*.py`)
+
+`normalisieren` (Ordnername → Präfix/Label/BKP-Codes) · `erfassung` (Ordner beim Scan sammeln, einmal schreiben; reine
+Ordner-Erfassung) · `vorlage` (Musterordner/Herleitung → Slots) · `merkmale` + `config/ablage_woerterbuch.yaml` · `index`
+(Statistik, 4 Ebenen) · `kontext` (Daten der Engine, Cache) · `projekt`, `ordner`, `vorschlag` (Scoring, Hierarchie) ·
+`produktion` (SQL-Haken) · `vorgang` (Server-Seite des Drops) · `lernen` (Statistik +1/−1) · `suche` · Transport und Dateioperationen
+in `shared/ablage_transport.py` (Helper UND Server, ohne rumps).
+
+### Datenmodell (Migrationen 030–035)
+
+`ablage_ordner` (jeder gesehene Ordner, auch leere; `art` normal/archiv/trenner; **`ausgeschlossen`** ist eine eigene Spalte —
+ein ausgeschlossenes `z_Archiv` bleibt ein Archiv), `ablage_slot` (Vorlage-Rollen, Schlüssel = Label-Pfad), `ablage_stats`
+(Merkmalszählungen je Ordner/Slot/Rolle/global, `_n` = Gesamtgewicht), `ablage_vorgang` (24 h), `ablage_log` (dauerhaft,
+mit `quelle` und `seite_ms`), `ablage_regel` (angelegt, noch ungenutzt).
+
+### Betrieb
+
+- **Nach dem Update** ist `ablage_ordner` leer. Beim Start läuft einmal pro Projekt eine reine Ordner-Erfassung im Hintergrund
+  (`dashboard._ablage_erst_erfassung`, unter dem Scan-Lock, keine Datei wird gelesen); Dauer je Projekt im Log
+  (`Ablage: Ordner erfasst in …`). Nicht erreichbares NAS → nächster Start. Danach Slots und Statistik neu.
+- **Neuberechnung** nach jedem Scan-All (in `_run_fts_optimize`) und per Knopf in Einstellungen → Ablage-Struktur.
+- **Cache** (`kontext`): Ordner und Statistik im Speicher, Laden im Hintergrund (Single-Flight), Vorwärmen beim Start. Ist er nicht
+  bereit, zeigt die Seite „Vorschläge werden vorbereitet…" und lädt nach. Grösse und Ladezeit im Diagnose-Endpunkt
+  (`/api/debug/diagnostics`, Zeile „Ablage-Cache").
+- **Statistik wächst mit jeder Ablage** (`lernen.nach_ablage`), Rückgängig nimmt sie zurück; der nächtliche Neuaufbau ersetzt
+  sie durch die altersgewichtete Fassung.
+- **Konfiguration**: `config.yaml` → `ablage:` (siehe `config.yaml.example`). Büro-Wörterbuch ergänzt das Standard-Wörterbuch.
+- **Auswertung aus dem Alltag**: `scripts/ablage_log_auswertung.py` (Wege, Median der Zeit, Rangverteilung, Projekttreffer).
+
+### Messung (`scripts/ablage_messung.py`, nur lesend)
+
+Zeit-Trennung mit **rollender Statistik** (alle 14 Tage neuer Stand), Struktur zum jeweiligen Stand, Kalibrierung auf der früheren
+Hälfte der Testdateien, berichtet die spätere. Testmengen: alle Dateien, oder `--testmenge drop` (drop-typische Endungen, ohne
+`imageNNN`/CAD, Ablage-Ereignisse statt Dateien). Basiswert der alten Logik eingefroren. Auf der Strut-Sicherung 27.09.2026
+(17 Projekte ab 184, 91'539 Dateien):
+
+| | Auftrag-Stichprobe | natürlich | drop-Ereignisse |
+|---|---:|---:|---:|
+| Projekt Top-1 / Top-3 | 57 / 67 % | 51 / 59 % | 61 / 67 % |
+| Ordner Top-1 (Blatt) | 8,8 % | 9,1 % | 7,9 % |
+| richtiger Zweig in den 3 Optionen (Schwelle 0.80) | 36 % | 44 % | 43 % |
+| … nach Umstellung auf `schwelle_sicher` 0.95 (bestimmt auch die Optionen!) | – | 37 % | 49 % |
+| „Neuer Ordner“: erscheint / trifft | – | 47 % / 16 % | 57 % / 9 % |
+| `sicher_bis` bei „Bereich“ oder tiefer: Abdeckung / Fehler | – | 7 % / 70 % (bei 0.80) | 9 % / 58 % |
+
+`sicher_bis` insgesamt „96 % korrekt“ war irreführend: fast nur „Projekt“. Darum `schwelle_sicher = 0.95` (strengste Schwelle der
+Kurve; die Regel „Fehler ≤ 5 %“ wird bei keiner erfüllt) und die Oberfläche behauptet nur beim Projekt „sicher“.
+
+### Hart erarbeitete Fallen
+
+1. **Struktur zum Stichtag messen**, nicht die heutige: sonst liegen 93 % der Testdateien in Ordnern, die es damals noch nicht gab.
+2. **Vorgänger ≠ Zielordner** (3 von 117): gleichnamige Dateien sind bei Strut meist Kopien (Anhänge, Versand, je Planstand ein
+   Ordner). Bonus 0; nur die Rückfrage „archivieren / überschreiben / beide behalten“ gilt, und zwar für den **gewählten** Ordner.
+3. **Projektnummer ≠ BKP-Code** (Projekt 211 und BKP 211). Gelernte BKP-Wörter: nicht, wenn der Code die Projektnummer ist; mind. 3 Belege,
+   einheitlicher Code, keine Plan-/Phasen-Wörter. Ohne das bekam `Schnitt.dxf` ein `bkp:188`.
+4. **idf-Gewicht deckeln** (`idf_max`): sonst gewinnt jeder winzige Ordner mit zufällig einer ähnlichen Datei gegen den grossen richtigen.
+5. **Optionen sind Zweige**, gerankt nach der Wahrscheinlichkeit des Zweigs (nicht der verfeinerten Tiefe).
+6. **`ausgeschlossen` ≠ `art`.** Ausgeschlossene Archivordner müssen als Archiv erkannt bleiben („alten Stand archivieren").
+7. **Cache-Stempel**: ändert `lernen` die Statistik, muss der Stempel mitgezogen werden, sonst lädt der nächste Zugriff den Cache trotzdem neu.
+8. **Rückgängig-Reihenfolge**: erst die neue Datei weg, dann den archivierten Vorgänger zurück (die neue liegt unter seinem Namen).
+9. **Bridge**: `Access-Control-Allow-Origin: *` → `/ablage/ausfuehren` und `/ablage/rueckgaengig` nehmen NUR einen Token; Quelle aus der
+   Helper-Registry, Ziel vom Server (nochmals geprüft). Bei unbekannten POST-Pfaden den Body lesen, sonst „Connection reset".
+10. **Messskripte mit `multiprocessing` brauchen `if __name__ == "__main__"`** (Scan-Worker starten per spawn und führen das Skript sonst erneut aus).
+11. **Strings mit „…" in Python-Quelltext**: ein ASCII-`"` hinter einem deutschen Anführungszeichen beendet den String (mehrfach passiert).
+12. Mails haben in der DB keine Pfade → keine Ordner-Statistik, nur Projekt-Signale (Absender-Domain). `.eml` werden beim Drop mit der
+    vorhandenen Mail-Logik gelesen; **`.msg` (Outlook) wird nicht gelesen** (der vorhandene Code kennt es nicht).
+
+### Bekannte Grenzen
+
+- **Rückgängig gegen Scan**: Nach „Rückgängig“ wird der Index-Eintrag sofort entfernt; ein Scan, der in den fünf Minuten dazwischen läuft,
+  kann ihn kurz wieder anlegen. Akzeptiert.
+- **Qualität**: Projekt Top-1 nur 51–61 % (mit Projektsignal im Namen 82 %, ohne 50 %); Ordner auf Blattebene ≈ 9 %. Strut legt tief und datiert ab.
+  Die Oberfläche (Suche, „zuletzt verwendet“, „Neuer Ordner“) muss das auffangen; ob es im Alltag schneller ist, zeigt erst `ablage_log`.
+- **Helper auf einem echten Mitarbeiter-Mac** ist nicht getestet (Menüleisten-Drop, „Im Finder zeigen“): Testanleitung im Abschlussbericht.
+- Regel-Vorschläge (`ablage_regel`) sind zurückgestellt, bis Alltagsdaten vorliegen. Kein weiteres Scoring-Tuning gegen die historische Messung.

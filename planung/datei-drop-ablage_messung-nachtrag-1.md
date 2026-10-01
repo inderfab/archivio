@@ -96,3 +96,24 @@ neu entsteht — das deckt der Vorschlag „Neuer Ordner“ (§3.3 des Nachtrags
 2. Die Oberfläche darf nur „Projekt“ als sicher darstellen, Zweige als Vorschlag.
 3. Die Hinweiszeile für Vorgänger wird nicht umgesetzt.
 4. Kein weiteres Scoring-Tuning gegen diese Messung (Nachtrag §5): erst `ablage_log` aus dem Alltag.
+
+## 6. Nachgemessen nach der Umstellung auf `schwelle_sicher = 0.95` und mit „Neuer Ordner“
+
+Gleiche Läufe wie oben, jetzt mit Schwelle 0.95 und dem Vorschlag „Neuer Ordner `<JJMMTT>_…`“ (Nachtrag §3.3).
+
+| | alle Dateien (natürlich) | drop-typische Ereignisse |
+|---|---:|---:|
+| Ordner Top-1 (vorher → jetzt) | 9,1 → 13,7 % | 7,9 → 9,8 % |
+| richtiger Zweig in den 3 Optionen (vorher → jetzt) | 43,8 → **37,0 %** | 43,0 → **49,1 %** |
+| richtiger Zweig in Option 1 | 27,3 → 24,7 % | 24,7 → 29,3 % |
+| Vorschlag „Neuer Ordner“ erscheint | 47 % | 57 % |
+| wahres Ziel ist ein neuer datierter Ordner (Obergrenze) | 49 % | 32 % |
+| **Treffer** „Neuer Ordner“ (neuer datierter Ordner unter dem vorgeschlagenen Zweig) | **16,1 %** | **9,2 %** |
+| Zweig in den Optionen **oder** Treffer bei „Neuer Ordner“ | 38,9 % | 49,6 % |
+
+- Die Schwelle verschiebt die Optionen: Für die **realistischere Testmenge (drop-typische Ereignisse) wird der Zweig besser (+6 Punkte)**, für alle
+  Dateien schlechter (−7). Bei Ereignissen mit Projektsignal im Namen: 40,5 %, ohne: 53,4 %.
+- „Neuer Ordner“ trifft in 9–16 % der Fälle, erscheint aber in 47–57 %: Die Karte ist oft nicht das, was man braucht (Präzision ca. 16–29 %), kostet
+  aber nur eine Zeile. Wo das wahre Ziel ein neuer datierter Ordner ist (32–49 %), trifft sie in rund einem Drittel dieser Fälle den richtigen Zweig.
+  Nach dem Alltagstest an `ablage_log` (Quelle „neuer_ordner“) prüfen, ob sie genutzt wird.
+- Mehr als „kein Rückschritt“ lässt sich daraus nicht ableiten; das Rauschen bei 17 Projekten ist gross (Nachtrag §5: kein weiteres Tuning).
