@@ -76,8 +76,11 @@ def projekt_bestimmen(ctx: Kontext, datei: DateiInfo, top: int = 5) -> list[Proj
     # Vorgänger (strikt: gleicher Name ausser Datum) irgendwo im Bestand
     if ctx.vorgaenger_fn:
         vname = mk.vorgaenger_name(datei.dateiname)
-        for pid, _oid, _pfad, fn in ctx.vorgaenger_fn(vname, None):
-            geben(pid, P_VORGAENGER, f"Vorgänger „{fn}“ liegt in diesem Projekt")
+        treffer = ctx.vorgaenger_fn(vname, None)
+        pids = {t[0] for t in treffer}
+        for pid, _oid, _pfad, fn in treffer:
+            # Gleichnamige Dateien in mehreren Projekten (image001.png, Anhänge) sagen nichts über EIN Projekt
+            geben(pid, P_VORGAENGER / len(pids), f"Vorgänger „{fn}“ liegt in diesem Projekt")
 
     # Führende Projektnummer (der Merkmals-Code hat sie schon gegen echte Projekte geprüft)
     for k in f:

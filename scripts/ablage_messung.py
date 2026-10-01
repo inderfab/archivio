@@ -713,7 +713,7 @@ def main():
           f"| Projekt „sicher\" (p ≥ {par.projekt_sicher}) | {pct(sich, n)} |\n| davon falsch | {pct(fal, sich)} ({fal}) |\n"
           f"| Laufzeit Projekt | Median {statistics.median(z['dt_p'] for z in held):.1f} ms · p95 {p95([z['dt_p'] for z in held]):.1f} ms |\n")
         # Ordner
-        for titel, mv in (("ohne Vorgänger-Signal (Statistik allein)", False), ("mit Vorgänger-Signal", True)):
+        for titel, mv in (("ohne Vorgänger-Signal (Statistik allein)", False), ("mit Vorgänger-Signal (Bonus laut Parameter, Standard 0: nur Rückfrage-Hinweis)", True)):
             zs = auswerten_ordner(ctx, held, par, mv)
             w(f"### Ordner {titel} — bei bekanntem Projekt\n")
             ausser = sum(z["ausser_wertung"] for z in zs)
@@ -733,6 +733,24 @@ def main():
                 w(tabelle_bereiche([z for z in zs if not z["ausser_wertung"]]) + "\n")
                 w("**Häufigste Fehlertypen (Top-1 falsch)**\n")
                 w("\n".join(fehlertypen(zs)) + "\n")
+        # Akzeptanz gegen die Ziele des Auftrags (§7), spätere Hälfte, Statistik allein
+        kz = kennzahlen(auswerten_ordner(ctx, held, par, False))
+        nn, ee = kz["n"], kz["eindeutig"]
+        ms_o = kz["ms"]
+        ms_p = [z["dt_p"] for z in held]
+        def zeile(name, ziel, wert, ok):
+            return f"| {name} | {ziel} | {wert} | {'✓' if ok else '✗'} |"
+        sf = kz["sicher_falsch"] / ee if ee else 0.0
+        w("### Akzeptanz (Ziele aus dem Auftrag, Statistik allein, spätere Hälfte)\n")
+        w("| Kennzahl | Ziel | Messwert | erreicht |\n|---|---|---:|:-:|")
+        w(zeile("Projekt Top-1", "≥ 95 %", pct(t1, n), n and t1 / n >= 0.95))
+        w(zeile("Ordner Top-3", "≥ 85 %", pct(kz["top3"], nn), nn and kz["top3"] / nn >= 0.85))
+        w(zeile("Ordner Top-1", "≥ 65 %", pct(kz["top1"], nn), nn and kz["top1"] / nn >= 0.65))
+        w(zeile("sicher-falsch (der „eindeutigen\")", "≤ 3 %", f"{pct(kz['sicher_falsch'], ee)} (von {ee})", sf <= 0.03))
+        w(zeile("`sicher_bis` korrekt", "≥ 95 %", pct(kz["sicher_ok"], nn), nn and kz["sicher_ok"] / nn >= 0.95))
+        w(zeile("Laufzeit Ordner-Teil p95", "< 300 ms", f"{p95(ms_o):.0f} ms", p95(ms_o) < 300))
+        w(zeile("Laufzeit Projekt p95 (inkl. Volltext-Rückfall)", "< 300 ms", f"{p95(ms_p):.0f} ms", p95(ms_p) < 300))
+        w("")
         # Ganze Stichprobe zum Vergleich
         zs_all = auswerten_ordner(ctx, zeilen_neu, par, False)
         k = kennzahlen(zs_all)

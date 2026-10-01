@@ -59,6 +59,18 @@ def _gemeinsamer_ahne(ctx: Kontext, projekt_id: int, ordner_ids: list[int]) -> s
     return ctx.ordner[gem].path if gem is not None else ctx.projekte[projekt_id].path
 
 
+def vorgaenger_im_ordner(ctx: Kontext, projekt_id: int, dateiname: str, ordner_pfad: str) -> dict | None:
+    """Liegt im gewählten Ordner schon eine Datei mit gleichem Namen (ausser Datum)? Dann fragt die Oberfläche:
+    „Gibt schon ein Dokument mit diesem Namen. Alten Stand in z_Archiv schieben oder überschreiben?"
+    Gilt für JEDEN gewählten Ordner, nicht nur für vorgeschlagene."""
+    if not ctx.vorgaenger_fn:
+        return None
+    for pid, oid, pfad, fn in ctx.vorgaenger_fn(mk.vorgaenger_name(dateiname), projekt_id):
+        if pid == projekt_id and ctx.ordner[oid].path == ordner_pfad:
+            return {"vorgaenger": pfad, "dateiname": fn, "archiv_ordner": _archiv_kind(ctx, oid)}
+    return None
+
+
 def ordner_vorschlag(ctx: Kontext, datei: DateiInfo, projekt_id: int, par: Parameter | None = None,
                      mit_vorgaenger: bool = True) -> dict:
     """Ordner-Teil des Vorschlags für ein feststehendes Projekt. Rückgabe: fall, sicher_bis, optionen."""
@@ -76,35 +88,27 @@ def ordner_vorschlag(ctx: Kontext, datei: DateiInfo, projekt_id: int, par: Param
                     return {"fall": "eindeutig", "sicher_bis": {"pfad": k.pfad, "p": P_REGEL},
                             "optionen": [_option(ctx, wb, k, P_REGEL, [f"Regel: „{merkmal}“ gehört nach „{k.name}“"])]}
 
-    # 2. Vorgänger (strikt: gleicher Name ausser Datum)
+    # 2. Statistik. Ein Vorgänger (gleicher Name ausser Datum) gibt dem Ordner einen Bonus, entscheidet aber
+    #    nicht allein: bei Strut liegen gleichnamige Dateien meist als Kopien in vielen Ordnern (Messung: nur 3 von
+    #    117 Vorgängern lagen im Zielordner). Die Rückfrage „archivieren oder überschreiben?" hängt an der Option,
+    #    deren Ordner die gleichnamige Datei wirklich enthält.
+    treffer = []
     if mit_vorgaenger and ctx.vorgaenger_fn:
         treffer = [t for t in ctx.vorgaenger_fn(mk.vorgaenger_name(datei.dateiname), projekt_id) if t[0] == projekt_id]
-        if treffer:
-            je_ordner: dict[int, tuple] = {}
-            for _pid, oid, pfad, fn in treffer:
-                je_ordner.setdefault(oid, (pfad, fn))
-            ids = list(je_ordner)
-            opts = []
-            for oid in ids:
-                o = ctx.ordner[oid]
-                pfad, fn = je_ordner[oid]
-                kand = od.Kand(oid, oid, o.slot_id, o.parent_id, o.path, o.name, o.label,
-                               ctx.slots[o.slot_id].label_pfad if o.slot_id in ctx.slots else "")
-                opts.append(_option(ctx, wb, kand, P_VORGAENGER / len(ids), [f"Vorgänger „{fn}“ liegt hier"],
-                                    vorgaenger=pfad, archiv_ordner=_archiv_kind(ctx, oid)))
-            if len(ids) == 1:
-                return {"fall": "eindeutig", "sicher_bis": {"pfad": opts[0]["pfad"], "p": P_VORGAENGER},
-                        "optionen": opts}
-            return {"fall": "teilweise", "sicher_bis": {"pfad": _gemeinsamer_ahne(ctx, projekt_id, ids),
-                                                          "p": P_VORGAENGER}, "optionen": opts[:3]}
-
-    # 3. Statistik
-    kands, scores = od.bewerten(ctx, projekt_id, f, par)
+    kands, scores = od.bewerten(ctx, projekt_id, f, par, vorgaenger_ordner={t[1] for t in treffer})
     if not kands:
         return {"fall": "ordner_unklar", "sicher_bis": wurzel, "optionen": []}
     probs = od.wahrscheinlichkeiten(scores, par.temperatur)
     h = od.hierarchie(ctx, projekt_id, kands, probs, par)
-    opts = [_option(ctx, wb, k, p, od.gruende(ctx, par, k, f)) for k, p in h["optionen"]]
+    opts = []
+    for k, p in h["optionen"]:
+        gr = od.gruende(ctx, par, k, f)
+        extra = {}
+        gleich = [t for t in treffer if ctx.ordner[t[1]].path == k.pfad]
+        if gleich:
+            extra = {"vorgaenger": gleich[0][2], "archiv_ordner": _archiv_kind(ctx, gleich[0][1])}
+            gr = [f"Vorgänger „{gleich[0][3]}“ liegt hier"] + gr
+        opts.append(_option(ctx, wb, k, p, gr, **extra))
     return {"fall": h["fall"], "sicher_bis": {"pfad": h["sicher_pfad"], "p": round(h["sicher_p"], 4)},
             "optionen": opts}
 

@@ -28,6 +28,7 @@ class Parameter:
     gamma: float = 1.0          # ... von global bei der Rolle
     namens_gewicht: float = 1.5  # Bonus je Wort, das Dateiname und Ordnername teilen (0 = aus)
     idf_max: float = 0.7        # Obergrenze des idf-Gewichts (seltene Merkmale dürfen nicht alles überstimmen)
+    vorgaenger_bonus: float = 0.0  # Score-Bonus für Ordner mit gleichnamiger Datei; bei Strut gemessen: jeder Bonus schadet
     delta: float = 4.0          # Gewicht des Elternordner-Teilbaums (0 = aus)
     temperatur: float = 3.0     # Softmax-Temperatur der Ordner-Scores (kalibriert in der Messung)
     eindeutig_min_n: float = 3.0  # „eindeutig" aus der Statistik nur mit so viel Vorgeschichte im Ordner selbst
@@ -46,7 +47,7 @@ class Parameter:
     @classmethod
     def aus_config(cls) -> "Parameter":
         p = cls()
-        for feld in ("alpha", "beta", "gamma", "temperatur", "schwelle_sicher", "projekt_sicher"):
+        for feld in ("alpha", "beta", "gamma", "temperatur", "schwelle_sicher", "projekt_sicher", "vorgaenger_bonus"):
             v = settings.get(f"ablage.{feld}")
             if v not in (None, ""):
                 try:

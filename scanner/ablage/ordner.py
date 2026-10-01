@@ -152,7 +152,7 @@ def _aktivitaet(ctx: Kontext, projekt_id: int, par: Parameter) -> dict:
 
 
 def bewerten(ctx: Kontext, projekt_id: int, features: dict, par: Parameter,
-             kands: list[Kand] | None = None) -> tuple[list[Kand], list[float]]:
+             kands: list[Kand] | None = None, vorgaenger_ordner=frozenset()) -> tuple[list[Kand], list[float]]:
     """Log-Scores aller Kandidaten (ohne Temperatur)."""
     kands = kands if kands is not None else kandidaten(ctx, projekt_id)
     if not kands:
@@ -185,6 +185,8 @@ def bewerten(ctx: Kontext, projekt_id: int, features: dict, par: Parameter,
             s += w * math.log(mod.po(k, m))
         if k.ordner_id in namen:
             s += par.namens_gewicht * namen[k.ordner_id][0]
+        if k.ordner_id is not None and k.ordner_id in vorgaenger_ordner:
+            s += par.vorgaenger_bonus
         scores.append(s)
     return kands, scores
 

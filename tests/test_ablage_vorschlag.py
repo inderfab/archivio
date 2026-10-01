@@ -11,7 +11,7 @@ from scanner.ablage import ordner as od
 from scanner.ablage.kontext import Kontext, OrdnerInfo, Parameter, Projekt, Slot
 from scanner.ablage.normalisieren import art_bestimmen, zerlege
 from scanner.ablage.projekt import DateiInfo
-from scanner.ablage.vorschlag import ordner_vorschlag, vorschlagen
+from scanner.ablage.vorschlag import ordner_vorschlag, vorgaenger_im_ordner, vorschlagen
 
 FIXTURE = Path(__file__).parent / "fixtures" / "musterordner_strut.txt"
 JETZT = datetime(2026, 10, 1, tzinfo=timezone.utc)
@@ -172,21 +172,37 @@ def test_fachplaner_nummer_ohne_projekt_ignoriert(buero):
 
 # ── Vorgänger, Duplikat, Regel ─────────────────────────────────────────────────
 
-def test_vorgaenger_schlaegt_statistik(buero):
+def test_vorgaenger_bonus_standardmaessig_aus(buero):
     conn, ctx, ids = buero
-    # Datei mit gleichem Namen (ausser Datum) liegt in einem Ordner, in den die Statistik sie nie schicken würde
     _projekt_datei(conn, ids[211], "211_Eigenartiger Bericht Fassade.pdf", "h-sonder", "e_Grundlagen/5_Produkte")
     ctx = kontext.lade_kontext(conn, JETZT)
-    erg = vorschlagen(ctx, DateiInfo("250918_211_Eigenartiger Bericht Fassade.pdf"), Parameter())
-    assert erg["fall"] == "eindeutig"
-    assert _pfade(erg)[0].endswith("e_Grundlagen/5_Produkte")
-    assert erg["optionen"][0]["vorgaenger"].endswith("211_Eigenartiger Bericht Fassade.pdf")
-    assert any("Vorgänger" in g for g in erg["optionen"][0]["gruende"])
-    ao = erg["optionen"][0]["archiv_ordner"]
-    assert ao is None or ao.endswith("5_Produkte/z_Archiv")
-    # ohne Vorgänger-Signal entscheidet die Statistik
+    assert Parameter().vorgaenger_bonus == 0.0
+    mit = vorschlagen(ctx, DateiInfo("250918_211_Eigenartiger Bericht Fassade.pdf"), Parameter())
     ohne = vorschlagen(ctx, DateiInfo("250918_211_Eigenartiger Bericht Fassade.pdf"), Parameter(), mit_vorgaenger=False)
-    assert not _pfade(ohne)[0].endswith("e_Grundlagen/5_Produkte") or ohne["fall"] != "eindeutig"
+    assert [o["pfad"] for o in mit["optionen"]] == [o["pfad"] for o in ohne["optionen"]]      # Ranking unverändert
+
+
+def test_vorgaenger_bonus_konfigurierbar_mit_rueckfrage_an_der_option(buero):
+    conn, ctx, ids = buero
+    _projekt_datei(conn, ids[211], "211_Eigenartiger Bericht Fassade.pdf", "h-sonder", "e_Grundlagen/5_Produkte")
+    ctx = kontext.lade_kontext(conn, JETZT)
+    mit = vorschlagen(ctx, DateiInfo("250918_211_Eigenartiger Bericht Fassade.pdf"), Parameter(vorgaenger_bonus=40))
+    erste = next(o for o in mit["optionen"] if o["pfad"].endswith("e_Grundlagen/5_Produkte"))
+    assert erste["vorgaenger"].endswith("211_Eigenartiger Bericht Fassade.pdf")
+    assert any("Vorgänger" in g for g in erste["gruende"])
+    ao = erste["archiv_ordner"]
+    assert ao is None or ao.endswith("5_Produkte/z_Archiv")
+    assert mit["fall"] != "eindeutig"                      # ein Vorgänger allein macht nie „eindeutig"
+
+
+def test_rueckfrage_fuer_jeden_gewaehlten_ordner(buero):
+    conn, ctx, ids = buero
+    _projekt_datei(conn, ids[211], "211_GR_EG.pdf", "h-v1", PLAN)
+    ctx = kontext.lade_kontext(conn, JETZT)
+    treffer = vorgaenger_im_ordner(ctx, ids[211], "260101_211_GR_EG.pdf", _ordner_pfad(211, PLAN))
+    assert treffer and treffer["vorgaenger"].endswith("211_GR_EG.pdf") and treffer["dateiname"] == "211_GR_EG.pdf"
+    assert vorgaenger_im_ordner(ctx, ids[211], "260101_211_GR_EG.pdf", _ordner_pfad(211, BHS)) is None
+    assert vorgaenger_im_ordner(ctx, ids[211], "211_GR_EG_b.pdf", _ordner_pfad(211, PLAN)) is None     # anderer Name
 
 
 def test_vorgaenger_nur_bei_gleichem_namen_ausser_datum(buero):
@@ -198,15 +214,23 @@ def test_vorgaenger_nur_bei_gleichem_namen_ausser_datum(buero):
     assert not any("Vorgänger" in g for o in erg["optionen"] for g in o["gruende"])
 
 
-def test_vorgaenger_in_mehreren_ordnern_ergibt_mehrere_optionen(buero):
+def test_vorgaenger_in_mehreren_ordnern_ergibt_mehrere_optionen_mit_rueckfrage(buero):
     conn, ctx, ids = buero
     _projekt_datei(conn, ids[211], "211_GR_EG.pdf", "h-v1", PLAN)
-    _projekt_datei(conn, ids[211], "211_GR_EG.pdf", "h-v2", "51_Ausfuehrung/51d_Unternehmer/211_Baumeisterarbeiten/02_Ausfuehrung")
+    _projekt_datei(conn, ids[211], "211_GR_EG.pdf", "h-v2", BAUMEISTER)
     ctx = kontext.lade_kontext(conn, JETZT)
-    erg = vorschlagen(ctx, DateiInfo("260101_211_GR_EG.pdf"), Parameter())
-    assert erg["fall"] == "teilweise" and len(erg["optionen"]) == 2
-    assert {p.split("/", 4)[-1] for p in _pfade(erg)} == {PLAN, "51_Ausfuehrung/51d_Unternehmer/211_Baumeisterarbeiten/02_Ausfuehrung"}
-    assert erg["sicher_bis"]["pfad"].endswith("51_Ausfuehrung")
+    erg = vorschlagen(ctx, DateiInfo("260101_211_GR_EG.pdf"), Parameter(vorgaenger_bonus=40))
+    mit_rueck = [o for o in erg["optionen"] if o["vorgaenger"]]
+    assert len(mit_rueck) >= 1 and all(o["vorgaenger"].endswith("211_GR_EG.pdf") for o in mit_rueck)
+
+
+def test_vorgaenger_in_vielen_projekten_zaehlt_wenig_fuers_projekt(buero):
+    conn, ctx, ids = buero
+    for nr in (211, 212, 213):
+        _projekt_datei(conn, ids[nr], "image001.png", f"h-img{nr}", "e_Grundlagen/5_Produkte")
+    ctx = kontext.lade_kontext(conn, JETZT)
+    erg = vorschlagen(ctx, DateiInfo("image001.png"), Parameter())
+    assert erg["fall"] == "projekt_unklar"                  # gleichnamig in 3 Projekten: kein Projekt-Signal
 
 
 def _projekt_datei(conn, pid, filename, h, rel):
