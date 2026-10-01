@@ -22,6 +22,7 @@ from pathlib import Path
 from config import settings
 from db import connection, queries
 from scanner import hasher, extractors
+from scanner.ablage.erfassung import OrdnerSammler, schreibe_ordner
 
 log = logging.getLogger(__name__)
 
@@ -457,8 +458,19 @@ def scan_project(project_id: int, root: Path,
 
     found_any = False
     scanned_paths: set[str] = set()
+    # Ordnerstruktur fürs Ablage-Modell: nur im Speicher sammeln, Schreiben einmal am Ende
+    sammler = OrdnerSammler(str(root), settings.get("ablage.archiv_labels"))
     try:
         for dirpath, dirnames, filenames in os.walk(root):
+            for d in dirnames:
+                if d.startswith('.') or Path(d).suffix.lower() in _FAKE_DIR_SUFFIXES:
+                    continue
+                _dp = str(Path(dirpath) / d)
+                sammler.ordner_gesehen(
+                    _dp, d,
+                    ausgeschlossen=_is_excluded_name(d, excluded_exact, excluded_patterns)
+                                   or _dp in ignored_paths,
+                )
             dirnames[:] = [
                 d for d in dirnames
                 if not d.startswith('.')
@@ -472,6 +484,8 @@ def scan_project(project_id: int, root: Path,
             dir_processable = [f for f in filenames if not _is_junk_file(f)]
 
             global_total += len(dir_processable)
+            if dir_processable:
+                sammler.dateien_gesehen(dirpath, len(dir_processable))
 
             if progress is not None:
                 progress["current_folder"] = Path(dirpath).name
@@ -519,6 +533,7 @@ def scan_project(project_id: int, root: Path,
                 try:
                     _st      = path.stat()
                     _mtime_q = _iso(_st.st_mtime)
+                    sammler.mtime_gesehen(dirpath, _mtime_q)
                     _hit = skip_conn.execute(
                         "SELECT 1 FROM document_paths dp "
                         "JOIN documents d ON d.id = dp.document_id "
@@ -672,6 +687,15 @@ def scan_project(project_id: int, root: Path,
             progress["removed"] = removed
     except Exception as exc:
         log.warning("Aufräumen gelöschter Dateien fehlgeschlagen: %s", exc)
+
+    try:
+        _ao_conn = connection.get_connection()
+        try:
+            schreibe_ordner(_ao_conn, project_id, sammler)
+        finally:
+            _ao_conn.close()
+    except Exception as exc:
+        log.warning("Ordnerstruktur speichern fehlgeschlagen: %s", exc)
 
     try:
         from scanner.norms import load_config

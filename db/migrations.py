@@ -43,6 +43,8 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "027_embeddings_float16", _m027)
     _apply(conn, "028_chunks_ohne_created_at", _m028)
     _apply(conn, "029_chunks_ohne_embedding", _m029)
+    _apply(conn, "030_ablage_ordner", _m030)
+    _apply(conn, "031_ablage_slot", _m031)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -791,3 +793,51 @@ def _m029(conn: sqlite3.Connection):
         log.info("document_chunks.embedding entfernt -- VACUUM beim naechsten Start")
     except Exception as exc:
         log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
+
+
+def _m030(conn: sqlite3.Connection):
+    """ablage_ordner: jeder Ordner, den der Scan sieht -- auch leere und ausgeschlossene.
+
+    Grundlage des Ablage-Vorschlags (planung/datei-drop-ablage.md). Die Tabelle fuellt
+    sich beim naechsten normalen Scan eines Projekts von selbst, einen Backfill gibt es
+    nicht. slot_id verweist auf ablage_slot (Migration 031, wird dort befuellt).
+    """
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_ordner (
+            id            INTEGER PRIMARY KEY AUTOINCREMENT,
+            project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+            path          TEXT    NOT NULL UNIQUE,
+            parent_id     INTEGER REFERENCES ablage_ordner(id) ON DELETE CASCADE,
+            rel_path      TEXT    NOT NULL,
+            depth         INTEGER NOT NULL,
+            name          TEXT    NOT NULL,
+            label         TEXT    NOT NULL,
+            praefix       TEXT    NOT NULL DEFAULT '',
+            codes         TEXT    NOT NULL DEFAULT '[]',
+            slot_id       INTEGER REFERENCES ablage_slot(id),
+            art           TEXT    NOT NULL DEFAULT 'normal'
+                              CHECK (art IN ('normal','archiv','trenner','ausgeschlossen')),
+            datei_anzahl  INTEGER NOT NULL DEFAULT 0,
+            letzte_aenderung TEXT,
+            zuletzt_gesehen  TEXT NOT NULL
+        )
+    """)
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ablage_ordner_project ON ablage_ordner(project_id)")
+    conn.execute("CREATE INDEX IF NOT EXISTS idx_ablage_ordner_slot ON ablage_ordner(slot_id)")
+    conn.commit()
+
+
+def _m031(conn: sqlite3.Connection):
+    """ablage_slot: die bueroweite Vorlage (aus Musterordner importiert und/oder aus den
+    Projekten hergeleitet). Schluessel ist der Label-Pfad, nie Praefix oder BKP-Code."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_slot (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            label_pfad  TEXT NOT NULL UNIQUE,
+            rolle       TEXT NOT NULL,
+            anzeige     TEXT NOT NULL,
+            abdeckung   REAL NOT NULL DEFAULT 0,
+            aus_vorlage INTEGER NOT NULL DEFAULT 0
+        )
+    """)
+    conn.commit()

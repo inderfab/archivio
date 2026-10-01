@@ -110,6 +110,39 @@ CREATE TABLE IF NOT EXISTS ignored_paths (
 
 CREATE INDEX IF NOT EXISTS idx_ignored_paths_project ON ignored_paths(project_id);
 
+-- Ablage-Vorschlag (planung/datei-drop-ablage.md §4)
+-- Slot = büroweite Vorlage-Rolle (Label-Pfad), Ordner = jeder vom Scan gesehene Ordner
+CREATE TABLE IF NOT EXISTS ablage_slot (
+    id          INTEGER PRIMARY KEY AUTOINCREMENT,
+    label_pfad  TEXT NOT NULL UNIQUE,
+    rolle       TEXT NOT NULL,
+    anzeige     TEXT NOT NULL,
+    abdeckung   REAL NOT NULL DEFAULT 0,
+    aus_vorlage INTEGER NOT NULL DEFAULT 0
+);
+
+-- ablage_ordner: AUCH leere und ausgeschlossene Ordner; Label ohne Ordnungspräfix
+CREATE TABLE IF NOT EXISTS ablage_ordner (
+    id            INTEGER PRIMARY KEY AUTOINCREMENT,
+    project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
+    path          TEXT    NOT NULL UNIQUE,
+    parent_id     INTEGER REFERENCES ablage_ordner(id) ON DELETE CASCADE,
+    rel_path      TEXT    NOT NULL,
+    depth         INTEGER NOT NULL,
+    name          TEXT    NOT NULL,
+    label         TEXT    NOT NULL,
+    praefix       TEXT    NOT NULL DEFAULT '',
+    codes         TEXT    NOT NULL DEFAULT '[]',
+    slot_id       INTEGER REFERENCES ablage_slot(id),
+    art           TEXT    NOT NULL DEFAULT 'normal'
+                      CHECK (art IN ('normal','archiv','trenner','ausgeschlossen')),
+    datei_anzahl  INTEGER NOT NULL DEFAULT 0,
+    letzte_aenderung TEXT,
+    zuletzt_gesehen  TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_ablage_ordner_project ON ablage_ordner(project_id);
+CREATE INDEX IF NOT EXISTS idx_ablage_ordner_slot ON ablage_ordner(slot_id);
+
 -- Migrations-Tabelle
 CREATE TABLE IF NOT EXISTS _migrations (
     id         TEXT PRIMARY KEY,
