@@ -73,6 +73,13 @@
       {% endif %}
     </div>
 
+    <div class="ad-suche-zeile">
+      <input type="search" class="ad-suche" data-projekt="{{ d.projekt.id }}" autocomplete="off" spellcheck="false"
+             placeholder="Ordner in diesem Projekt suchen … (zum Beispiel „fassade“ oder „bauing“)"
+             aria-label="Ordner im Projekt suchen">
+      <div class="ad-suchtreffer" role="listbox" hidden></div>
+    </div>
+
     {% if d.optionen %}
     <div class="ad-optionen" role="radiogroup">
       {% for o in d.optionen %}
@@ -90,6 +97,30 @@
         {% if o.gruende %}<ul class="ad-gruende">{% for g in o.gruende %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
         {% if o.neu_anlegen %}<div class="ad-neu-hinweis">Ordner wird angelegt</div>{% endif %}
       </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+
+    {% for n in d.neue_ordner %}
+    <div class="ad-neukarte" tabindex="0" data-eltern="{{ n.eltern }}" data-praefix="{{ n.praefix }}"
+         data-trenner="{{ n.trenner }}" onclick="waehleNeuerOrdner({{ d.idx }}, this)">
+      <div class="ad-opt-kopf">
+        <span class="ad-nr">+</span><span class="ad-opt-label">Neuer Ordner</span>
+        <span class="ad-badge">{{ n.format }}</span>
+      </div>
+      <div class="ad-opt-pfad">{{ n.rel_kurz }} › <code>{{ n.praefix }}{{ n.trenner }}</code><input type="text"
+           class="ad-neu-thema" value="{{ n.thema }}" placeholder="Thema" spellcheck="false" aria-label="Thema des neuen Ordners"
+           onclick="event.stopPropagation(); waehleNeuerOrdner({{ d.idx }}, this.closest('.ad-neukarte'))"
+           oninput="neuesThema({{ d.idx }}, this.closest('.ad-neukarte'))"></div>
+      <ul class="ad-gruende"><li>Die Unterordner sind meist datiert (zum Beispiel „{{ n.beispiel }}“), das Format kommt von dort</li></ul>
+    </div>
+    {% endfor %}
+
+    {% if d.zuletzt %}
+    <div class="ad-zuletzt"><span class="ad-leise">Zuletzt verwendet:</span>
+      {% for z in d.zuletzt %}
+      <button type="button" class="ad-chip" data-pfad="{{ z.pfad }}" title="{{ z.pfad }}"
+              onclick="waehleZuletzt({{ d.idx }}, this)">{{ z.rel }}</button>
       {% endfor %}
     </div>
     {% endif %}

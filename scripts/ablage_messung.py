@@ -427,6 +427,8 @@ def auswerten_ordner(ctx, zeilen, par, mit_vorgaenger):
             rang = [k.pfad for k, _ in h["optionen"]]
             erg = {"fall": h["fall"], "sicher_bis": {"pfad": h["sicher_pfad"], "p": h["sicher_p"]},
                    "optionen": [{"pfad": k.pfad, "p": p} for k, p in h["optionen"]]}
+            erg["neue"] = od.neue_ordner_vorschlaege(ctx, [k.ordner_id for k, _ in h["optionen"] if k.ordner_id is not None],
+                                                     z["f"]["filename"])
         ms = (time.perf_counter() - t0) * 1000
         sb = erg["sicher_bis"]["pfad"] if erg.get("sicher_bis") else None
         wurzel = ctx.projekte[pid].path.rstrip("/")
@@ -434,7 +436,14 @@ def auswerten_ordner(ctx, zeilen, par, mit_vorgaenger):
         sicher_ok = bool(sb) and (z["wahr"] == sb or z["wahr"].startswith(sb.rstrip("/") + "/"))
         im_zweig = [bool(r) and (z["wahr"] == r or z["wahr"].startswith(r.rstrip("/") + "/")) for r in rang]
         tiefe_o1 = len([t for t in rang[0][len(wurzel):].split("/") if t]) if rang else 0
-        out.append({"z": z, "tiefe_roh": tiefe, "gruppe": z["gruppe"], "ausser_wertung": False, "ziel_neu": z["ziel_neu"], "fall": erg["fall"],
+        # Nachtrag 1 §3.3: „Neuer Ordner" — Treffer, wenn das wahre Ziel ein neuer datierter Ordner unter dem Zweig ist
+        neue = erg.get("neue") or []
+        voll = f"{wurzel}/{z['f']['ordner']}" if z["f"]["ordner"] else ""
+        fehlt = voll[len(z["wahr"]) + 1:].split("/")[0] if (z["ziel_neu"] and voll.startswith(z["wahr"] + "/")) else ""
+        neu_ziel_datiert = bool(fehlt) and bool(od._DATIERT.match(fehlt))
+        neu_treffer = neu_ziel_datiert and any(n["eltern"] == z["wahr"] for n in neue)
+        out.append({"z": z, "neu_vorschlag": bool(neue), "neu_ziel_datiert": neu_ziel_datiert, "neu_treffer": neu_treffer,
+                    "tiefe_roh": tiefe, "gruppe": z["gruppe"], "ausser_wertung": False, "ziel_neu": z["ziel_neu"], "fall": erg["fall"],
                     "top1": bool(rang) and rang[0] == z["wahr"], "top3": z["wahr"] in rang[:3],
                     "sicher_ok": sicher_ok, "tiefe": tiefe if sicher_ok else 0,
                     "zweig1": bool(im_zweig) and im_zweig[0], "zweig3": any(im_zweig[:3]), "tiefe_o1": tiefe_o1,
@@ -457,6 +466,10 @@ def kennzahlen(zs):
             "eindeutig": len(eind), "sicher_falsch": sum(not z["top1"] for z in eind),
             "sicher_ok": sum(z["sicher_ok"] for z in zs),
             "zweig1": sum(z["zweig1"] for z in zs), "zweig3": sum(z["zweig3"] for z in zs),
+            "neu_vorschlag": sum(z.get("neu_vorschlag", False) for z in zs),
+            "neu_ziel_datiert": sum(z.get("neu_ziel_datiert", False) for z in zs),
+            "neu_treffer": sum(z.get("neu_treffer", False) for z in zs),
+            "zweig_oder_neu": sum(bool(z["zweig3"] or z.get("neu_treffer")) for z in zs),
             "tiefe_o1": [z["tiefe_o1"] for z in zs if z["zweig1"]],
             "tiefe": [z["tiefe"] for z in zs], "nutzen": sum(z["nutzen"] for z in zs) / n if n else 0.0,
             "faelle": Counter(z["fall"] for z in zs), "ms": [z["ms"] for z in zs]}
@@ -668,6 +681,10 @@ def bericht_menge(w, titel, ctx, rows, par, ausfuehrlich=False):
         w(f"Ordner (bei bekanntem Projekt, n={k['n']}): Top-1 {pct(k['top1'], k['n'])} · Top-3 {pct(k['top3'], k['n'])} · "
           f"Zweig in Option 1 {pct(k['zweig1'], k['n'])} · Zweig in einer der 3 Optionen {pct(k['zweig3'], k['n'])} · "
           f"`sicher_bis` korrekt {pct(k['sicher_ok'], k['n'])}\n")
+        w(f"**Neuer datierter Ordner** (separat ausgewiesen): Vorschlag „Neuer Ordner“ erscheint in {pct(k['neu_vorschlag'], k['n'])} der Fälle · "
+          f"das wahre Ziel ist ein neuer datierter Ordner in {pct(k['neu_ziel_datiert'], k['n'])} (Obergrenze) · "
+          f"**Treffer** (neuer datierter Ordner unter dem vorgeschlagenen Zweig) {pct(k['neu_treffer'], k['n'])} · "
+          f"Zweig in den Optionen **oder** Treffer bei „Neuer Ordner“ {pct(k['zweig_oder_neu'], k['n'])}\n")
     w("**Stufe von `sicher_bis`**\n")
     w(tiefe_tabelle(res, par) + "\n")
     gewaehlt = None

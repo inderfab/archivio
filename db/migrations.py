@@ -48,6 +48,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "032_ablage_stats", _m032)
     _apply(conn, "033_ablage_vorgang", _m033)
     _apply(conn, "034_ablage_ordner_ausgeschlossen", _m034)
+    _apply(conn, "035_ablage_log_quelle", _m035)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -908,3 +909,15 @@ def _m034(conn: sqlite3.Connection):
     conn.commit()
     if zeilen:
         log.info("%d Ordner auf die Spalte ausgeschlossen umgestellt", len(zeilen))
+
+
+def _m035(conn: sqlite3.Connection):
+    """ablage_log: Kennzeichen, WIE der Nutzer das Ziel gewaehlt hat (option | zuletzt | suche | browser |
+    neuer_ordner) und die Zeit von Seitenaufruf bis Ablegen. Daraus wertet Fabio nach 2-3 Wochen aus, ob die Funktion
+    im Alltag schneller ist als selbst suchen (Nachtrag 1 §5)."""
+    spalten = [r[1] for r in conn.execute("PRAGMA table_info(ablage_log)")]
+    if "quelle" not in spalten:
+        conn.execute("ALTER TABLE ablage_log ADD COLUMN quelle TEXT")
+    if "seite_ms" not in spalten:
+        conn.execute("ALTER TABLE ablage_log ADD COLUMN seite_ms INTEGER")
+    conn.commit()

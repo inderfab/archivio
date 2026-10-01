@@ -32,6 +32,26 @@
   .ad-opt-pfad { font-size: 12px; color: var(--text-2); margin: 4px 0 0 28px; word-break: break-all; }
   .ad-gruende { margin: 6px 0 0 28px; padding-left: 16px; font-size: 12px; color: var(--text-2); }
   .ad-neu-hinweis { margin: 6px 0 0 28px; font-size: 12px; color: #92400e; }
+  .ad-suche-zeile { position: relative; margin: 0 0 12px; }
+  .ad-suche { width: 100%; max-width: 560px; padding: 8px 10px; font-size: 13px; font-family: inherit;
+              border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  .ad-suchtreffer { position: absolute; z-index: 20; left: 0; right: 0; max-width: 700px; max-height: 280px; overflow: auto;
+                    background: var(--bg); border: 1px solid var(--border); border-radius: var(--radius); margin-top: 4px;
+                    box-shadow: 0 6px 18px rgba(0,0,0,.12); }
+  .ad-treffer { padding: 7px 10px; font-size: 13px; cursor: pointer; display: flex; gap: 8px; justify-content: space-between; }
+  .ad-treffer.aktiv, .ad-treffer:hover { background: #eff6ff; }
+  .ad-treffer .pfad { color: var(--text-3); font-size: 12px; word-break: break-all; text-align: right; }
+  .ad-leer { padding: 9px 10px; font-size: 12px; color: var(--text-3); }
+  .ad-neukarte { border: 1px dashed var(--border); border-radius: var(--radius); padding: 10px 12px; margin-bottom: 10px; cursor: pointer; }
+  .ad-neukarte:hover { background: var(--bg-2); }
+  .ad-neukarte.gewaehlt { border: 1px solid #1d4ed8; background: #eff6ff; box-shadow: 0 0 0 1px #1d4ed8 inset; }
+  .ad-neu-thema { margin-left: 2px; padding: 3px 6px; font-size: 12px; font-family: inherit; min-width: 220px;
+                  border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  .ad-zuletzt { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; margin: 0 0 12px; }
+  .ad-chip { font-size: 12px; padding: 3px 9px; border: 1px solid var(--border); border-radius: 999px; background: var(--bg);
+             cursor: pointer; font-family: inherit; color: var(--text-2); max-width: 420px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .ad-chip:hover { background: var(--bg-2); }
+  .ad-chip.gewaehlt { border-color: #1d4ed8; background: #eff6ff; color: #1d4ed8; }
   .ad-ziel { font-size: 12px; color: var(--text-2); margin: 6px 0 10px; word-break: break-all; }
   .ad-frage { border: 1px solid #fde68a; background: #fffbeb; border-radius: var(--radius); padding: 10px 12px; margin: 8px 0 12px; font-size: 13px; }
   .ad-frage label { display: block; margin-top: 6px; cursor: pointer; }
@@ -66,7 +86,7 @@
       <button type="button" class="btn btn-primary" id="ablegen-knopf" onclick="alleAblegen()" disabled>Ablegen</button>
       {% if dateien|length > 1 %}<button type="button" class="btn" onclick="alleWieErste()">Alle wie erste</button>{% endif %}
       <button type="button" class="btn" onclick="alleAbbrechen()">Abbrechen</button>
-      <span class="tipp">1 / 2 / 3 wählt eine Option · Enter legt ab · Esc bricht ab</span>
+      <span class="tipp">1 / 2 / 3 wählt eine Option · N neuer Ordner · Enter legt ab · Esc bricht ab</span>
     </div>
   {% endif %}
 </div>
@@ -81,6 +101,12 @@
   function offen() { return sektionen().filter(function (s) { return s.dataset.fertig !== '1'; }); }
 
   // ── Ziel wählen ────────────────────────────────────────────────────────────
+  function quelleSetzen(s, quelle, index) {
+    s.dataset.quelle = quelle; s.dataset.optionIndex = (index === undefined || index === null) ? '' : String(index);
+    s.querySelectorAll('.ad-opt, .ad-neukarte').forEach(function (o) { o.classList.remove('gewaehlt'); o.setAttribute && o.setAttribute('aria-checked', 'false'); });
+    s.querySelectorAll('.ad-chip').forEach(function (c) { c.classList.remove('gewaehlt'); });
+  }
+
   function setzeZiel(s, pfad, neu) {
     s.dataset.dest = pfad || '';
     s.dataset.neu = neu ? '1' : '';
@@ -95,6 +121,7 @@
   function waehleOption(idx, k) {
     var s = sek(idx); aktiv = idx;
     var opts = s.querySelectorAll('.ad-opt');
+    quelleSetzen(s, 'option', k);
     opts.forEach(function (o, i) {
       o.classList.toggle('gewaehlt', i === k);
       o.setAttribute('aria-checked', i === k ? 'true' : 'false');
@@ -106,11 +133,94 @@
   // Aufruf aus _dashboard_browse.html (Inline-onclick): hier = Ordner von Hand gewählt (Rang 0)
   function selectEntry(el, idx, path) {
     var s = sek(idx); aktiv = idx;
-    s.querySelectorAll('.ad-opt').forEach(function (o) { o.classList.remove('gewaehlt'); o.setAttribute('aria-checked', 'false'); });
+    quelleSetzen(s, 'browser', null);
     document.querySelectorAll('#datei-' + idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
     el.classList.add('selected');
     setzeZiel(s, path, false);
   }
+  // ── Zuletzt verwendet, Suche, neuer datierter Ordner ───────────────────────
+  function waehleZuletzt(idx, btn) {
+    var s = sek(idx); aktiv = idx;
+    quelleSetzen(s, 'zuletzt', null);
+    btn.classList.add('gewaehlt');
+    document.querySelectorAll('#datei-' + idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
+    setzeZiel(s, btn.dataset.pfad, false);
+  }
+
+  function neuerOrdnerPfad(karte) {
+    var thema = karte.querySelector('.ad-neu-thema').value.trim().replace(/[\/]/g, '-');
+    return thema ? karte.dataset.eltern + '/' + karte.dataset.praefix + karte.dataset.trenner + thema : '';
+  }
+  function waehleNeuerOrdner(idx, karte) {
+    var s = sek(idx); aktiv = idx;
+    quelleSetzen(s, 'neuer_ordner', null);
+    karte.classList.add('gewaehlt');
+    document.querySelectorAll('#datei-' + idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
+    setzeZiel(s, neuerOrdnerPfad(karte), true);
+    if (!neuerOrdnerPfad(karte)) { var z = s.querySelector('.ad-dest'); if (z) z.textContent = 'bitte ein Thema für den neuen Ordner eintragen'; }
+  }
+  function neuesThema(idx, karte) {
+    var s = sek(idx);
+    if (!karte.classList.contains('gewaehlt')) return;
+    waehleNeuerOrdner(idx, karte);
+  }
+
+  var suchTimer = {};
+  function sucheEinrichten(s) {
+    var feld = s.querySelector('.ad-suche'); if (!feld) return;
+    var liste = s.querySelector('.ad-suchtreffer'), aktivIdx = -1;
+    function zeichne(treffer) {
+      liste.textContent = ''; aktivIdx = -1;
+      if (!treffer.length) { var l = document.createElement('div'); l.className = 'ad-leer'; l.textContent = 'Keine Ordner gefunden'; liste.appendChild(l); }
+      treffer.forEach(function (t, i) {
+        var z = document.createElement('div'); z.className = 'ad-treffer'; z.setAttribute('role', 'option');
+        var n = document.createElement('span'); n.textContent = t.name;
+        var p = document.createElement('span'); p.className = 'pfad'; p.textContent = t.rel.replace(/\//g, ' › ');
+        z.appendChild(n); z.appendChild(p);
+        z.onmousedown = function (e) { e.preventDefault(); waehle(t); };
+        liste.appendChild(z);
+      });
+      liste.hidden = false;
+    }
+    function markiere(i) {
+      var z = liste.querySelectorAll('.ad-treffer'); if (!z.length) return;
+      aktivIdx = (i + z.length) % z.length;
+      z.forEach(function (el, k) { el.classList.toggle('aktiv', k === aktivIdx); });
+      z[aktivIdx].scrollIntoView({ block: 'nearest' });
+    }
+    function waehle(t) {
+      quelleSetzen(s, 'suche', null);
+      document.querySelectorAll('#datei-' + s.dataset.idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
+      setzeZiel(s, t.pfad, false);
+      feld.value = ''; liste.hidden = true; liste.textContent = '';
+    }
+    liste._treffer = [];
+    feld.addEventListener('input', function () {
+      clearTimeout(suchTimer[s.dataset.idx]);
+      var q = feld.value.trim();
+      if (!q) { liste.hidden = true; return; }
+      suchTimer[s.dataset.idx] = setTimeout(async function () {
+        try {
+          var r = await fetch('/api/ablage/' + s.dataset.token + '/suche?projekt=' + feld.dataset.projekt + '&q=' + encodeURIComponent(q));
+          var j = await r.json();
+          if (feld.value.trim() !== q) return;                         // inzwischen weitergetippt
+          liste._treffer = j.treffer || []; zeichne(liste._treffer);
+        } catch (e) { liste.hidden = true; }
+      }, 120);
+    });
+    feld.addEventListener('keydown', function (ev) {
+      var offen = !liste.hidden;
+      if (ev.key === 'ArrowDown' && offen) { ev.preventDefault(); markiere(aktivIdx + 1); ev.stopPropagation(); }
+      else if (ev.key === 'ArrowUp' && offen) { ev.preventDefault(); markiere(aktivIdx - 1); ev.stopPropagation(); }
+      else if (ev.key === 'Enter' && offen && liste._treffer.length) {
+        ev.preventDefault(); ev.stopPropagation(); waehle(liste._treffer[aktivIdx >= 0 ? aktivIdx : 0]);
+      } else if (ev.key === 'Escape' && (offen || feld.value)) {
+        ev.stopPropagation(); feld.value = ''; liste.hidden = true;
+      }
+    });
+    feld.addEventListener('blur', function () { setTimeout(function () { liste.hidden = true; }, 150); });
+  }
+
   function clearFromDepth(idx, depth) {
     document.querySelectorAll('#browse-cols-' + idx + ' [data-depth]').forEach(function (el) {
       if (parseInt(el.dataset.depth) >= depth) el.remove();
@@ -177,7 +287,9 @@
     var token = s.dataset.token;
     zeige(s, '', 'Wird abgelegt…');
     var body = { dest: s.dataset.dest, dateiname: s.querySelector('.ad-name').value.trim(),
-                 kopie: s.querySelector('.ad-kopie-box').checked, vorgaenger_modus: modus(s) || 'behalten' };
+                 kopie: s.querySelector('.ad-kopie-box').checked, vorgaenger_modus: modus(s) || 'behalten',
+                 quelle: s.dataset.quelle || 'browser', seite_ms: Math.round(performance.now()) };
+    if (s.dataset.optionIndex !== undefined && s.dataset.optionIndex !== '') body.option_index = parseInt(s.dataset.optionIndex);
     var r = await fetch('/api/ablage/' + token + '/bestaetigen', { method: 'POST',
         headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
     var j = await json(r);
@@ -273,6 +385,8 @@
   }
 
   function sektionStarten(s) {
+    sucheEinrichten(s);
+    if (s.dataset.dest && s.querySelector('.ad-opt')) { s.dataset.quelle = 'option'; s.dataset.optionIndex = '0'; }
     s.querySelectorAll('.ad-name').forEach(function (n) { n.addEventListener('input', function () { pruefeGleichnamig(s); }); });
     var details = s.querySelector('.ad-browser');
     if (details) {
@@ -298,6 +412,12 @@
     if (ev.key === 'Enter' && !(ev.target && ev.target.tagName === 'BUTTON')) {
       var knopf = document.getElementById('ablegen-knopf');
       if (knopf && !knopf.disabled) { ev.preventDefault(); alleAblegen(); }
+      return;
+    }
+    if (!tippt && ev.key === 'n') {
+      var s2 = sek(aktiv) && sek(aktiv).dataset.fertig !== '1' ? sek(aktiv) : offen()[0];
+      var k2 = s2 && s2.querySelector('.ad-neukarte');
+      if (k2) { waehleNeuerOrdner(parseInt(s2.dataset.idx), k2); var t2 = k2.querySelector('.ad-neu-thema'); if (t2) t2.focus(); ev.preventDefault(); }
       return;
     }
     if (!tippt && /^[1-3]$/.test(ev.key)) {

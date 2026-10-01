@@ -109,8 +109,10 @@ def ordner_vorschlag(ctx: Kontext, datei: DateiInfo, projekt_id: int, par: Param
             extra = {"vorgaenger": gleich[0][2], "archiv_ordner": _archiv_kind(ctx, gleich[0][1])}
             gr = [f"Vorgänger „{gleich[0][3]}“ liegt hier"] + gr
         opts.append(_option(ctx, wb, k, p, gr, **extra))
+    neue = od.neue_ordner_vorschlaege(ctx, [k.ordner_id for k, _ in h["optionen"] if k.ordner_id is not None],
+                                      datei.dateiname)
     return {"fall": h["fall"], "sicher_bis": {"pfad": h["sicher_pfad"], "p": round(h["sicher_p"], 4)},
-            "optionen": opts}
+            "optionen": opts, "neue_ordner": neue}
 
 
 def vorschlagen(ctx: Kontext, datei: DateiInfo, par: Parameter | None = None, projekt_id: int | None = None,

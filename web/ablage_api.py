@@ -98,6 +98,19 @@ async def abgelegt(token: str, request: Request):
     return {"ok": True} if ok else _fehler(409, fehler)
 
 
+@router.get("/{token}/suche")
+async def suche(token: str, projekt: int, q: str = ""):
+    """Ordnersuche im Projekt (Tippen filtert). Nur aus der Datenbank, nie übers NAS."""
+    from scanner.ablage import suche as _suche
+
+    def _tun(conn):
+        if vorgang.holen(conn, token) is None:
+            return 404, {"ok": False, "error": "Unbekannter Vorgang"}
+        return 200, {"ok": True, "treffer": _suche.suche_ordner(conn, projekt, q)}
+    code, body = await asyncio.to_thread(_arbeit, _tun)
+    return JSONResponse(body, status_code=code)
+
+
 @router.get("/{token}/pruefen")
 async def pruefen(token: str, dest: str, dateiname: str):
     """Liegt im gewählten Ordner schon eine Datei mit diesem Namen? Dann stellt die Oberfläche die Rückfrage

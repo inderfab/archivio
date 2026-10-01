@@ -37,7 +37,7 @@ def _teile(pfad: str, basis: str) -> list[str]:
     return [t for t in pfad[len(basis):].split("/") if t] if pfad.startswith(basis) else []
 
 
-def _ansicht(idx: int, v: dict) -> dict:
+def _ansicht(idx: int, v: dict, conn=None) -> dict:
     """Alles, was das Template für eine Datei braucht (kein Rechnen im Template)."""
     vs = v["vorschlag"] or {}
     projekte = vs.get("projekte") or []
@@ -47,19 +47,24 @@ def _ansicht(idx: int, v: dict) -> dict:
                "lokal": bool(v.get("lokal_src")), "name_vorschlag": vs.get("dateiname_vorschlag"),
                "projekte": projekte, "optionen": [], "krumen": [], "sicher_pfad": "", "start_pfad": "",
                "projekt": None, "duplikate": vs.get("duplikate") or [],
-               "angeboten": vs.get("projekte_angeboten") or [], "angeglichen": bool(vs.get("angeglichen"))}
+               "angeboten": vs.get("projekte_angeboten") or [], "angeglichen": bool(vs.get("angeglichen")),
+               "zuletzt": [], "neue_ordner": []}
     d["vorbereitung"] = fall == "vorbereitung"
     if fall in ("duplikat", "projekt_unklar", "vorbereitung") or not top:
         base = settings.get("scanner.base_folders", []) or []
         d["start_pfad"] = base[0]["path"] if base else ""
         return d
-    conn = connection.get_connection()
+    eigene = conn is None
+    conn = conn or connection.get_connection()
     try:
         row = conn.execute("SELECT id, name, path FROM projects WHERE id = ?", (top["id"],)).fetchone()
+        zuletzt = vorgang.zuletzt_verwendet(conn, v.get("host"), row["path"]) if row else []
     finally:
-        conn.close()
+        if eigene:
+            conn.close()
     if not row:
         return d
+    d["zuletzt"] = zuletzt
     label, klasse = _badge(top["p"])
     d["projekt"] = {"id": row["id"], "name": row["name"], "path": row["path"], "p": top["p"], "badge": label,
                     "klasse": klasse, "gruende": top.get("gruende") or []}
@@ -67,6 +72,8 @@ def _ansicht(idx: int, v: dict) -> dict:
     d["sicher_pfad"] = sicher
     d["start_pfad"] = row["path"]
     d["krumen"] = [row["name"]] + _teile(sicher, row["path"])
+    d["neue_ordner"] = [{**n, "rel_kurz": " › ".join(_teile(n["eltern"], row["path"])) or row["name"]}
+                        for n in (vs.get("neue_ordner") or [])]
     for o in vs.get("optionen") or []:
         rel = _teile(o["pfad"], sicher)
         lab, kl = _badge(o["p"])

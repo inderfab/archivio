@@ -276,7 +276,7 @@ def test_hierarchie_teilweise():
     ctx = _mini()
     kands = od.kandidaten(ctx, 1)
     p = {1: 0.02, 2: 0.46, 3: 0.44, 4: 0.08}
-    h = od.hierarchie(ctx, 1, kands, [p[k.key] for k in kands], Parameter())
+    h = od.hierarchie(ctx, 1, kands, [p[k.key] for k in kands], Parameter(schwelle_sicher=0.8))
     assert h["fall"] == "teilweise" and h["sicher_pfad"] == "/p/A"
     assert abs(h["sicher_p"] - 0.92) < 1e-9
     assert [k.key for k, _ in h["optionen"]][:2] == [2, 3]
@@ -286,13 +286,13 @@ def test_hierarchie_eindeutig_und_unklar():
     ctx = _mini()
     ctx.stats[("ordner", 2)] = {"_n": 5.0}            # „eindeutig" braucht Vorgeschichte im Ordner selbst
     kands = od.kandidaten(ctx, 1)
-    e = od.hierarchie(ctx, 1, kands, [{1: 0.0, 2: 0.9, 3: 0.05, 4: 0.05}[k.key] for k in kands], Parameter())
+    e = od.hierarchie(ctx, 1, kands, [{1: 0.0, 2: 0.9, 3: 0.05, 4: 0.05}[k.key] for k in kands], Parameter(schwelle_sicher=0.8))
     assert e["fall"] == "eindeutig" and e["sicher_pfad"] == "/p/A/x"
     ctx2 = _mini()                                     # ohne Vorgeschichte: nur „sicher bis", nie „eindeutig"
     kands2 = od.kandidaten(ctx2, 1)
-    e2 = od.hierarchie(ctx2, 1, kands2, [{1: 0.0, 2: 0.9, 3: 0.05, 4: 0.05}[k.key] for k in kands2], Parameter())
+    e2 = od.hierarchie(ctx2, 1, kands2, [{1: 0.0, 2: 0.9, 3: 0.05, 4: 0.05}[k.key] for k in kands2], Parameter(schwelle_sicher=0.8))
     assert e2["fall"] == "teilweise" and e2["sicher_pfad"] == "/p/A/x"
-    u = od.hierarchie(ctx, 1, kands, [{1: 0.05, 2: 0.3, 3: 0.2, 4: 0.45}[k.key] for k in kands], Parameter())
+    u = od.hierarchie(ctx, 1, kands, [{1: 0.05, 2: 0.3, 3: 0.2, 4: 0.45}[k.key] for k in kands], Parameter(schwelle_sicher=0.8))
     assert u["fall"] == "ordner_unklar" and u["sicher_pfad"] == "/p"
 
 
@@ -305,7 +305,9 @@ def test_teilweise_im_synthetischen_buero(buero):
     sicher = erg["sicher_bis"]["pfad"]
     assert all(p.startswith(sicher) for p in _pfade(erg))
     if erg["fall"] != "eindeutig":
-        assert {_ordner_pfad(211, BHS), _ordner_pfad(211, FPS)} & set(_pfade(erg))
+        # Optionen sind Zweige: BHS/FPS selbst oder ihr gemeinsamer Elternordner „Protokolle"
+        ziele = {_ordner_pfad(211, BHS), _ordner_pfad(211, FPS)}
+        assert any(z == p or z.startswith(p.rstrip("/") + "/") for z in ziele for p in _pfade(erg))
 
 
 def test_absicht_optionen_fuer_plan_pdf(buero):

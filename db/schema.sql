@@ -163,7 +163,8 @@ CREATE TABLE IF NOT EXISTS ablage_vorgang (
 CREATE TABLE IF NOT EXISTS ablage_log (
     id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, host TEXT,
     dateiname TEXT, endung TEXT, merkmale TEXT, vorschlag TEXT,
-    gewaehlt_pfad TEXT, gewaehlt_rang INTEGER, projekt_richtig INTEGER, dauer_ms INTEGER
+    gewaehlt_pfad TEXT, gewaehlt_rang INTEGER, projekt_richtig INTEGER, dauer_ms INTEGER,
+    quelle TEXT, seite_ms INTEGER      -- option | zuletzt | suche | browser | neuer_ordner; Seitenaufruf → Ablegen
 );
 CREATE TABLE IF NOT EXISTS ablage_regel (
     id INTEGER PRIMARY KEY AUTOINCREMENT, merkmal TEXT NOT NULL, slot_label_pfad TEXT NOT NULL,

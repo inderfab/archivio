@@ -13,7 +13,9 @@ gibt es dann ehrlich „sicher bis hierher, darunter 2–3 Optionen".
 from __future__ import annotations
 
 import math
+import re
 from dataclasses import dataclass
+from datetime import datetime
 
 from scanner.ablage import merkmale as mk
 from scanner.ablage.index import N, rolle_key
@@ -371,4 +373,72 @@ def gruende(ctx: Kontext, par: Parameter, k: Kand, features: dict, n: int = 3) -
             break
     if not res and k.virtuell:
         res.append("Gehört nach der Vorlage zu diesem Projekt")
+    return res
+
+
+# ── Neuer datierter Ordner (Nachtrag 1 §3.3) ───────────────────────────────────
+
+_DATIERT = re.compile(r"^(\d{6}|\d{8})([_ ])")
+_THEMA_WORT = re.compile(r"[^\W\d_]{3,}", re.UNICODE)
+_THEMA_UNWICHTIG = {"mail", "neu", "entwurf", "kopie", "copy", "pdf", "docx", "final", "datei", "scan", "bild"}
+DATIERT_ANTEIL = 0.60       # so viele Unterordner müssen datiert sein
+DATIERT_MIN_KINDER = 3      # darunter ist es kein „Sammelordner"
+
+
+def _datierte_kinder(ctx: Kontext, ordner: "object") -> tuple[int, list]:
+    kids = [ctx.ordner[k] for k in ctx.kinder(ordner.id)
+            if ctx.ordner[k].art == "normal" and not ctx.ordner[k].ausgeschlossen]
+    return len(kids), [k for k in kids if _DATIERT.match(k.name)]
+
+
+def thema_vorschlag(dateiname: str, stoppwoerter=frozenset(), n: int = 4) -> str:
+    """Vorausgefülltes Thema aus den Wörtern des Dateinamens (ohne Datum, Nummern, Endung, Füllwörter)."""
+    stamm = dateiname.rsplit(".", 1)[0] if "." in dateiname else dateiname
+    res = []
+    for w in _THEMA_WORT.findall(stamm):
+        norm = mk.label_text(w)
+        if norm in stoppwoerter or norm in _THEMA_UNWICHTIG or len(norm) < 3:
+            continue
+        if w.lower() not in [x.lower() for x in res]:
+            res.append(w)
+        if len(res) >= n:
+            break
+    return " ".join(res)
+
+
+def neue_ordner_vorschlaege(ctx: Kontext, ordner_ids, dateiname: str = "", heute: datetime | None = None,
+                            max_n: int = 2) -> list[dict]:
+    """Sind die Unterordner eines Zweigs mehrheitlich datiert (`260721_Thema`), gibt es dort die Option „Neuer Ordner".
+    Datumsformat und Trenner kommen von den Geschwisterordnern, das Thema ist ein editierbarer Vorschlag aus dem Dateinamen.
+    Betrachtet werden die Zweige der Optionen: der Zweig selbst, oder (liegt die Option in einem datierten Ordner) sein
+    Elternordner."""
+    heute = heute or datetime.now()
+    wb = mk.woerterbuch()
+    gesehen, res = set(), []
+    for oid in ordner_ids:
+        o = ctx.ordner.get(oid)
+        if o is None:
+            continue
+        kandidaten = [o]
+        if _DATIERT.match(o.name) and o.parent_id in ctx.ordner:
+            kandidaten.append(ctx.ordner[o.parent_id])
+        for eltern in kandidaten:
+            if eltern.id in gesehen or eltern.art != "normal" or eltern.ausgeschlossen:
+                continue
+            n, datiert = _datierte_kinder(ctx, eltern)
+            if n < DATIERT_MIN_KINDER or len(datiert) / n < DATIERT_ANTEIL:
+                continue
+            gesehen.add(eltern.id)
+            laenge = max(set(len(_DATIERT.match(k.name).group(1)) for k in datiert),
+                         key=lambda x: sum(len(_DATIERT.match(k.name).group(1)) == x for k in datiert))
+            trenner = max("_ ", key=lambda t: sum(_DATIERT.match(k.name).group(2) == t for k in datiert))
+            neuestes = max(datiert, key=lambda k: k.name)
+            res.append({"eltern": eltern.path, "eltern_id": eltern.id, "eltern_rel": eltern.rel_path,
+                        "format": "JJJJMMTT" if laenge == 8 else "JJMMTT", "trenner": trenner,
+                        "praefix": heute.strftime("%Y%m%d" if laenge == 8 else "%y%m%d"),
+                        "thema": thema_vorschlag(dateiname, wb.stoppwoerter), "beispiel": neuestes.name,
+                        "anteil_datiert": round(len(datiert) / n, 2)})
+            break                                    # je Option höchstens ein Elternordner
+        if len(res) >= max_n:
+            break
     return res

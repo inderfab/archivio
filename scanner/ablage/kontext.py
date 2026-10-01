@@ -36,7 +36,10 @@ class Parameter:
     delta: float = 4.0          # Gewicht des Elternordner-Teilbaums (0 = aus)
     temperatur: float = 3.0     # Softmax-Temperatur der Ordner-Scores (kalibriert in der Messung)
     eindeutig_min_n: float = 3.0  # „eindeutig" aus der Statistik nur mit so viel Vorgeschichte im Ordner selbst
-    schwelle_sicher: float = 0.80
+    # Nachtrag 1 §2.1: Kurve Abdeckung gegen Fehler (Strut-Sicherung, 957 drop-typische Ereignisse und 2000 Dateien).
+    # Regel: grösste Abdeckung ab Stufe „Bereich" bei Fehler ≤ 5 % — sie ist bei jeder Schwelle von 0.60 bis 0.95 verfehlt
+    # (Fehler 55–78 %), also gilt die strengste Schwelle: so wenig falsche „sicher bis hier"-Aussagen wie möglich.
+    schwelle_sicher: float = 0.95
     min_option_p: float = 0.08  # Optionen unterhalb sind keine Optionen mehr
     projekt_sicher: float = 0.60
     prior_k: float = 40.0       # Gewicht des Slot-Anteils im Ordner-Prior
@@ -306,6 +309,32 @@ def holen_wartend(conn, warten_s: float = 2.0) -> "Kontext | None":
     _zustand["fertig"].wait(warten_s)
     with _cache_lock:
         return _cache["ctx"]
+
+
+def inkrementell(info: dict, vorzeichen: int, conn=None) -> None:
+    """Die Statistik im Cache um eine abgelegte Datei ergänzen (+1) oder zurücknehmen (-1), ohne neu zu laden.
+    `info` stammt aus `lernen.nach_ablage`."""
+    with _cache_lock:
+        ctx = _cache["ctx"]
+        if ctx is None:
+            return
+        from scanner.ablage.index import N as _N, rolle_key
+        g = vorzeichen * info["gewicht"]
+        ebenen = [("ordner", info["ordner_id"]), ("global", 0), ("rolle", rolle_key(info["rolle"]))]
+        if info.get("slot_id") is not None:
+            ebenen.append(("slot", info["slot_id"]))
+        for e, k in ebenen:
+            z = ctx.stats.setdefault((e, k), {})
+            for m in [*info["merkmale"], _N]:
+                z[m] = max(0.0, z.get(m, 0.0) + g)
+        o = ctx.ordner.get(info["ablage_ordner_id"])
+        if o is not None:
+            o.datei_anzahl = max(0, o.datei_anzahl + vorzeichen)
+            if vorzeichen > 0:
+                o.letzte_aenderung = datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+        ctx.__dict__.pop("_teilbaum", None)                      # Teilbaum-Summen neu bilden
+        if conn is not None:
+            _cache["stempel"] = _stempel(conn)                   # sonst hielte der Stempel den Cache für veraltet
 
 
 def bereit(conn=None) -> bool:

@@ -198,6 +198,7 @@ def holen(conn, token: str) -> dict | None:
 # ── Bestätigen ─────────────────────────────────────────────────────────────────
 
 MODI = ("behalten", "archivieren", "ueberschreiben")
+QUELLEN = ("option", "zuletzt", "suche", "browser", "neuer_ordner")      # wie das Ziel gewählt wurde (Protokoll)
 
 
 def gleichnamige(ctx, projekt_id: int, dest: str, dateiname: str) -> dict | None:
@@ -254,9 +255,19 @@ def bestaetigen(conn, token: str, entscheid: dict) -> tuple[bool, str]:
             modus = "behalten"            # nichts da, was archiviert/überschrieben werden könnte
         else:
             vorgaenger, archiv = treffer["vorgaenger"], treffer["archiv_ordner"]
+    quelle = entscheid.get("quelle") if entscheid.get("quelle") in QUELLEN else "browser"
+    try:
+        option_index = int(entscheid["option_index"]) if quelle == "option" else None
+    except (KeyError, TypeError, ValueError):
+        option_index = None
+    try:
+        seite_ms = max(0, int(entscheid.get("seite_ms"))) if entscheid.get("seite_ms") is not None else None
+    except (TypeError, ValueError):
+        seite_ms = None
     gespeichert = {"dest": dest, "dateiname": dateiname, "kopie": bool(entscheid.get("kopie")),
                    "vorgaenger_modus": modus, "vorgaenger": vorgaenger, "archiv_ordner": archiv,
-                   "projekt_id": projekt["id"], "projekt_pfad": projekt["path"]}
+                   "projekt_id": projekt["id"], "projekt_pfad": projekt["path"],
+                   "quelle": quelle, "option_index": option_index, "seite_ms": seite_ms}
     with conn:
         conn.execute("UPDATE ablage_vorgang SET entscheid = ?, status = 'bestaetigt' WHERE token = ?",
                      (json.dumps(gespeichert), token))
@@ -302,12 +313,20 @@ def abgelegt(conn, token: str, final_path: str | None, trocken: bool = False,
                  .replace(tzinfo=timezone.utc)).total_seconds() * 1000)
     vs = v["vorschlag"] or {}
     erster = (vs.get("projekte") or [{}])[0]
+    quelle = e.get("quelle") or "browser"
+    if quelle == "option" and e.get("option_index") is not None:
+        rang = e["option_index"] + 1                       # die gewählte Karte
+    elif quelle in ("suche", "browser", "neuer_ordner"):
+        rang = 0                                           # nicht aus den Vorschlägen gewählt
+    else:
+        rang = _rang(vs, e["dest"])
     with conn:
         cur = conn.execute(
             "INSERT INTO ablage_log (ts, host, dateiname, endung, merkmale, vorschlag, gewaehlt_pfad, gewaehlt_rang,"
-            " projekt_richtig, dauer_ms) VALUES (?,?,?,?,?,?,?,?,?,?)",
+            " projekt_richtig, dauer_ms, quelle, seite_ms) VALUES (?,?,?,?,?,?,?,?,?,?,?,?)",
             (_jetzt(), v["host"], v["dateiname"], Path(v["dateiname"]).suffix.lower(), json.dumps(v["merkmale"]),
-             json.dumps(vs), e["dest"], _rang(vs, e["dest"]), int(erster.get("id") == e.get("projekt_id")), dauer))
+             json.dumps(vs), e["dest"], rang, int(erster.get("id") == e.get("projekt_id")), dauer, quelle,
+             e.get("seite_ms")))
         e.update(final_path=final_path, abgelegt_ts=_jetzt(), log_id=cur.lastrowid, archiviert=archiviert)
         conn.execute("UPDATE ablage_vorgang SET status = 'abgelegt', entscheid = ? WHERE token = ?",
                      (json.dumps(e), token))
@@ -317,6 +336,16 @@ def abgelegt(conn, token: str, final_path: str | None, trocken: bool = False,
             process_file(conn, e["projekt_id"], Path(final_path))      # sofort durchsuchbar
         except Exception as exc:
             log.warning("Sofort-Indexierung fehlgeschlagen für %s: %s", final_path, exc)
+    if final_path and os.path.isfile(final_path):
+        try:
+            from scanner.ablage import lernen
+            info = lernen.nach_ablage(conn, v, final_path)
+            if info:
+                e["lernen"] = info
+                with conn:
+                    conn.execute("UPDATE ablage_vorgang SET entscheid = ? WHERE token = ?", (json.dumps(e), token))
+        except Exception as exc:
+            log.warning("Statistik nach der Ablage nicht aktualisiert: %s", exc)
     _staging_loeschen(v.get("staging_pfad"))
     return True, ""
 
@@ -374,6 +403,12 @@ def rueckgaengig_buchen(conn, token: str, final_path: str | None = None) -> bool
         return False
     e = v["entscheid"] or {}
     pfad = final_path or e.get("final_path")
+    if e.get("lernen"):
+        try:
+            from scanner.ablage import lernen
+            lernen.zurueck(conn, e["lernen"])
+        except Exception as exc:
+            log.warning("Statistik nach Rückgängig nicht zurückgenommen: %s", exc)
     with conn:
         if e.get("log_id"):
             conn.execute("DELETE FROM ablage_log WHERE id = ?", (e["log_id"],))
@@ -528,3 +563,24 @@ def vorschlag_nachholen(conn, token: str, par=None) -> dict | None:
     with conn:
         conn.execute("UPDATE ablage_vorgang SET vorschlag = ? WHERE token = ?", (json.dumps(vs), token))
     return vs
+
+
+# ── Zuletzt verwendet (Nachtrag 1 §3.2) ────────────────────────────────────────
+
+def zuletzt_verwendet(conn, host: str | None, projekt_pfad: str, n: int = 5, tage: int = 14) -> list[dict]:
+    """Die letzten Ziele dieses Rechners (`host`) aus den letzten `tage` Tagen im angegebenen Projekt."""
+    if not host:
+        return []
+    grenze = (datetime.now(timezone.utc) - timedelta(days=tage)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    basis = pfad_schluessel(projekt_pfad).rstrip("/")
+    res, gesehen = [], set()
+    for r in conn.execute("SELECT gewaehlt_pfad FROM ablage_log WHERE host = ? AND ts >= ? AND gewaehlt_pfad IS NOT NULL "
+                          "ORDER BY ts DESC, id DESC", (host, grenze)):
+        p = pfad_schluessel(r["gewaehlt_pfad"])
+        if p in gesehen or not p.startswith(basis + "/"):
+            continue
+        gesehen.add(p)
+        res.append({"pfad": p, "rel": p[len(basis) + 1:].replace("/", " › ")})
+        if len(res) >= n:
+            break
+    return res
