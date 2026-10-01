@@ -93,8 +93,46 @@ async def entscheid(token: str):
 async def abgelegt(token: str, request: Request):
     body = await request.json()
     ok, fehler = await asyncio.to_thread(
-        _arbeit, lambda c: vorgang.abgelegt(c, token, body.get("final_path"), bool(body.get("trocken"))))
+        _arbeit, lambda c: vorgang.abgelegt(c, token, body.get("final_path"), bool(body.get("trocken")),
+                                            body.get("archiviert")))
     return {"ok": True} if ok else _fehler(409, fehler)
+
+
+@router.get("/{token}/pruefen")
+async def pruefen(token: str, dest: str, dateiname: str):
+    """Liegt im gewählten Ordner schon eine Datei mit diesem Namen? Dann stellt die Oberfläche die Rückfrage
+    „alten Stand nach z_Archiv schieben oder überschreiben?"."""
+    def _tun(conn):
+        from scanner.ablage import kontext
+        v = vorgang.holen(conn, token)
+        if v is None:
+            return 404, {"ok": False, "error": "Unbekannter Vorgang"}
+        projekt = vorgang.projekt_fuer_pfad(conn, dest)
+        if projekt is None:
+            return 200, {"ok": True, "gleichnamig": None, "ausserhalb": True}
+        t = vorgang.gleichnamige(kontext.holen(conn), projekt["id"], vorgang.pfad_schluessel(dest), dateiname.strip())
+        return 200, {"ok": True, "ausserhalb": False,
+                     "gleichnamig": None if t is None else {"dateiname": t["dateiname"], "exakt": t["exakt"],
+                                                           "pfad": t["vorgaenger"],
+                                                           "archiv_ordner": t["archiv_ordner"]}}
+    code, body = await asyncio.to_thread(_arbeit, _tun)
+    return JSONResponse(body, status_code=code)
+
+
+@router.post("/{token}/rueckgaengig")
+async def rueckgaengig(token: str, request: Request):
+    """Der Helper meldet: Ablage rückgängig gemacht (Buchhaltung: Protokollzeile und Index-Eintrag weg)."""
+    body = await request.json()
+    ok = await asyncio.to_thread(_arbeit, lambda c: vorgang.rueckgaengig_buchen(c, token, body.get("final_path")))
+    return {"ok": ok}
+
+
+@router.post("/{token}/rueckgaengig-lokal")
+async def rueckgaengig_lokal(token: str, request: Request):
+    if not _nur_lokal(request):
+        return _fehler(403, "Nur vom Server-Mac selbst")
+    code, body = await asyncio.to_thread(_arbeit, lambda c: vorgang.rueckgaengig_lokal(c, token))
+    return JSONResponse(body, status_code=code)
 
 
 @router.post("/{token}/abbrechen")
@@ -128,7 +166,7 @@ async def ausfuehren_lokal(token: str, request: Request):
             return 404, {"ok": False, "error": str(exc)}
         except (OSError, ValueError) as exc:
             return 500, {"ok": False, "error": str(exc)}
-        vorgang.abgelegt(conn, token, erg["final"], trocken)
+        vorgang.abgelegt(conn, token, erg["final"], trocken, erg["archiviert"])
         return 200, {"ok": True, "final_path": erg["final"], "trocken": trocken, "archiviert": erg["archiviert"]}
 
     code, body = await asyncio.to_thread(_arbeit, _tun)

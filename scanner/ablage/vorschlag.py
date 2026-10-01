@@ -125,7 +125,7 @@ def vorschlagen(ctx: Kontext, datei: DateiInfo, par: Parameter | None = None, pr
                  "dateiname_vorschlag": None}
 
     # Duplikat: derselbe Inhalt liegt schon im Bestand
-    if datei.hash and ctx.duplikat_fn:
+    if datei.hash and ctx.duplikat_fn and projekt_id is None:
         dup = ctx.duplikat_fn(datei.hash)
         if dup:
             res.update({"fall": "duplikat",

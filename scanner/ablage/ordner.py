@@ -293,16 +293,19 @@ def hierarchie(ctx: Kontext, projekt_id: int, kands: list[Kand], probs: list[flo
                 return node
             node = kids[0]
 
-    optionen = []
-    for c in beste_kinder(sicher)[:3]:
-        if marg[c] < par.min_option_p and optionen:
-            break
+    optionen = []            # (Kandidat, angezeigte Wahrscheinlichkeit, Rang-Schlüssel = Wahrscheinlichkeit des Zweigs)
+    kinder_top = beste_kinder(sicher)[:3]
+    for c in kinder_top:
+        if marg[c] < par.min_option_p:
+            continue                                  # keine Optionen ohne Wahrscheinlichkeitsmasse
         n = verfeinern(c)
-        optionen.append((_knoten_kand(ctx, n, kand_by_key), marg[n]))
+        optionen.append((_knoten_kand(ctx, n, kand_by_key), marg[n], marg[c]))
     if sicher is not None and eigen.get(sicher, 0.0) >= par.min_option_p:      # Dateien direkt im sicheren Ordner
-        optionen.append((_knoten_kand(ctx, sicher, kand_by_key), eigen[sicher]))
-        optionen.sort(key=lambda t: -t[1])
-        optionen = optionen[:3]
+        optionen.append((_knoten_kand(ctx, sicher, kand_by_key), eigen[sicher], eigen[sicher]))
+    if not optionen and kinder_top:                   # sonst wenigstens der beste Zweig
+        n = verfeinern(kinder_top[0])
+        optionen.append((_knoten_kand(ctx, n, kand_by_key), marg[n], marg[kinder_top[0]]))
+    optionen = [(k, p) for k, p, _ in sorted(optionen, key=lambda t: -t[2])[:3]]
     sicher_pfad = wurzel if sicher is None else _knoten_kand(ctx, sicher, kand_by_key).pfad
     return {"fall": "teilweise" if sicher is not None else "ordner_unklar", "sicher_key": sicher,
             "sicher_pfad": sicher_pfad, "sicher_p": marg[sicher], "optionen": optionen}

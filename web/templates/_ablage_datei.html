@@ -1,0 +1,117 @@
+{# Eine Datei der Ablage-Seite. Wird auch einzeln per htmx ausgetauscht, wenn ein Projekt gewählt wird. #}
+{% set erste = d.optionen[0] if d.optionen else none %}
+<section class="ad" id="datei-{{ d.idx }}" data-idx="{{ d.idx }}" data-token="{{ d.token }}"
+         data-lokal="{{ '1' if d.lokal else '' }}" data-fall="{{ d.fall }}"
+         data-start="{{ d.start_pfad }}" data-sicher="{{ d.sicher_pfad }}"
+         data-dest="{{ erste.pfad if erste else '' }}" data-neu="{{ '1' if erste and erste.neu_anlegen else '' }}">
+
+  <div class="ad-kopf">
+    <input type="text" class="ad-name" value="{{ d.dateiname }}" aria-label="Dateiname" spellcheck="false">
+    {% if d.name_vorschlag %}
+    <span class="ad-namensvorschlag">Vorschlag:
+      <code>{{ d.name_vorschlag }}</code>
+      <button type="button" class="btn" onclick="uebernehmeName({{ d.idx }}, {{ d.name_vorschlag | tojson | forceescape }})">Übernehmen</button>
+    </span>
+    {% endif %}
+  </div>
+
+  {% if d.fall == 'duplikat' %}
+    <div class="ad-warnung">
+      <strong>Diese Datei liegt bereits im Archiv:</strong>
+      <ul>{% for x in d.duplikate %}<li>{{ x.pfad }}</li>{% endfor %}</ul>
+      <div class="ad-knoepfe">
+        <button type="button" class="btn" onclick="abbrechenEine({{ d.idx }})">Nicht ablegen</button>
+        {% if d.duplikate %}
+        <button type="button" class="btn"
+                hx-get="/dashboard/ablage/datei?token={{ d.token }}&idx={{ d.idx }}&projekt={{ d.duplikate[0].projekt_id }}"
+                hx-target="#datei-{{ d.idx }}" hx-swap="outerHTML">Trotzdem ablegen</button>
+        {% endif %}
+      </div>
+    </div>
+
+  {% elif d.fall == 'projekt_unklar' or not d.projekt %}
+    <div class="ad-projektwahl">
+      <div class="ad-satz">Zu welchem Projekt gehört die Datei?</div>
+      <div class="ad-knoepfe">
+        {% for p in d.projekte %}
+        <button type="button" class="btn ad-projekt"
+                hx-get="/dashboard/ablage/datei?token={{ d.token }}&idx={{ d.idx }}&projekt={{ p.id }}"
+                hx-target="#datei-{{ d.idx }}" hx-swap="outerHTML">
+          {{ p.name }} <span class="ad-p">{{ (p.p * 100) | round | int }} %</span>
+        </button>
+        {% endfor %}
+        {% if not d.projekte %}<span class="ad-leise">Kein Projekt erkannt.</span>{% endif %}
+      </div>
+    </div>
+
+  {% else %}
+    <div class="ad-projekt-zeile">
+      Projekt <strong>{{ d.projekt.name }}</strong>
+      <span class="ad-badge ad-{{ d.projekt.klasse }}">{{ d.projekt.badge }}</span>
+      {% if d.projekt.gruende %}<span class="ad-leise">· {{ d.projekt.gruende[0] }}</span>{% endif %}
+      {% if d.angeboten and d.angeboten|length > 1 %}
+        <span class="ad-leise">· anderes Projekt:</span>
+        {% for p in d.angeboten if p.id != d.projekt.id %}
+        <a href="#" class="ad-link"
+           hx-get="/dashboard/ablage/datei?token={{ d.token }}&idx={{ d.idx }}&projekt={{ p.id }}"
+           hx-target="#datei-{{ d.idx }}" hx-swap="outerHTML">{{ p.name }}</a>
+        {% endfor %}
+      {% endif %}
+    </div>
+
+    <div class="ad-satz">
+      {% if d.fall == 'eindeutig' %}
+        Sicher: <strong>{{ d.krumen | join(' › ') }}{% if erste %} › {{ erste.rel }}{% endif %}</strong>. Enter legt ab.
+      {% elif d.fall == 'teilweise' %}
+        Sicher <strong>{{ d.krumen | join(' › ') }}</strong>. Ordner wählen:
+      {% else %}
+        Sicher Projekt <strong>{{ d.projekt.name }}</strong>, Ordner unklar.
+      {% endif %}
+    </div>
+
+    {% if d.optionen %}
+    <div class="ad-optionen" role="radiogroup">
+      {% for o in d.optionen %}
+      <div class="ad-opt {{ 'gewaehlt' if loop.first else '' }}" role="radio" tabindex="0"
+           aria-checked="{{ 'true' if loop.first else 'false' }}"
+           data-pfad="{{ o.pfad }}" data-neu="{{ '1' if o.neu_anlegen else '' }}"
+           onclick="waehleOption({{ d.idx }}, {{ loop.index0 }})">
+        <div class="ad-opt-kopf">
+          <span class="ad-nr">{{ loop.index }}</span>
+          <span class="ad-opt-label">{{ o.label }}</span>
+          <span class="ad-badge ad-{{ o.klasse }}">{{ o.badge }}</span>
+          <span class="ad-p">{{ o.prozent }} %</span>
+        </div>
+        <div class="ad-opt-pfad">{{ o.rel }}</div>
+        {% if o.gruende %}<ul class="ad-gruende">{% for g in o.gruende %}<li>{{ g }}</li>{% endfor %}</ul>{% endif %}
+        {% if o.neu_anlegen %}<div class="ad-neu-hinweis">Ordner wird angelegt</div>{% endif %}
+      </div>
+      {% endfor %}
+    </div>
+    {% endif %}
+  {% endif %}
+
+  {% if d.fall != 'duplikat' %}
+  <div class="ad-ziel">Ziel: <span class="ad-dest">{{ erste.pfad if erste else 'noch nicht gewählt' }}</span>
+    <span class="ad-neu-zeile" {% if not (erste and erste.neu_anlegen) %}hidden{% endif %}> · Ordner wird angelegt</span>
+  </div>
+
+  <div class="ad-frage" hidden>
+    <div class="ad-frage-text"></div>
+    <label><input type="radio" name="modus-{{ d.idx }}" value="archivieren"> Alten Stand nach <code>z_Archiv</code> schieben</label>
+    <label class="ad-ueberschreiben"><input type="radio" name="modus-{{ d.idx }}" value="ueberschreiben"> Überschreiben</label>
+    <label><input type="radio" name="modus-{{ d.idx }}" value="behalten"> Beide behalten (die neue Datei bekommt „(2)“)</label>
+  </div>
+
+  <label class="ad-kopie"><input type="checkbox" class="ad-kopie-box"> Kopie am ursprünglichen Ort behalten</label>
+
+  <details class="ad-browser" {{ 'open' if d.fall in ('ordner_unklar', 'projekt_unklar') or not d.projekt else '' }}>
+    <summary>Anderen Ordner wählen</summary>
+    <div class="ad-browser-koerper" id="browser-{{ d.idx }}">
+      <div class="browse-cols" id="browse-cols-{{ d.idx }}"><div class="ad-leise" style="padding:14px;">Ordner werden geladen…</div></div>
+    </div>
+  </details>
+  {% endif %}
+
+  <div class="ad-ergebnis" aria-live="polite"></div>
+</section>

@@ -1,0 +1,309 @@
+{% extends "base.html" %}
+{% block title %}Archivio – Datei ablegen{% endblock %}
+
+{% block content %}
+<style>
+  .ablage-seite { max-width: 1060px; margin: 0 auto; padding: 28px 24px 80px; }
+  .ablage-seite h1 { font-size: 20px; font-weight: 700; margin: 0 0 18px; }
+  .ad { border: 1px solid var(--border); border-radius: var(--radius); padding: 16px 18px; margin-bottom: 18px; background: var(--bg); }
+  .ad[data-fertig="1"] { opacity: .85; }
+  .ad-kopf { display: flex; flex-wrap: wrap; align-items: center; gap: 10px; margin-bottom: 12px; }
+  .ad-name { flex: 1 1 320px; max-width: 520px; padding: 7px 9px; font-size: 14px; font-weight: 600; font-family: inherit;
+             border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg); color: var(--text); }
+  .ad-namensvorschlag { font-size: 12px; color: var(--text-2); }
+  .ad-namensvorschlag .btn { padding: 2px 8px; font-size: 11px; margin-left: 6px; }
+  .ad-projekt-zeile { font-size: 13px; margin-bottom: 8px; display: flex; flex-wrap: wrap; gap: 6px; align-items: baseline; }
+  .ad-satz { font-size: 14px; margin: 6px 0 12px; }
+  .ad-leise { color: var(--text-3); font-size: 12px; }
+  .ad-link { font-size: 12px; }
+  .ad-badge { font-size: 11px; padding: 1px 7px; border-radius: 999px; border: 1px solid var(--border); }
+  .ad-ok { color: #166534; border-color: #bbf7d0; background: #f0fdf4; }
+  .ad-mid { color: #92400e; border-color: #fde68a; background: #fffbeb; }
+  .ad-low { color: #991b1b; border-color: #fecaca; background: #fef2f2; }
+  .ad-p { font-size: 12px; color: var(--text-3); }
+  .ad-optionen { display: grid; gap: 10px; margin-bottom: 12px; }
+  .ad-opt { border: 1px solid var(--border); border-radius: var(--radius); padding: 10px 12px; cursor: pointer; background: var(--bg); }
+  .ad-opt:hover { background: var(--bg-2); }
+  .ad-opt.gewaehlt { border-color: #1d4ed8; background: #eff6ff; box-shadow: 0 0 0 1px #1d4ed8 inset; }
+  .ad-opt-kopf { display: flex; align-items: center; gap: 8px; }
+  .ad-nr { width: 20px; height: 20px; border-radius: 50%; background: var(--bg-2); border: 1px solid var(--border);
+           display: inline-flex; align-items: center; justify-content: center; font-size: 11px; }
+  .ad-opt-label { font-weight: 600; font-size: 14px; }
+  .ad-opt-pfad { font-size: 12px; color: var(--text-2); margin: 4px 0 0 28px; word-break: break-all; }
+  .ad-gruende { margin: 6px 0 0 28px; padding-left: 16px; font-size: 12px; color: var(--text-2); }
+  .ad-neu-hinweis { margin: 6px 0 0 28px; font-size: 12px; color: #92400e; }
+  .ad-ziel { font-size: 12px; color: var(--text-2); margin: 6px 0 10px; word-break: break-all; }
+  .ad-frage { border: 1px solid #fde68a; background: #fffbeb; border-radius: var(--radius); padding: 10px 12px; margin: 8px 0 12px; font-size: 13px; }
+  .ad-frage label { display: block; margin-top: 6px; cursor: pointer; }
+  .ad-kopie { display: flex; gap: 6px; align-items: center; font-size: 13px; margin: 10px 0; }
+  .ad-browser summary { cursor: pointer; font-size: 13px; color: var(--text-2); margin: 6px 0; }
+  .ad-browser-koerper { display: flex; height: 340px; border: 1px solid var(--border); border-radius: var(--radius); overflow: hidden; margin-top: 8px; }
+  .ad-browser-koerper .browse-cols { display: flex; flex: 1; overflow-x: auto; }
+  .ad-browser-koerper .browse-col { max-height: none; }
+  .ad-browser-koerper .browse-check { display: none; }
+  .ad-warnung { background: #fffbeb; border: 1px solid #fde68a; border-radius: var(--radius); padding: 12px 14px; font-size: 13px; }
+  .ad-knoepfe { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 8px; }
+  .ad-ergebnis { margin-top: 10px; font-size: 14px; }
+  .ad-ergebnis .ok { color: #166534; font-weight: 600; }
+  .ad-ergebnis .fehler { color: #b91c1c; }
+  .ad-ergebnis a { margin-right: 14px; cursor: pointer; }
+  .ablage-leiste { position: sticky; bottom: 0; background: var(--bg); border-top: 1px solid var(--border);
+                   padding: 12px 0; display: flex; gap: 10px; align-items: center; }
+  .ablage-leiste .tipp { margin-left: auto; font-size: 12px; color: var(--text-3); }
+</style>
+
+<div class="ablage-seite">
+  <h1>{{ 'Dateien ablegen' if dateien|length > 1 else 'Datei ablegen' }}</h1>
+
+  {% if ohne_token %}
+    <p class="ad-leise">Hier öffnet sich die Ablage, wenn Sie eine Datei aufs Archivio-Symbol in der Menüleiste ziehen.</p>
+  {% elif abgelaufen %}
+    <p class="ad-leise">Dieser Vorgang ist abgelaufen (nach 24 Stunden). Bitte die Datei nochmals aufs Archivio-Symbol ziehen.</p>
+  {% else %}
+    {% for d in dateien %}{% include "_ablage_datei.html" %}{% endfor %}
+
+    <div class="ablage-leiste">
+      <button type="button" class="btn btn-primary" id="ablegen-knopf" onclick="alleAblegen()" disabled>Ablegen</button>
+      {% if dateien|length > 1 %}<button type="button" class="btn" onclick="alleWieErste()">Alle wie erste</button>{% endif %}
+      <button type="button" class="btn" onclick="alleAbbrechen()">Abbrechen</button>
+      <span class="tipp">1 / 2 / 3 wählt eine Option · Enter legt ab · Esc bricht ab</span>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+  var HELPER = (typeof HELPER !== 'undefined' && HELPER) || 'http://localhost:44380';
+  var RUECKGAENGIG_MS = 5 * 60 * 1000;
+  var aktiv = 0;
+
+  function sektionen() { return Array.prototype.slice.call(document.querySelectorAll('.ad')); }
+  function sek(idx) { return document.getElementById('datei-' + idx); }
+  function offen() { return sektionen().filter(function (s) { return s.dataset.fertig !== '1'; }); }
+
+  // ── Ziel wählen ────────────────────────────────────────────────────────────
+  function setzeZiel(s, pfad, neu) {
+    s.dataset.dest = pfad || '';
+    s.dataset.neu = neu ? '1' : '';
+    var z = s.querySelector('.ad-dest');
+    if (z) z.textContent = pfad || 'noch nicht gewählt';
+    var h = s.querySelector('.ad-neu-zeile');
+    if (h) h.hidden = !neu;
+    pruefeGleichnamig(s);
+    knopfAktualisieren();
+  }
+
+  function waehleOption(idx, k) {
+    var s = sek(idx); aktiv = idx;
+    var opts = s.querySelectorAll('.ad-opt');
+    opts.forEach(function (o, i) {
+      o.classList.toggle('gewaehlt', i === k);
+      o.setAttribute('aria-checked', i === k ? 'true' : 'false');
+    });
+    document.querySelectorAll('#datei-' + idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
+    if (opts[k]) setzeZiel(s, opts[k].dataset.pfad, opts[k].dataset.neu === '1');
+  }
+
+  // Aufruf aus _dashboard_browse.html (Inline-onclick): hier = Ordner von Hand gewählt (Rang 0)
+  function selectEntry(el, idx, path) {
+    var s = sek(idx); aktiv = idx;
+    s.querySelectorAll('.ad-opt').forEach(function (o) { o.classList.remove('gewaehlt'); o.setAttribute('aria-checked', 'false'); });
+    document.querySelectorAll('#datei-' + idx + ' .browse-entry').forEach(function (e) { e.classList.remove('selected'); });
+    el.classList.add('selected');
+    setzeZiel(s, path, false);
+  }
+  function clearFromDepth(idx, depth) {
+    document.querySelectorAll('#browse-cols-' + idx + ' [data-depth]').forEach(function (el) {
+      if (parseInt(el.dataset.depth) >= depth) el.remove();
+    });
+  }
+  function toggleBrowseCheck() {}
+
+  function uebernehmeName(idx, name) {
+    var s = sek(idx); s.querySelector('.ad-name').value = name; pruefeGleichnamig(s);
+  }
+
+  // ── Gleichnamige Datei im Zielordner: Rückfrage ────────────────────────────
+  var pruefTimer = {};
+  function pruefeGleichnamig(s) {
+    clearTimeout(pruefTimer[s.dataset.idx]);
+    if (s.dataset.fertig === '1') return;
+    s.dataset.frage = '?';                 // Prüfung läuft: „Ablegen" bleibt gesperrt, bis das Ergebnis da ist
+    knopfAktualisieren();
+    pruefTimer[s.dataset.idx] = setTimeout(async function () {
+      var frage = s.querySelector('.ad-frage');
+      if (!frage) { s.dataset.frage = ''; knopfAktualisieren(); return; }
+      var dest = s.dataset.dest, name = s.querySelector('.ad-name').value.trim();
+      if (!dest || !name) { frage.hidden = true; s.dataset.frage = ''; knopfAktualisieren(); return; }
+      var ergebnis = '';
+      try {
+        var r = await fetch('/api/ablage/' + s.dataset.token + '/pruefen?dest=' + encodeURIComponent(dest) +
+                            '&dateiname=' + encodeURIComponent(name));
+        var j = await r.json();
+        if (s.dataset.fertig === '1' || dest !== s.dataset.dest) return;     // inzwischen abgelegt/anderes Ziel
+        var g = j.gleichnamig;
+        if (g) {
+          frage.querySelector('.ad-frage-text').textContent =
+            'Gibt schon ein Dokument mit diesem Namen („' + g.dateiname + '“). Was soll mit dem alten Stand passieren?';
+          frage.querySelector('.ad-ueberschreiben').hidden = !g.exakt;
+          frage.querySelectorAll('input[type=radio]').forEach(function (x) { x.checked = false; });
+          frage.hidden = false; ergebnis = '1';
+        } else { frage.hidden = true; }
+      } catch (e) { frage.hidden = true; }
+      s.dataset.frage = ergebnis;
+      knopfAktualisieren();
+    }, 150);
+  }
+
+  function modus(s) {
+    var x = s.querySelector('.ad-frage input[type=radio]:checked');
+    return x ? x.value : (s.dataset.frage === '1' || s.dataset.frage === '?' ? '' : 'behalten');
+  }
+
+  function knopfAktualisieren() {
+    var knopf = document.getElementById('ablegen-knopf');
+    if (!knopf) return;
+    var o = offen().filter(function (s) { return s.dataset.fall !== 'duplikat'; });
+    knopf.disabled = !o.length || o.some(function (s) { return !s.dataset.dest || modus(s) === ''; });
+  }
+
+  // ── Ablegen ────────────────────────────────────────────────────────────────
+  function zeige(s, klasse, text) {
+    var e = s.querySelector('.ad-ergebnis'); e.textContent = ''; var sp = document.createElement('span');
+    sp.className = klasse; sp.textContent = text; e.appendChild(sp); return e;
+  }
+  async function json(r) { try { return await r.json(); } catch (e) { return { ok: false, error: 'Unerwartete Antwort' }; } }
+
+  async function ablegen(s) {
+    var token = s.dataset.token;
+    zeige(s, '', 'Wird abgelegt…');
+    var body = { dest: s.dataset.dest, dateiname: s.querySelector('.ad-name').value.trim(),
+                 kopie: s.querySelector('.ad-kopie-box').checked, vorgaenger_modus: modus(s) || 'behalten' };
+    var r = await fetch('/api/ablage/' + token + '/bestaetigen', { method: 'POST',
+        headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+    var j = await json(r);
+    if (!j.ok) { zeige(s, 'fehler', '⚠ ' + (j.error || 'Nicht möglich')); return false; }
+    var r2;
+    try {
+      r2 = s.dataset.lokal === '1'
+        ? await fetch('/api/ablage/' + token + '/ausfuehren-lokal', { method: 'POST' })
+        : await fetch(HELPER + '/ablage/ausfuehren', { method: 'POST',
+            headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: token }) });
+    } catch (e) {
+      zeige(s, 'fehler', '⚠ Archivio Helper läuft nicht auf diesem Mac. Bitte starten und nochmals versuchen.');
+      return false;
+    }
+    var j2 = await json(r2);
+    if (!j2.ok) { zeige(s, 'fehler', '⚠ ' + (j2.error || 'Nicht abgelegt')); return false; }
+    s.dataset.fertig = '1';
+    ergebnisZeigen(s, j2, body.kopie);
+    return true;
+  }
+
+  function link(text, fn) { var a = document.createElement('a'); a.className = 'ad-link'; a.textContent = text;
+    a.onclick = function (e) { e.preventDefault(); fn(a); }; return a; }
+
+  function ergebnisZeigen(s, j, kopie) {
+    var e = zeige(s, 'ok', j.trocken ? '🧪 TROCKENLAUF — nichts wurde verschoben. Wäre abgelegt in ' + j.final_path
+                                    : '✓ abgelegt in ' + j.final_path);
+    if (j.trocken) { s.dataset.fertig = ''; return; }
+    e.appendChild(document.createElement('br'));
+    e.appendChild(link('Im Finder zeigen', function () {
+      fetch(HELPER + '/reveal?path=' + encodeURIComponent(j.final_path)).catch(function () {}); }));
+    if (!kopie && !j.ersetzt) {
+      var u = link('Rückgängig', async function () {
+        var r = s.dataset.lokal === '1'
+          ? await fetch('/api/ablage/' + s.dataset.token + '/rueckgaengig-lokal', { method: 'POST' })
+          : await fetch(HELPER + '/ablage/rueckgaengig', { method: 'POST',
+              headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ token: s.dataset.token }) });
+        var x = await json(r);
+        if (x.ok) { s.dataset.fertig = 'zurueck'; zeige(s, 'ok', '↩ Rückgängig gemacht — die Datei liegt wieder an ihrem Platz.'); }
+        else zeige(s, 'fehler', '⚠ ' + (x.error || 'Nicht möglich'));
+      });
+      e.appendChild(u);
+      setTimeout(function () { if (u.parentNode) u.remove(); }, RUECKGAENGIG_MS);
+    }
+    var alleFertig = offen().length === 0;
+    if (alleFertig) { var k = document.getElementById('ablegen-knopf'); if (k) k.disabled = true; }
+    knopfAktualisieren();
+  }
+
+  async function alleAblegen() {
+    var knopf = document.getElementById('ablegen-knopf');
+    knopf.disabled = true; knopf.textContent = 'Wird abgelegt…';
+    for (var s of offen()) { if (s.dataset.fall !== 'duplikat') await ablegen(s); }
+    knopf.textContent = 'Ablegen'; knopfAktualisieren();
+  }
+
+  function alleWieErste() {
+    var a = sektionen(); if (!a.length || !a[0].dataset.dest) return;
+    var ziel = a[0].dataset.dest, neu = a[0].dataset.neu === '1';
+    a.slice(1).forEach(function (s) { if (s.dataset.fertig !== '1' && s.dataset.fall !== 'duplikat') {
+      s.querySelectorAll('.ad-opt').forEach(function (o) { o.classList.remove('gewaehlt'); });
+      setzeZiel(s, ziel, neu); } });
+  }
+
+  function abbrechenEine(idx) {
+    var s = sek(idx);
+    fetch('/api/ablage/' + s.dataset.token + '/abbrechen', { method: 'POST' });
+    s.dataset.fertig = '1'; zeige(s, 'ok', 'Nicht abgelegt.'); knopfAktualisieren();
+  }
+
+  function alleAbbrechen() {
+    offen().forEach(function (s) { fetch('/api/ablage/' + s.dataset.token + '/abbrechen', { method: 'POST' }); });
+    document.body.innerHTML =
+      '<div style="display:flex;align-items:center;justify-content:center;height:100vh;font-family:-apple-system,sans-serif;' +
+      'color:#333;text-align:center;"><div><div>Abgebrochen — es wurde nichts abgelegt.</div>' +
+      '<div style="color:#888;font-size:13px;margin-top:8px;">Dieser Tab kann geschlossen werden.</div></div></div>';
+    window.close();
+  }
+
+  // ── Spaltenbrowser (lädt nach, bis zum Vorschlag aufgeklappt) ──────────────
+  function browserLaden(s) {
+    var details = s.querySelector('.ad-browser');
+    if (!details || details.dataset.geladen === '1') return;
+    var start = s.dataset.start; if (!start) return;
+    details.dataset.geladen = '1';
+    var dest = s.dataset.sicher || '';
+    var url = '/dashboard/ablage-spalten?idx=' + s.dataset.idx + '&start=' + encodeURIComponent(start) +
+              (dest ? '&dest=' + encodeURIComponent(dest) : '');
+    htmx.ajax('GET', url, { target: '#browse-cols-' + s.dataset.idx, swap: 'innerHTML' }).then(function () {
+      var cols = document.getElementById('browse-cols-' + s.dataset.idx);
+      if (cols) cols.scrollLeft = cols.scrollWidth;
+    });
+  }
+
+  function sektionStarten(s) {
+    s.querySelectorAll('.ad-name').forEach(function (n) { n.addEventListener('input', function () { pruefeGleichnamig(s); }); });
+    var details = s.querySelector('.ad-browser');
+    if (details) {
+      details.addEventListener('toggle', function () { if (details.open) browserLaden(s); });
+      if (details.open) browserLaden(s);
+    }
+    if (s.dataset.dest) pruefeGleichnamig(s);
+    s.addEventListener('focusin', function () { aktiv = parseInt(s.dataset.idx); });
+  }
+
+  document.addEventListener('DOMContentLoaded', function () {
+    sektionen().forEach(sektionStarten); knopfAktualisieren();
+  });
+  document.body.addEventListener('htmx:afterSwap', function (ev) {
+    var s = ev.detail.target && ev.detail.target.classList && ev.detail.target.classList.contains('ad') ? ev.detail.target : null;
+    if (s) { sektionStarten(s); knopfAktualisieren(); }
+  });
+
+  // ── Tastatur: 1/2/3 wählen, Enter legt ab, Esc bricht ab ───────────────────
+  document.addEventListener('keydown', function (ev) {
+    var tippt = ev.target && /^(INPUT|TEXTAREA|SELECT)$/.test(ev.target.tagName) && ev.target.type !== 'radio' && ev.target.type !== 'checkbox';
+    if (ev.key === 'Escape') { alleAbbrechen(); return; }
+    if (ev.key === 'Enter' && !(ev.target && ev.target.tagName === 'BUTTON')) {
+      var knopf = document.getElementById('ablegen-knopf');
+      if (knopf && !knopf.disabled) { ev.preventDefault(); alleAblegen(); }
+      return;
+    }
+    if (!tippt && /^[1-3]$/.test(ev.key)) {
+      var s = sek(aktiv) && sek(aktiv).dataset.fertig !== '1' ? sek(aktiv) : offen()[0];
+      if (s && s.querySelectorAll('.ad-opt')[parseInt(ev.key) - 1]) waehleOption(parseInt(s.dataset.idx), parseInt(ev.key) - 1);
+    }
+  });
+</script>
+{% endblock %}

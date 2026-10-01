@@ -238,7 +238,8 @@ def invalidieren() -> None:
 
 
 def _stempel(conn) -> tuple:
-    return (conn.execute("SELECT COUNT(*) FROM ablage_ordner").fetchone()[0],
+    return (tuple(conn.execute("SELECT COUNT(*), COALESCE(MAX(id), 0) FROM projects").fetchone()),
+            conn.execute("SELECT COUNT(*) FROM ablage_ordner").fetchone()[0],
             conn.execute("SELECT COUNT(*) FROM ablage_slot").fetchone()[0],
             conn.execute("SELECT COALESCE(SUM(gewicht), 0) FROM ablage_stats WHERE ebene='global' AND merkmal='_n'"
                          ).fetchone()[0],

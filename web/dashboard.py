@@ -19,7 +19,7 @@ from pydantic import BaseModel
 
 from config import settings
 from db import connection
-from scanner.walker import scan_project, process_file, suggest_project_for_file, suggest_destination_folder
+from scanner.walker import scan_project, process_file
 from web.shared import templates
 
 router = APIRouter(prefix="/dashboard")
@@ -1160,20 +1160,6 @@ def _find_owning_project(conn, folder_path: str) -> dict | None:
     return best
 
 
-def _unique_upload_dest(dest_dir: Path, filename: str) -> Path:
-    """Verhindert Ueberschreiben bei Namenskollision im Zielordner."""
-    target = dest_dir / filename
-    if not target.exists():
-        return target
-    stem, suffix = Path(filename).stem, Path(filename).suffix
-    i = 2
-    while True:
-        candidate = dest_dir / f"{stem} ({i}){suffix}"
-        if not candidate.exists():
-            return candidate
-        i += 1
-
-
 _UPLOAD_PROJEKTNUMMER = re.compile(r"^(\d+)\s")
 
 
@@ -1194,7 +1180,7 @@ def _render_filename_template(template: str, *, project_name: str | None, origin
     return rendered + suffix
 
 
-def _prerender_browse_columns(request: Request, start_path: str, dest_path: str) -> str:
+def _prerender_browse_columns(request: Request, start_path: str, dest_path: str, project_id: int = 0) -> str:
     """Rendert die Spalten-Ansicht server-seitig direkt bis zum vorgeschlagenen
     Zielordner aufgeklappt -- fuer den Datei-Drop-Upload, damit man sofort sieht, wo
     die Datei landen wuerde, statt erst "Anderen Ordner wählen" klicken zu muessen.
@@ -1217,7 +1203,7 @@ def _prerender_browse_columns(request: Request, start_path: str, dest_path: str)
             "subdirs":      subdirs,
             "error_msg":    error_msg,
             "current_path": current,
-            "project_id":   0,
+            "project_id":   project_id,
             "depth":        depth,
             "selected":     child_path,
         }))
@@ -1225,151 +1211,21 @@ def _prerender_browse_columns(request: Request, start_path: str, dest_path: str)
     return "".join(html_parts)
 
 
-@router.get("/upload", response_class=HTMLResponse)
-async def upload_page(request: Request, src: str = Query(...)):
-    src_path = Path(src)
-    if not src_path.is_file():
-        return templates.TemplateResponse("dashboard_upload.html", {
-            "request": request, "error": f"Datei nicht gefunden: {src}",
-        })
-
-    conn = connection.get_connection()
-    suggested = None
-    suggested_dest = None
-    try:
-        ids = suggest_project_for_file(conn, src_path)
-        if ids:
-            # Bewusst OHNE active=1 -- siehe suggest_project_for_file()/
-            # _find_owning_project(): ein pausiertes Projekt bleibt ein gueltiges Ziel.
-            row = conn.execute(
-                "SELECT id, name, path FROM projects WHERE id=?", (ids[0],)
-            ).fetchone()
-            if row:
-                suggested = dict(row)
-                suggested_dest = suggest_destination_folder(
-                    conn, suggested["id"], src_path.name
-                )
-    finally:
-        conn.close()
-
-    if suggested_dest is None and suggested:
-        suggested_dest = suggested["path"]
-
-    if suggested:
-        start_path = str(Path(suggested["path"]).parent)
-    else:
-        base_folders = settings.get("scanner.base_folders", []) or []
-        start_path = base_folders[0]["path"] if base_folders else ""
-
-    template = settings.get("upload.filename_template", "{dateiname}") or "{dateiname}"
-    filename_suggestion = _render_filename_template(
-        template,
-        project_name=suggested["name"] if suggested else None,
-        original_name=src_path.name,
-    )
-    if filename_suggestion == src_path.name:
-        filename_suggestion = None  # keine Umbenennung vorgeschlagen -- nichts anzuzeigen
-
-    log.info(
-        "Datei-Drop-Vorschlag: %r -> Projekt %s, Ziel %r, Namensvorschlag %r",
-        src_path.name, suggested["name"] if suggested else "(kein Vorschlag)",
-        suggested_dest, filename_suggestion,
-    )
-
-    return templates.TemplateResponse("dashboard_upload.html", {
-        "request":             request,
-        "src":                 str(src_path),
-        "filename":            src_path.name,
-        "filename_suggestion": filename_suggestion,
-        "suggested":           suggested,
-        "suggested_dest":      suggested_dest or "",
-        "start_path":          start_path,
-    })
-
-
-@router.get("/upload-columns", response_class=HTMLResponse)
-async def upload_columns(request: Request, start: str = Query(...), dest: str = Query("")):
-    """Liefert die Spalten-Ansicht separat von upload_page() -- das Aufklappen bis zum
-    Zielordner braucht mehrere Ordner-Auflistungen (teils uebers NAS), was die Seite
-    spuerbar verzoegern wuerde, wenn es den ersten Seitenaufbau blockiert. Die Seite
-    selbst laedt deshalb sofort, dieser Endpunkt wird per htmx direkt danach
-    nachgeladen ("Browser sofort da, Ordnerliste zieht nach")."""
-    if not dest:
-        subdirs, error_msg = _list_browse_level(start)
-        return templates.TemplateResponse("_dashboard_browse.html", {
-            "request": request, "subdirs": subdirs, "error_msg": error_msg,
-            "current_path": start, "project_id": 0, "depth": 0, "selected": "",
-        })
-    html = _prerender_browse_columns(request, start, dest)
-    return HTMLResponse(html)
-
-
-@router.post("/upload", response_class=HTMLResponse)
-async def upload_submit(
-    request:     Request,
-    src:         str = Form(...),
-    dest_folder: str = Form(...),
-    filename:    str = Form(...),
-    keep_copy:   str | None = Form(None),
-):
-    src_path = Path(src)
-    if not src_path.is_file():
-        return HTMLResponse(f"⚠ Ausgangsdatei nicht mehr gefunden: {src}", status_code=404)
-    if not os.path.isdir(dest_folder):
-        return HTMLResponse(f"⚠ Zielordner nicht gefunden: {dest_folder}", status_code=404)
-
-    filename = filename.strip() or src_path.name
-
+@router.get("/upload")
+async def upload_alt(request: Request, src: str = Query("")):
+    """Alte Adresse (Datei-Drop v1): leitet auf die neue Ablage-Seite um. Nur für Dateien auf diesem Rechner."""
+    from fastapi.responses import RedirectResponse
+    from scanner.ablage import vorgang
+    from web.ablage_api import _nur_lokal
+    if not src or not Path(src).is_file() or not _nur_lokal(request):
+        return HTMLResponse("Diese Adresse wird nicht mehr benutzt: Dateien einfach aufs Archivio-Symbol in der "
+                            "Menüleiste ziehen.", status_code=410)
     conn = connection.get_connection()
     try:
-        project = _find_owning_project(conn, dest_folder)
-        if project is None:
-            log.info("Datei-Drop abgelehnt: %r -> %r gehört zu keinem Archivio-Projekt",
-                      src_path.name, dest_folder)
-            return HTMLResponse(
-                "⚠ Dieser Ordner gehört zu keinem Archivio-Projekt — bitte "
-                "einen Ordner innerhalb eines bestehenden Projekts wählen.",
-                status_code=400,
-            )
-
-        target = _unique_upload_dest(Path(dest_folder), filename)
-        dry_run = os.environ.get("ARCHIVIO_UPLOAD_DRY_RUN") == "1"
-
-        if dry_run:
-            log.info(
-                "DRY-RUN Datei-Drop: %r -> %r (Projekt %s, %s, NICHT ausgeführt)",
-                src_path.name, str(target), project["name"],
-                "Kopie" if keep_copy else "verschoben",
-            )
-        else:
-            try:
-                if keep_copy:
-                    import shutil
-                    shutil.copy2(src_path, target)
-                else:
-                    import shutil
-                    shutil.move(str(src_path), str(target))
-            except OSError as exc:
-                log.warning("Datei-Drop fehlgeschlagen: %r -> %r: %s", src_path.name, target, exc)
-                return HTMLResponse(f"⚠ Datei konnte nicht abgelegt werden: {exc}", status_code=500)
-
-            process_file(conn, project["id"], target)
-            log.info("Datei-Drop abgelegt: %r -> %r (Projekt %s, %s)",
-                      src_path.name, str(target), project["name"],
-                      "Kopie" if keep_copy else "verschoben")
+        erg = await asyncio.to_thread(vorgang.analyse_lokal, conn, src)
     finally:
         conn.close()
-
-    return HTMLResponse(f"""<!DOCTYPE html>
-<html lang="de"><head><meta charset="utf-8"><title>Abgelegt</title>
-<style>body{{font-family:-apple-system,sans-serif;display:flex;align-items:center;
-justify-content:center;height:100vh;margin:0;background:#f5f5f5;color:#333;text-align:center;}}
-.hint{{color:#888;font-size:13px;margin-top:8px;}}</style>
-<script>setTimeout(function(){{ window.close(); }}, 900);</script>
-</head><body><div>
-<div>{"🧪 TROCKENLAUF — nichts wurde wirklich verschoben. Wäre abgelegt in" if dry_run else "✓ „" + filename + '" abgelegt in'} {project["name"]}{" (" + str(target) + ")" if dry_run else " — jetzt durchsuchbar."}</div>
-<div class="hint">Dieser Tab kann geschlossen werden.</div>
-</div></body></html>""")
+    return RedirectResponse(f"/dashboard/ablage?t={erg['token']}", status_code=303)
 
 
 @router.post("/ignore-level", response_class=HTMLResponse)

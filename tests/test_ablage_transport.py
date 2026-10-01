@@ -193,7 +193,8 @@ def test_ganzer_ablauf_verschiebt_protokolliert_und_indexiert(welt):
     doc = welt["conn"].execute("SELECT d.filename FROM documents d JOIN document_paths dp ON dp.document_id = d.id "
                                "WHERE dp.path = ?", (str(endgueltig),)).fetchone()
     assert doc is not None                                             # sofort durchsuchbar
-    assert welt["reg"].get(token) is None                              # Token verbraucht
+    assert welt["reg"].get(token)["fertig"] is True                    # Token verbraucht (bleibt nur für „Rückgängig")
+    assert _ausfuehren(welt, token)[0] == 403                          # und lässt sich nicht nochmals ausführen
 
 
 def test_kopie_behaelt_das_original(welt):

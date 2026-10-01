@@ -151,8 +151,8 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 except Exception:
                     body = {}
                 self._handle_copy_to_folder(body.get("paths") or [])
-            elif parsed.path == "/ablage/ausfuehren" and ablage_registry is not None:
-                self._handle_ablage_ausfuehren()
+            elif parsed.path in ("/ablage/ausfuehren", "/ablage/rueckgaengig") and ablage_registry is not None:
+                self._handle_ablage_ausfuehren(rueckgaengig=parsed.path.endswith("rueckgaengig"))
             elif parsed.path == "/choose-folder":
                 self._handle_choose_folder()
             elif parsed.path == "/choose-file":
@@ -187,9 +187,15 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                     os._exit(0)
                 threading.Thread(target=_do_restart, daemon=True).start()
             else:
+                # Body trotzdem lesen: schliesst der Server mit ungelesenen Daten, bekommt der Client
+                # gelegentlich ein „Connection reset" statt des 404
+                try:
+                    self.rfile.read(int(self.headers.get("Content-Length", 0) or 0))
+                except Exception:
+                    pass
                 self._cors_headers(404)
 
-        def _handle_ablage_ausfuehren(self):
+        def _handle_ablage_ausfuehren(self, rueckgaengig: bool = False):
             """Datei-Drop: führt eine im Browser bestätigte Ablage aus. Nimmt NUR einen Token entgegen —
             die Bridge antwortet mit Access-Control-Allow-Origin: *, jede Webseite könnte sie aufrufen, ein
             Endpunkt mit freien src/dest-Pfaden wäre ein Loch (siehe shared/ablage_transport.py)."""
@@ -203,7 +209,8 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
             if not server_url:
                 self._json_response(503, {"ok": False, "error": "Kein Server eingestellt"})
                 return
-            code, antwort = ablage_transport.ausfuehren(body.get("token"), ablage_registry, server_url, log=log)
+            funktion = ablage_transport.rueckgaengig if rueckgaengig else ablage_transport.ausfuehren
+            code, antwort = funktion(body.get("token"), ablage_registry, server_url, log=log)
             self._json_response(code, antwort)
 
         def _handle_choose_folder(self):

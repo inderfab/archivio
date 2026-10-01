@@ -63,6 +63,12 @@ class TokenRegistry:
         with self._lock:
             self._d.pop(token, None)
 
+    def abgelegt(self, token: str, **daten) -> None:
+        """Nach der Ausführung: der Eintrag bleibt für „Rückgängig" (5 Min), kann aber nicht nochmals ausgeführt werden."""
+        with self._lock:
+            if token in self._d:
+                self._d[token].update(daten, fertig=True, ts_fertig=time.time())
+
     def __len__(self) -> int:
         with self._lock:
             return len(self._d)
@@ -241,7 +247,7 @@ def ausfuehren(token, registry: TokenRegistry, server_url: str, session=None, lo
     session = session or requests
     dry = trocken() if dry_run is None else dry_run
     eintrag = registry.get(token)
-    if eintrag is None:
+    if eintrag is None or eintrag.get("fertig"):
         return 403, {"ok": False, "error": "Unbekannter Token"}
     basis = server_url.rstrip("/")
     try:
@@ -280,8 +286,51 @@ def ausfuehren(token, registry: TokenRegistry, server_url: str, session=None, lo
         if log:
             log.warning("Meldung 'abgelegt' fehlgeschlagen: %s", exc)
     if not dry:
-        registry.entfernen(token)
+        registry.abgelegt(token, final=erg["final"], archiviert=erg["archiviert"], ersetzt=erg["ersetzt"],
+                          vorgaenger=d.get("vorgaenger"), kopie=bool(d.get("kopie")))
     if log:
         log.info("Ablage %s: %s -> %s", "(TROCKENLAUF)" if dry else "ausgeführt", eintrag["name"], erg["final"])
     return 200, {"ok": True, "final_path": erg["final"], "trocken": dry, "archiviert": erg["archiviert"],
                  "ersetzt": erg["ersetzt"]}
+
+
+RUECKGAENGIG_S = 300     # 5 Minuten
+
+
+def rueckgaengig(token, registry: TokenRegistry, server_url: str, session=None, log=None) -> tuple[int, dict]:
+    """Macht eine Ablage innerhalb von 5 Minuten rückgängig: Datei zurück an den ursprünglichen Ort, ein ins Archiv
+    geschobener Vorgänger zurück an seinen Platz. Nur per Token; Quelle, Ablageort und Archivpfad stammen aus der
+    Registry des Helpers (nicht vom Aufrufer). Nicht möglich bei Kopie (nichts zurückzuholen) und bei Überschreiben
+    (der alte Stand ist weg)."""
+    import requests
+    session = session or requests
+    e = registry.get(token)
+    if e is None or not e.get("fertig"):
+        return 403, {"ok": False, "error": "Unbekannter Token"}
+    if time.time() - e["ts_fertig"] > RUECKGAENGIG_S:
+        return 409, {"ok": False, "error": "Die 5 Minuten sind vorbei"}
+    if e.get("kopie"):
+        return 409, {"ok": False, "error": "Bei einer Kopie gibt es nichts rückgängig zu machen"}
+    if e.get("ersetzt"):
+        return 409, {"ok": False, "error": "Überschriebene Datei lässt sich nicht zurückholen"}
+    final, src = Path(e["final"]), Path(e["src"])
+    if not final.is_file():
+        return 404, {"ok": False, "error": "Die abgelegte Datei ist nicht mehr da"}
+    if src.exists():
+        return 409, {"ok": False, "error": "Am ursprünglichen Ort liegt inzwischen etwas anderes"}
+    try:
+        # Erst die neue Datei weg (sie liegt beim Archivieren unter dem Namen des Vorgängers), dann den Vorgänger zurück
+        shutil.move(str(final), str(src))
+        if e.get("archiviert") and e.get("vorgaenger") and Path(e["archiviert"]).is_file() \
+                and not Path(e["vorgaenger"]).exists():
+            shutil.move(e["archiviert"], e["vorgaenger"])
+    except OSError as exc:
+        return 500, {"ok": False, "error": str(exc)}
+    try:
+        session.post(f"{server_url.rstrip('/')}/api/ablage/{token}/rueckgaengig", json={"final_path": str(final)},
+                     timeout=30)
+    except Exception as exc:
+        if log:
+            log.warning("Meldung 'rückgängig' fehlgeschlagen: %s", exc)
+    registry.entfernen(token)
+    return 200, {"ok": True, "src": str(src)}

@@ -46,6 +46,7 @@ from web.shared import templates
 from web.dashboard import router as dashboard_router
 from web.api import router as api_router
 from web.ablage_api import router as ablage_router
+from web.ablage_seite import router as ablage_seite_router
 from web.gallery import router as gallery_router
 
 
@@ -373,6 +374,7 @@ app.mount(
 app.include_router(dashboard_router)
 app.include_router(api_router)
 app.include_router(ablage_router)
+app.include_router(ablage_seite_router)
 app.include_router(gallery_router)
 
 # ── Routen ────────────────────────────────────────────────────────────────────
