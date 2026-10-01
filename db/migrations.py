@@ -45,6 +45,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "029_chunks_ohne_embedding", _m029)
     _apply(conn, "030_ablage_ordner", _m030)
     _apply(conn, "031_ablage_slot", _m031)
+    _apply(conn, "032_ablage_stats", _m032)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -839,5 +840,21 @@ def _m031(conn: sqlite3.Connection):
             abdeckung   REAL NOT NULL DEFAULT 0,
             aus_vorlage INTEGER NOT NULL DEFAULT 0
         )
+    """)
+    conn.commit()
+
+
+def _m032(conn: sqlite3.Connection):
+    """ablage_stats: nach Alter gewichtete Merkmalszaehlungen je Ordner, Slot, Rolle und
+    global (Naive-Bayes-Grundlage des Ablage-Vorschlags). Die Zeile `_n` je Schluessel
+    haelt das Gesamtgewicht. Wird komplett von scanner/ablage/index.py neu aufgebaut."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_stats (
+            ebene    TEXT    NOT NULL CHECK (ebene IN ('ordner','slot','rolle','global')),
+            key_id   INTEGER NOT NULL,
+            merkmal  TEXT    NOT NULL,
+            gewicht  REAL    NOT NULL,
+            PRIMARY KEY (ebene, key_id, merkmal)
+        ) WITHOUT ROWID
     """)
     conn.commit()

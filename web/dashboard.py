@@ -1773,6 +1773,8 @@ async def ablage_settings_save(request: Request):
                 vorlage.vorlage_entfernen(conn)
             settings.save({"ablage": {"musterordner": muster, "lernen_ab_projektnummer": ab}})
             vorlage.neu_berechnen(conn)
+            from scanner.ablage import index
+            index.neu_aufbauen(conn)
             return ""
         except FileNotFoundError:
             return "Musterordner nicht gefunden. Ist das Laufwerk verbunden?"
@@ -2773,7 +2775,10 @@ def _ablage_struktur_neu() -> dict | None:
         from scanner.ablage import vorlage
         conn = connection.get_connection()
         try:
-            return vorlage.neu_berechnen(conn)
+            res = vorlage.neu_berechnen(conn)
+            from scanner.ablage import index
+            res["statistik"] = index.neu_aufbauen(conn)
+            return res
         finally:
             conn.close()
     except Exception as exc:

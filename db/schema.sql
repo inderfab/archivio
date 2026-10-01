@@ -143,6 +143,15 @@ CREATE TABLE IF NOT EXISTS ablage_ordner (
 CREATE INDEX IF NOT EXISTS idx_ablage_ordner_project ON ablage_ordner(project_id);
 CREATE INDEX IF NOT EXISTS idx_ablage_ordner_slot ON ablage_ordner(slot_id);
 
+-- Merkmalszählungen (alters-gewichtet) je Ordner/Slot/Rolle/global; `_n` = Gesamtgewicht
+CREATE TABLE IF NOT EXISTS ablage_stats (
+    ebene    TEXT    NOT NULL CHECK (ebene IN ('ordner','slot','rolle','global')),
+    key_id   INTEGER NOT NULL,
+    merkmal  TEXT    NOT NULL,
+    gewicht  REAL    NOT NULL,
+    PRIMARY KEY (ebene, key_id, merkmal)
+) WITHOUT ROWID;
+
 -- Migrations-Tabelle
 CREATE TABLE IF NOT EXISTS _migrations (
     id         TEXT PRIMARY KEY,

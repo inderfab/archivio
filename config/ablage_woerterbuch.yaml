@@ -1,0 +1,82 @@
+# Standard-Wörterbuch für die Merkmalserkennung beim Ablage-Vorschlag (Schweiz / SIA).
+#
+# Alle Einträge in normalisierter Form: Kleinbuchstaben, Umlaute ausgeschrieben
+# (ä→ae, ö→oe, ü→ue), keine Satzzeichen. Ein Eintrag mit bis zu 3 Zeichen muss als ganzes
+# Wort im Dateinamen stehen; längere gelten auch als Wortanfang („grundriss" trifft
+# „Grundrisse"), ab 6 Zeichen auch als Wortbestandteil („protokoll" trifft
+# „Bauherrenprotokoll").
+#
+# Büro-eigene Ergänzungen stehen in config.yaml unter `ablage.woerterbuch` (gleiche
+# Struktur, wird eingemischt). Nichts hier ist büro-spezifisch codiert.
+
+stoppwoerter: [
+  der, die, das, und, oder, mit, fuer, von, auf, ist, ein, eine, im, am, zum, zur, als, aus, bei, nach, vor,
+  the, and, for, with, kopie, copy, datei, file, scan, img, dokument, pdf, neu, aktuell, final,
+]
+
+# Dateiendungen, bei denen ein Dokument mit hoher Wahrscheinlichkeit ein Plan ist
+plan_endungen: [.dwg, .dxf, .pln, .vwx, .ifc, .rvt, .skp]
+
+# Bei diesen Endungen ist ein Geschoss im Namen („Brief an EG Eigentümer") kein Hinweis auf einen Plan
+dokument_endungen: [.doc, .docx, .xls, .xlsx, .txt, .rtf, .eml, .msg, .odt, .ods]
+
+phase:
+  WB: [wettbewerb, studienauftrag, wb]
+  VP: [vorprojekt, vp]
+  BP: [bauprojekt, bp]
+  BG: [baueingabe, baugesuch, baubewilligung, baugespann, bg]
+  AP: [ausfuehrung, ausfuehrungsplan, ausfuehrungsplaene, ap]
+  SUB: [ausschreibung, submission, devis, leistungsverzeichnis]
+  REV: [revision, revisionsplan, revisionsunterlagen, dokumentation]
+
+# Kurze Plan-Kürzel (<= 3 Zeichen) zählen nur, wenn der Name sonst nach Plan aussieht
+# (Geschoss, Massstab, ausgeschriebener Plantyp, Plan-Dateiendung).
+plantyp:
+  GR: [gr, grundriss, grundrisse]
+  SN: [sn, schnitt, schnitte]
+  AN: [an, ansicht, ansichten]
+  DET: [det, detail, details, detailplan]
+  SIT: [sit, situation, situationsplan, lageplan]
+  UMG: [umg, umgebung, umgebungsplan]
+
+doktyp:
+  offerte: [offerte, angebot, offertanfrage]
+  rechnung: [rechnung, rechnungen, faktura, akonto, schlussrechnung]
+  protokoll: [protokoll, protokolle, bhs, fps, bss, sitzungsprotokoll, jourfix]
+  vertrag: [vertrag, werkvertrag, architektenvertrag, planervertrag]
+  kv: [kv, kostenvoranschlag, kostenschaetzung, kostenzusammenstellung]
+  devis: [devis, leistungsverzeichnis, lv, ausschreibung]
+  terminprogramm: [terminprogramm, terminplan, bauprogramm]
+  adressliste: [adressliste, adressen, adressverzeichnis, kontaktliste]
+  organigramm: [organigramm]
+  baubeschrieb: [baubeschrieb, baubeschreibung, projektbeschrieb]
+  baugesuch: [baugesuch, baueingabe, baubewilligung]
+  brandschutz: [brandschutz, brandschutzkonzept, brandschutznachweis]
+  schutzraum: [schutzraum]
+  gutachten: [gutachten, expertise]
+  grundbuch: [grundbuch, grundbuchauszug]
+  visualisierung: [visualisierung, rendering, render, perspektive]
+  jurybericht: [jurybericht, juryprotokoll]
+  kontrollplan: [kontrollplan, kontrollplaene, kontrollplanung]
+
+fachplaner:
+  bauingenieur: [bauingenieur, statik, statiker, tragwerk]
+  hlks: [hlsk, hlks, hlk, haustechnik, heizung, lueftung, sanitaer]
+  elektro: [elektro, elektroingenieur, elektroplanung]
+  bauphysik: [bauphysik, bauphysiker, akustik, schallschutz, waermeschutz, energienachweis]
+  brandschutz: [brandschutzplaner, brandschutzexperte]
+  landschaft: [landschaft, landschaftsarchitekt, landschaftsplaner]
+  geologe: [geologe, geologie, baugrund, altlasten, geotechnik]
+  geometer: [geometer, vermessung, geometerplan, vermessungsplan]
+  bauleitung: [bauleitung, bauleiter]
+  fassade: [fassadenplaner]
+  innenarchitekt: [innenarchitekt, innenarchitektur]
+  beleuchtung: [beleuchtung, beleuchtungsplaner, lichtplanung]
+
+# Plan-Massstäbe, die als blosse Zahl im Namen stehen dürfen (nur mit Plan-Kontext)
+massstaebe: [20, 25, 50, 100, 200, 250, 500, 1000, 2000]
+
+# Projektnummer im Dateinamen: ein Wort aus genau dieser Form, entweder zuerst oder direkt
+# nach einem Datum (`260320_215_WB`, `211_Emmenhof`). Überschreibbar mit
+# `ablage.dateiname_projektnummer` (Regex für ein ganzes Wort).
+projektnummer: '\d{3}'

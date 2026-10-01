@@ -16,3 +16,4 @@ internal/
 
 # Lizenzsystem: Geheimnis darf niemals ins Repo (siehe tools/license_keygen.py)
 license_secret.txt
+ablage_messung_*.md
