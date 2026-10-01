@@ -525,12 +525,32 @@ class ArchivioServer(rumps.App):
         subprocess.run(["open", f"http://127.0.0.1:8000/dashboard/upload?src={quote(path)}"])
 
     def _on_file_dropped(self, paths: list[str]) -> None:
-        """Callback für bridge.register_drop_target() -- eine Datei aufs
-        Menüleisten-Icon gezogen. Bei mehreren Dateien auf einmal (selten) je einen
-        eigenen Browser-Tab, statt die Auswahl auf eine zu beschränken."""
+        """Callback für bridge.register_drop_target() -- Dateien aufs Menüleisten-Icon gezogen. Drop am
+        Server-Mac läuft über dieselbe Engine wie der Helper, nur ohne Upload: der Server liest die Datei
+        selbst (/api/ablage/analyse-lokal). Ein Browser-Tab für alle Dateien."""
         log.info("Datei-Drop aufs Menüleisten-Icon: %s", paths)
+        threading.Thread(target=self._ablage_lokal, args=(list(paths),), daemon=True).start()
+
+    def _ablage_lokal(self, paths: list[str]) -> None:
+        import requests
+        tokens, fehler = [], []
         for p in paths:
-            self._open_upload_page(p)
+            try:
+                r = requests.post("http://127.0.0.1:8000/api/ablage/analyse-lokal", json={"src": p}, timeout=90)
+                if r.status_code == 200 and r.json().get("token"):
+                    tokens.append(r.json()["token"])
+                else:
+                    fehler.append(f"{Path(p).name}: {r.status_code}")
+            except Exception as exc:
+                fehler.append(f"{Path(p).name}: {exc}")
+        if fehler:
+            log.warning("Datei-Drop nicht möglich: %s", "; ".join(fehler))
+            try:
+                rumps.notification("Archivio", "Ablage nicht möglich", "; ".join(fehler)[:200])
+            except Exception:
+                pass
+        if tokens:
+            subprocess.run(["open", f"http://127.0.0.1:8000/dashboard/ablage?t={','.join(tokens)}"])
 
     def toggle_autostart(self, sender):
         new_state = sender.state != 1

@@ -119,7 +119,8 @@ def _unique_dest(dest_dir: Path, filename: str) -> Path:
         i += 1
 
 
-def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None):
+def make_local_http_handler(app_name: str, log, config_provider=None, link_action_provider=None,
+                            ablage_registry=None):
     """config_provider: optionales Callable[[], str], das server_url für den
     /config-Endpoint liefert. Helper übergibt einen Reader auf sein config.json,
     Server übergibt einen fest verdrahteten "http://127.0.0.1:8000" (dieselbe Adresse,
@@ -150,6 +151,8 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 except Exception:
                     body = {}
                 self._handle_copy_to_folder(body.get("paths") or [])
+            elif parsed.path == "/ablage/ausfuehren" and ablage_registry is not None:
+                self._handle_ablage_ausfuehren()
             elif parsed.path == "/choose-folder":
                 self._handle_choose_folder()
             elif parsed.path == "/choose-file":
@@ -185,6 +188,23 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
                 threading.Thread(target=_do_restart, daemon=True).start()
             else:
                 self._cors_headers(404)
+
+        def _handle_ablage_ausfuehren(self):
+            """Datei-Drop: führt eine im Browser bestätigte Ablage aus. Nimmt NUR einen Token entgegen —
+            die Bridge antwortet mit Access-Control-Allow-Origin: *, jede Webseite könnte sie aufrufen, ein
+            Endpunkt mit freien src/dest-Pfaden wäre ein Loch (siehe shared/ablage_transport.py)."""
+            import ablage_transport
+            length = int(self.headers.get("Content-Length", 0) or 0)
+            try:
+                body = json.loads((self.rfile.read(length) if length else b"{}") or b"{}")
+            except Exception:
+                body = {}
+            server_url = (config_provider() if config_provider else "") or ""
+            if not server_url:
+                self._json_response(503, {"ok": False, "error": "Kein Server eingestellt"})
+                return
+            code, antwort = ablage_transport.ausfuehren(body.get("token"), ablage_registry, server_url, log=log)
+            self._json_response(code, antwort)
 
         def _handle_choose_folder(self):
             """Nativer Finder-Ordner-Picker OHNE Datei-Kopie -- für die Einstellungen
@@ -357,8 +377,9 @@ def make_local_http_handler(app_name: str, log, config_provider=None, link_actio
     return _LocalHTTPHandler
 
 
-def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None) -> None:
-    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider)
+def start_local_server(app_name: str, log, config_provider=None, link_action_provider=None,
+                       ablage_registry=None) -> None:
+    handler_cls = make_local_http_handler(app_name, log, config_provider, link_action_provider, ablage_registry)
     try:
         srv = http.server.HTTPServer(("127.0.0.1", HELPER_PORT), handler_cls)
         threading.Thread(target=srv.serve_forever, daemon=True).start()

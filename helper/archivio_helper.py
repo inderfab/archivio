@@ -14,6 +14,7 @@ import requests
 import rumps
 
 import menubar_bridge as bridge
+import ablage_transport
 
 HELPER_PORT = bridge.HELPER_PORT
 
@@ -227,11 +228,17 @@ class ArchivioHelper(rumps.App):
         bridge.repair_broken_autostart_entries("Archivio Helper", log)
         self._autostart_item.state = bridge.ensure_autostart_default(log, STATE_PATH)
 
+        # Datei-Drop: Token → Quelldatei nur hier im Speicher (siehe shared/ablage_transport.py)
+        self._ablage_tokens = ablage_transport.TokenRegistry()
         bridge.start_local_server(
             "Archivio Helper", log,
             config_provider=lambda: _load_config().get("server_url", ""),
             link_action_provider=lambda: _load_config().get("link_action", "reveal"),
+            ablage_registry=self._ablage_tokens,
         )
+        # Muss ueber before_start laufen: das Status-Item existiert erst waehrend App.run()
+        rumps.events.before_start.register(
+            lambda: bridge.register_drop_target(self, self._on_file_dropped, log))
         bridge.register_url_handler(log)
         bridge.ensure_quick_action_installed(log)
         threading.Thread(target=self._status_loop, daemon=True).start()
@@ -441,6 +448,24 @@ class ArchivioHelper(rumps.App):
         dort aus über /install-mcp auf diesem Helper, nicht mehr automatisch beim
         Start (siehe shared/menubar_bridge.py::install_mcp_client)."""
         subprocess.run(["open", f"{self._server_url}/mcp-log"])
+
+    def _on_file_dropped(self, paths: list[str]) -> None:
+        """Dateien aufs Menüleisten-Symbol gezogen: analysieren lassen und die Ablage-Seite öffnen — ein
+        Browser-Tab für alle Dateien eines Drops. Läuft im Hintergrund (Hash und Upload brauchen Zeit)."""
+        threading.Thread(target=self._ablage_analysieren, args=(list(paths),), daemon=True).start()
+
+    def _ablage_analysieren(self, paths: list[str]) -> None:
+        log.info("Datei-Drop aufs Menüleisten-Icon: %d Datei(en)", len(paths))
+        res = ablage_transport.dateien_analysieren(paths, self._server_url, self._ablage_tokens, log=log)
+        tokens = [r["token"] for r in res if r.get("token")]
+        fehler = [f"{r['name']}: {r['fehler']}" for r in res if r.get("fehler")]
+        if fehler:
+            try:
+                rumps.notification("Archivio", "Ablage nicht möglich", "; ".join(fehler)[:200])
+            except Exception:
+                pass
+        if tokens:
+            subprocess.run(["open", ablage_transport.ablage_url(self._server_url, tokens)])
 
     def open_browser(self, _):
         subprocess.run(["open", self._server_url])

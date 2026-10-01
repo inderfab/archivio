@@ -45,6 +45,7 @@ from db import connection
 from web.shared import templates
 from web.dashboard import router as dashboard_router
 from web.api import router as api_router
+from web.ablage_api import router as ablage_router
 from web.gallery import router as gallery_router
 
 
@@ -249,6 +250,20 @@ def _startvorbereitung() -> None:
     # Erst jetzt die Dienste starten, die die Datenbank benutzen.
     threading.Thread(target=_scheduler_loop, daemon=True).start()
 
+    # Ablage-Vorschlag vorwärmen: das Laden von Ordnern und Statistik braucht bei grossen Beständen ein paar
+    # Sekunden — die sollen nicht der erste Datei-Drop bezahlen. Best effort, ein Fehler stört nichts.
+    def _ablage_vorwaermen():
+        try:
+            from scanner.ablage import kontext as _kontext
+            _c = connection.get_connection()
+            try:
+                _kontext.holen(_c)
+            finally:
+                _c.close()
+        except Exception as _e:
+            logging.getLogger(__name__).debug("Ablage-Kontext nicht vorgewärmt: %s", _e)
+    threading.Thread(target=_ablage_vorwaermen, daemon=True).start()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -357,6 +372,7 @@ app.mount(
 )
 app.include_router(dashboard_router)
 app.include_router(api_router)
+app.include_router(ablage_router)
 app.include_router(gallery_router)
 
 # ── Routen ────────────────────────────────────────────────────────────────────

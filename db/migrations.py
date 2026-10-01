@@ -46,6 +46,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "030_ablage_ordner", _m030)
     _apply(conn, "031_ablage_slot", _m031)
     _apply(conn, "032_ablage_stats", _m032)
+    _apply(conn, "033_ablage_vorgang", _m033)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -857,4 +858,31 @@ def _m032(conn: sqlite3.Connection):
             PRIMARY KEY (ebene, key_id, merkmal)
         ) WITHOUT ROWID
     """)
+    conn.commit()
+
+
+def _m033(conn: sqlite3.Connection):
+    """Datei-Drop: ablage_vorgang (ein Drop bis zur Ablage, 24 h), ablage_log (dauerhaft, fuer Messung und
+    Lernen), ablage_regel (explizite Regeln, nie automatisch aktiv)."""
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_vorgang (
+            token TEXT PRIMARY KEY, erstellt TEXT NOT NULL, host TEXT, dateiname TEXT NOT NULL,
+            groesse INTEGER, mtime TEXT, hash TEXT, staging_pfad TEXT, lokal_src TEXT,
+            merkmale TEXT NOT NULL, vorschlag TEXT NOT NULL, entscheid TEXT,
+            status TEXT NOT NULL DEFAULT 'offen'
+                CHECK (status IN ('offen','bestaetigt','abgelegt','abgebrochen'))
+        )""")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_log (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, host TEXT,
+            dateiname TEXT, endung TEXT, merkmale TEXT, vorschlag TEXT,
+            gewaehlt_pfad TEXT, gewaehlt_rang INTEGER, projekt_richtig INTEGER, dauer_ms INTEGER
+        )""")
+    conn.execute("""
+        CREATE TABLE IF NOT EXISTS ablage_regel (
+            id INTEGER PRIMARY KEY AUTOINCREMENT, merkmal TEXT NOT NULL, slot_label_pfad TEXT NOT NULL,
+            quelle TEXT NOT NULL CHECK (quelle IN ('admin','gelernt')), aktiv INTEGER NOT NULL DEFAULT 1,
+            erstellt TEXT NOT NULL, treffer INTEGER NOT NULL DEFAULT 0,
+            UNIQUE(merkmal, slot_label_pfad)
+        )""")
     conn.commit()

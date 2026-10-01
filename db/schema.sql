@@ -152,6 +152,25 @@ CREATE TABLE IF NOT EXISTS ablage_stats (
     PRIMARY KEY (ebene, key_id, merkmal)
 ) WITHOUT ROWID;
 
+-- Datei-Drop: ein Vorgang je abgelegte Datei (24 h), Protokoll dauerhaft, explizite Regeln
+CREATE TABLE IF NOT EXISTS ablage_vorgang (
+    token TEXT PRIMARY KEY, erstellt TEXT NOT NULL, host TEXT, dateiname TEXT NOT NULL,
+    groesse INTEGER, mtime TEXT, hash TEXT, staging_pfad TEXT, lokal_src TEXT,
+    merkmale TEXT NOT NULL, vorschlag TEXT NOT NULL, entscheid TEXT,
+    status TEXT NOT NULL DEFAULT 'offen' CHECK (status IN ('offen','bestaetigt','abgelegt','abgebrochen'))
+);
+CREATE TABLE IF NOT EXISTS ablage_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, ts TEXT NOT NULL, host TEXT,
+    dateiname TEXT, endung TEXT, merkmale TEXT, vorschlag TEXT,
+    gewaehlt_pfad TEXT, gewaehlt_rang INTEGER, projekt_richtig INTEGER, dauer_ms INTEGER
+);
+CREATE TABLE IF NOT EXISTS ablage_regel (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, merkmal TEXT NOT NULL, slot_label_pfad TEXT NOT NULL,
+    quelle TEXT NOT NULL CHECK (quelle IN ('admin','gelernt')), aktiv INTEGER NOT NULL DEFAULT 1,
+    erstellt TEXT NOT NULL, treffer INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(merkmal, slot_label_pfad)
+);
+
 -- Migrations-Tabelle
 CREATE TABLE IF NOT EXISTS _migrations (
     id         TEXT PRIMARY KEY,
