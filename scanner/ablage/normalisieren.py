@@ -136,11 +136,9 @@ def ist_trenner(name: str) -> bool:
     return bool(_TRENNER_RE.match(unicodedata.normalize("NFC", name).strip()))
 
 
-def art_bestimmen(name: str, label: str | None = None, archiv_labels=None,
-                  ausgeschlossen: bool = False) -> str:
-    """`ausgeschlossen` kommt vom Aufrufer (walker._is_excluded_name), alles andere von hier."""
-    if ausgeschlossen:
-        return "ausgeschlossen"
+def art_bestimmen(name: str, label: str | None = None, archiv_labels=None) -> str:
+    """Art eines Ordners: normal | archiv | trenner. Ob er vom Scan ausgeschlossen ist, ist davon unabhängig
+    (eigene Spalte `ausgeschlossen`): ein ausgeschlossenes `z_Archiv` bleibt ein Archiv."""
     if ist_trenner(name):
         return "trenner"
     if label is None:

@@ -50,7 +50,7 @@ def kandidaten(ctx: Kontext, projekt_id: int) -> list[Kand]:
         if o.slot_id is not None and (o.slot_id not in slot_ordner
                                       or o.datei_anzahl > ctx.ordner[slot_ordner[o.slot_id]].datei_anzahl):
             slot_ordner[o.slot_id] = o.id
-        if o.art != "normal":
+        if o.art != "normal" or o.ausgeschlossen:
             continue
         slot = ctx.slots.get(o.slot_id) if o.slot_id is not None else None
         res.append(Kand(o.id, o.id, o.slot_id, o.parent_id, o.path, o.name, o.label,
@@ -68,7 +68,7 @@ def kandidaten(ctx: Kontext, projekt_id: int) -> list[Kand]:
             if es is None or es.id not in slot_ordner:
                 continue
             eo = ctx.ordner[slot_ordner[es.id]]
-            if eo.art != "normal":
+            if eo.art != "normal" or eo.ausgeschlossen:
                 continue
             eltern_key, eltern_pfad = eo.id, eo.path
         res.append(Kand(("v", sid), None, sid, eltern_key, f"{eltern_pfad.rstrip('/')}/{slot.anzeige}",

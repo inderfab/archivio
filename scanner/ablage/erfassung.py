@@ -31,11 +31,11 @@ class OrdnerSammler:
     def __init__(self, root: str, archiv_labels=None):
         self.root = pfad_schluessel(root)
         self.archiv_labels = archiv_labels
-        self._ordner: dict[str, str] = {}          # Pfad → art
+        self._ordner: dict[str, tuple] = {}        # Pfad → (art, ausgeschlossen)
         self._dateien: dict[str, list] = {}        # Pfad → [Anzahl, jüngste mtime (ISO) | None]
 
     def ordner_gesehen(self, pfad: str, name: str, ausgeschlossen: bool = False) -> None:
-        self._ordner[pfad] = art_bestimmen(name, _zerlegt(name)[1], self.archiv_labels, ausgeschlossen)
+        self._ordner[pfad] = (art_bestimmen(name, _zerlegt(name)[1], self.archiv_labels), int(bool(ausgeschlossen)))
 
     def dateien_gesehen(self, ordner: str, anzahl: int) -> None:
         self._dateien.setdefault(ordner, [0, None])[0] += anzahl
@@ -53,7 +53,7 @@ class OrdnerSammler:
         """Eltern vor Kindern (nach Tiefe sortiert), damit parent_id beim Schreiben bekannt ist."""
         res = []
         root = self.root
-        for pfad, art in self._ordner.items():
+        for pfad, (art, ausgeschlossen) in self._ordner.items():
             key = pfad_schluessel(pfad)
             rel = key[len(root):].lstrip("/") if key.startswith(root) else key
             name = os.path.basename(key)
@@ -62,14 +62,14 @@ class OrdnerSammler:
             res.append({
                 "path": key, "rel_path": rel, "depth": rel.count("/") + 1, "name": name,
                 "label": label, "praefix": praefix, "codes": codes,
-                "art": art, "datei_anzahl": anzahl, "letzte_aenderung": mtime,
+                "art": art, "ausgeschlossen": ausgeschlossen, "datei_anzahl": anzahl, "letzte_aenderung": mtime,
                 "parent": key.rsplit("/", 1)[0] if "/" in rel else None,
             })
         res.sort(key=lambda d: (d["depth"], d["path"]))
         return res
 
 
-_FELDER = ("parent_id", "rel_path", "depth", "name", "label", "praefix", "codes", "art",
+_FELDER = ("parent_id", "rel_path", "depth", "name", "label", "praefix", "codes", "art", "ausgeschlossen",
            "datei_anzahl", "letzte_aenderung")
 
 
@@ -98,18 +98,18 @@ def schreibe_ordner(conn, project_id: int, sammler: OrdnerSammler) -> int:
             row = conn.execute(
                 """INSERT INTO ablage_ordner
                        (project_id, path, parent_id, rel_path, depth, name, label, praefix,
-                        codes, art, datei_anzahl, letzte_aenderung, zuletzt_gesehen)
-                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)
+                        codes, art, ausgeschlossen, datei_anzahl, letzte_aenderung, zuletzt_gesehen)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)
                    ON CONFLICT(path) DO UPDATE SET
                        project_id=excluded.project_id, parent_id=excluded.parent_id,
                        rel_path=excluded.rel_path, depth=excluded.depth, name=excluded.name,
                        label=excluded.label, praefix=excluded.praefix, codes=excluded.codes,
-                       art=excluded.art, datei_anzahl=excluded.datei_anzahl,
+                       art=excluded.art, ausgeschlossen=excluded.ausgeschlossen, datei_anzahl=excluded.datei_anzahl,
                        letzte_aenderung=excluded.letzte_aenderung,
                        zuletzt_gesehen=excluded.zuletzt_gesehen
                    RETURNING id""",
                 (project_id, d["path"], parent_id, d["rel_path"], d["depth"], d["name"],
-                 d["label"], d["praefix"], d["codes"], d["art"], d["datei_anzahl"],
+                 d["label"], d["praefix"], d["codes"], d["art"], d["ausgeschlossen"], d["datei_anzahl"],
                  d["letzte_aenderung"], marke),
             ).fetchone()
             ids[d["path"]] = row[0]

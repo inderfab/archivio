@@ -67,7 +67,7 @@ def lern_projekte(conn) -> list[int]:
         ab = None
     rows = conn.execute(
         "SELECT p.id, p.name, p.path, COUNT(o.id) AS n FROM projects p "
-        "JOIN ablage_ordner o ON o.project_id = p.id AND o.art <> 'ausgeschlossen' "
+        "JOIN ablage_ordner o ON o.project_id = p.id AND o.ausgeschlossen = 0 "
         "GROUP BY p.id"
     ).fetchall()
     res = []
@@ -97,7 +97,7 @@ def _projekt_labelpfade(conn, projekt_ids) -> tuple[dict[int, set[str]], dict[st
     pro_projekt: dict[int, set[str]] = {i: set() for i in ids}
     namen: dict[str, Counter] = {}
     for r in conn.execute(
-        "SELECT project_id, rel_path, name FROM ablage_ordner WHERE art IN ('normal','archiv')"
+        "SELECT project_id, rel_path, name FROM ablage_ordner WHERE art IN ('normal','archiv') AND ausgeschlossen = 0"
     ):
         if r["project_id"] not in ids:
             continue

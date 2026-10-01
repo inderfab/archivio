@@ -138,7 +138,8 @@ CREATE TABLE IF NOT EXISTS ablage_ordner (
                       CHECK (art IN ('normal','archiv','trenner','ausgeschlossen')),
     datei_anzahl  INTEGER NOT NULL DEFAULT 0,
     letzte_aenderung TEXT,
-    zuletzt_gesehen  TEXT NOT NULL
+    zuletzt_gesehen  TEXT NOT NULL,
+    ausgeschlossen INTEGER NOT NULL DEFAULT 0     -- vom Scan ausgeschlossen (Sperrliste/ignoriert), unabhängig von `art`
 );
 CREATE INDEX IF NOT EXISTS idx_ablage_ordner_project ON ablage_ordner(project_id);
 CREATE INDEX IF NOT EXISTS idx_ablage_ordner_slot ON ablage_ordner(slot_id);

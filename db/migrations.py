@@ -47,6 +47,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "031_ablage_slot", _m031)
     _apply(conn, "032_ablage_stats", _m032)
     _apply(conn, "033_ablage_vorgang", _m033)
+    _apply(conn, "034_ablage_ordner_ausgeschlossen", _m034)
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -886,3 +887,24 @@ def _m033(conn: sqlite3.Connection):
             UNIQUE(merkmal, slot_label_pfad)
         )""")
     conn.commit()
+
+
+def _m034(conn: sqlite3.Connection):
+    """ablage_ordner.ausgeschlossen: die Art eines Ordners und sein Ausschluss vom Scan sind zwei verschiedene Dinge.
+
+    Vorher wurde ein ausgeschlossener Ordner mit art='ausgeschlossen' erfasst und verlor dabei seine Art: ein
+    ausgeschlossenes `z_Archiv` war dann kein Archiv mehr, „alten Stand archivieren" fand keinen Archivordner.
+    Jetzt bleibt `art` (normal/archiv/trenner) und `ausgeschlossen` ist ein eigenes 0/1-Feld. Bestehende Zeilen mit
+    art='ausgeschlossen' werden umgestellt (die CHECK-Konstante bleibt aus Kompatibilitaet erlaubt, wird aber nicht
+    mehr geschrieben)."""
+    spalten = [r[1] for r in conn.execute("PRAGMA table_info(ablage_ordner)")]
+    if "ausgeschlossen" not in spalten:
+        conn.execute("ALTER TABLE ablage_ordner ADD COLUMN ausgeschlossen INTEGER NOT NULL DEFAULT 0")
+    from scanner.ablage.normalisieren import art_bestimmen
+    zeilen = conn.execute("SELECT id, name, label FROM ablage_ordner WHERE art = 'ausgeschlossen'").fetchall()
+    for r in zeilen:
+        conn.execute("UPDATE ablage_ordner SET ausgeschlossen = 1, art = ? WHERE id = ?",
+                     (art_bestimmen(r[1], r[2]), r[0]))
+    conn.commit()
+    if zeilen:
+        log.info("%d Ordner auf die Spalte ausgeschlossen umgestellt", len(zeilen))

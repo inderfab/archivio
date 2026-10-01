@@ -499,3 +499,40 @@ def test_migration_033(tmp_db):
     assert "033_ablage_vorgang" in ids
     for t in ("ablage_vorgang", "ablage_log", "ablage_regel"):
         assert tmp_db.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
+
+
+def test_archivieren_in_ausgeschlossenen_archivordner(welt):
+    """Die Sperrliste der Test-Config enthält „Archiv": der Ordner wird nicht gescannt, aber der alte Stand muss
+    trotzdem dorthin verschoben werden können (verschoben, nicht indexiert)."""
+    from scanner.ablage import kontext
+    from scanner.walker import scan_project
+    ziel = welt["projekt"] / "c_Protokolle"
+    (ziel / "Archiv").mkdir()
+    alt = ziel / "Protokoll BHS 5.txt"
+    alt.write_text("alter Stand", encoding="utf-8")
+    scan_project(welt["pid"], welt["projekt"])
+    kontext.invalidieren()
+    z = welt["conn"].execute("SELECT art, ausgeschlossen FROM ablage_ordner WHERE rel_path = 'c_Protokolle/Archiv'").fetchone()
+    assert (z["art"], z["ausgeschlossen"]) == ("archiv", 1)
+    token = _drop(welt, _datei(welt, inhalt="neuer Stand"))
+    assert _bestaetigen(welt, token, ziel, vorgaenger_modus="archivieren").status_code == 200
+    e = vorgang.holen(welt["conn"], token)["entscheid"]
+    assert e["archiv_ordner"] == str(ziel / "Archiv")
+    code, res = _ausfuehren(welt, token)
+    assert code == 200 and res["archiviert"] == str(ziel / "Archiv" / "Protokoll BHS 5.txt")
+    assert (ziel / "Archiv" / "Protokoll BHS 5.txt").read_text(encoding="utf-8") == "alter Stand"
+    assert alt.read_text(encoding="utf-8") == "neuer Stand"
+    # die neue Datei ist indexiert, im ausgeschlossenen Archiv wird nichts neu aufgenommen
+    assert welt["conn"].execute("SELECT 1 FROM document_paths WHERE path = ?", (str(alt),)).fetchone()
+    assert not welt["conn"].execute("SELECT 1 FROM document_paths WHERE path LIKE ?", (str(ziel / "Archiv") + "/%",)).fetchone()
+
+
+def test_ausgeschlossener_ordner_ist_kein_vorschlag(welt):
+    from scanner.ablage import kontext, ordner
+    from scanner.walker import scan_project
+    (welt["projekt"] / "Upload").mkdir()
+    scan_project(welt["pid"], welt["projekt"])
+    kontext.invalidieren()
+    ctx = kontext.holen(welt["conn"])
+    pfade = [k.pfad for k in ordner.kandidaten(ctx, welt["pid"])]
+    assert not any(p.endswith("/Upload") for p in pfade) and any(p.endswith("c_Protokolle") for p in pfade)

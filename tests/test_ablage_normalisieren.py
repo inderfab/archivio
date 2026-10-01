@@ -127,7 +127,7 @@ def test_trenner_und_archiv():
     assert art_bestimmen("z_Archiv") == "archiv"
     assert art_bestimmen("Z_Archiv") == "archiv"
     assert art_bestimmen("51a_Planstände") == "normal"
-    assert art_bestimmen("Temp", ausgeschlossen=True) == "ausgeschlossen"
+    assert art_bestimmen("Temp") == "normal"            # Ausschluss ist eine eigene Spalte, keine Art mehr
 
 
 def test_ungueltig_ist_kein_archiv():

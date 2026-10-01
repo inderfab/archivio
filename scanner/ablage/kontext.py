@@ -81,6 +81,7 @@ class OrdnerInfo:
     slot_id: int | None
     datei_anzahl: int = 0
     letzte_aenderung: str | None = None
+    ausgeschlossen: bool = False       # vom Scan ausgeschlossen; die Art (z. B. archiv) bleibt davon unberührt
 
 
 @dataclass
@@ -176,7 +177,7 @@ class Kontext:
         eigene: dict[int, set] = {}
         for oid in self.ordner_von(projekt_id):
             o = self.ordner[oid]
-            if o.art != "normal":
+            if o.art != "normal" or o.ausgeschlossen:
                 continue
             eigene[oid] = {w for w in label_text(o.name).split() if len(w) >= 4 and not w.isdigit()}
         for oid, ws in eigene.items():
@@ -272,12 +273,12 @@ def lade_kontext(conn, jetzt: datetime | None = None) -> Kontext:
                                   r["abdeckung"])
     letzte: dict[int, str] = {}
     for r in conn.execute("SELECT id, project_id, path, rel_path, name, label, parent_id, art, slot_id, datei_anzahl,"
-                          " letzte_aenderung FROM ablage_ordner"):
+                          " letzte_aenderung, ausgeschlossen FROM ablage_ordner"):
         if r["project_id"] not in ctx.projekte:
             continue
         ctx.ordner[r["id"]] = OrdnerInfo(r["id"], r["project_id"], r["path"], r["rel_path"], r["name"], r["label"],
                                          r["parent_id"], r["art"], r["slot_id"], r["datei_anzahl"],
-                                         r["letzte_aenderung"])
+                                         r["letzte_aenderung"], bool(r["ausgeschlossen"]))
         if r["letzte_aenderung"] and r["letzte_aenderung"] > letzte.get(r["project_id"], ""):
             letzte[r["project_id"]] = r["letzte_aenderung"]
     for pid, ts in letzte.items():

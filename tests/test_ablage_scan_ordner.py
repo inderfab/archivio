@@ -59,7 +59,9 @@ def test_leere_und_ausgeschlossene_ordner_erfasst(tmp_db, tmp_path):
     assert o["0-------"]["art"] == "trenner"
     assert o["00_ungueltig"]["art"] == "normal"
     assert json.loads(o["201_209_Baugrubenaushub"]["codes"]) == ["201-209"]
-    assert o["Upload"]["art"] == "ausgeschlossen"
+    # Ausschluss ist eine eigene Spalte, die Art bleibt erhalten
+    assert o["Upload"]["ausgeschlossen"] == 1 and o["Upload"]["art"] == "normal"
+    assert o["51_Ausfuehrung/51a_Planstände"]["ausgeschlossen"] == 0
 
     # nicht betreten und nicht erfasst: Inhalt ausgeschlossener sowie versteckte Ordner
     assert "Upload/tief" not in o
@@ -153,3 +155,32 @@ def test_archiv_labels_aus_config(tmp_db, tmp_path, monkeypatch):
     o = _ordner(tmp_db, pid)
     assert o["Ablage_Alt"]["art"] == "archiv"
     assert o["z_Archiv"]["art"] == "normal"
+
+
+def test_ausgeschlossenes_archiv_bleibt_archiv(tmp_db, tmp_path):
+    """Die Test-Config sperrt „Archiv": der Ordner wird nicht gescannt, ist aber weiterhin ein Archiv-Ordner."""
+    root = tmp_path / "scan"
+    (root / "c_Protokolle" / "Archiv").mkdir(parents=True)
+    (root / "c_Protokolle" / "z_Archiv").mkdir()
+    (root / "c_Protokolle" / "a.txt").write_text("x", encoding="utf-8")
+    pid = queries.insert_project(tmp_db, "P", str(root))
+    tmp_db.commit()
+    scan_project(pid, root)
+    o = _ordner(tmp_db, pid)
+    assert o["c_Protokolle/Archiv"]["art"] == "archiv" and o["c_Protokolle/Archiv"]["ausgeschlossen"] == 1
+    assert o["c_Protokolle/z_Archiv"]["art"] == "archiv" and o["c_Protokolle/z_Archiv"]["ausgeschlossen"] == 0
+
+
+def test_migration_034_stellt_alte_zeilen_um(tmp_db):
+    from db import migrations
+    pid = tmp_db.execute("INSERT INTO projects (name, path) VALUES ('P', '/p')").lastrowid
+    for name, label in (("Upload", "upload"), ("Archiv", "archiv")):
+        tmp_db.execute(
+            "INSERT INTO ablage_ordner (project_id, path, rel_path, depth, name, label, art, zuletzt_gesehen)"
+            " VALUES (?,?,?,1,?,?,'ausgeschlossen','x')", (pid, f"/p/{name}", name, name, label))
+    tmp_db.commit()
+    migrations._m034(tmp_db)
+    zeilen = {r["name"]: (r["art"], r["ausgeschlossen"]) for r in tmp_db.execute("SELECT name, art, ausgeschlossen FROM ablage_ordner")}
+    assert zeilen == {"Upload": ("normal", 1), "Archiv": ("archiv", 1)}
+    migrations._m034(tmp_db)                                    # idempotent
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='034_ablage_ordner_ausgeschlossen'").fetchone()

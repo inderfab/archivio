@@ -434,7 +434,7 @@ def auswerten_ordner(ctx, zeilen, par, mit_vorgaenger):
         sicher_ok = bool(sb) and (z["wahr"] == sb or z["wahr"].startswith(sb.rstrip("/") + "/"))
         im_zweig = [bool(r) and (z["wahr"] == r or z["wahr"].startswith(r.rstrip("/") + "/")) for r in rang]
         tiefe_o1 = len([t for t in rang[0][len(wurzel):].split("/") if t]) if rang else 0
-        out.append({"gruppe": z["gruppe"], "ausser_wertung": False, "ziel_neu": z["ziel_neu"], "fall": erg["fall"],
+        out.append({"z": z, "tiefe_roh": tiefe, "gruppe": z["gruppe"], "ausser_wertung": False, "ziel_neu": z["ziel_neu"], "fall": erg["fall"],
                     "top1": bool(rang) and rang[0] == z["wahr"], "top3": z["wahr"] in rang[:3],
                     "sicher_ok": sicher_ok, "tiefe": tiefe if sicher_ok else 0,
                     "zweig1": bool(im_zweig) and im_zweig[0], "zweig3": any(im_zweig[:3]), "tiefe_o1": tiefe_o1,
@@ -516,6 +516,170 @@ def kalibrieren(ctx, train, par, grid):
     return par.temperatur
 
 
+# ── Nachtrag 1, §2: zusätzliche Kennzahlen (nur messen, kein Tuning) ───────────
+
+DROP_ENDUNGEN = {".pdf", ".docx", ".doc", ".xlsx", ".eml", ".msg", ".jpg", ".png", ".zip"}
+CAD_ENDUNGEN = {".dwg", ".dxf", ".pln", ".vwx", ".ifc", ".rvt", ".skp", ".3dm", ".nwd", ".c4d", ".3ds", ".obj", ".gsm"}
+_BILD_NR = re.compile(r"^image\d{3}\.(png|jpg)$", re.IGNORECASE)
+SCHWELLEN = [0.60, 0.65, 0.70, 0.75, 0.80, 0.85, 0.90, 0.95]
+WAHL_MAX_FEHLER = 0.05      # Regel für die Schwellenwahl: grösste Abdeckung ab „Bereich", Fehler höchstens so gross
+
+
+def ist_drop_typisch(f) -> bool:
+    """Dateien, die tatsächlich per Drop ankommen: keine CAD/BIM-Exporte, keine `image001.png`-Anhänge."""
+    ext = (f["ext"] or Path(f["filename"]).suffix).lower()
+    return ext in DROP_ENDUNGEN and ext not in CAD_ENDUNGEN and not _BILD_NR.match(f["filename"])
+
+
+def ereignisse(dateien):
+    """Gleicher Zielordner, gleicher Tag und gleiche Endung = EIN Ablage-Ereignis; Vertreter ist die erste Datei.
+    Ein Export von 60 PDFs zählt nur einmal."""
+    gruppen: dict[tuple, dict] = {}
+    for f in sorted(dateien, key=lambda f: (f["mod"], f["id"])):
+        k = (f["project_id"], f["ordner"], f["mod"][:10], (f["ext"] or Path(f["filename"]).suffix).lower())
+        gruppen.setdefault(k, f)
+    return list(gruppen.values())
+
+
+def hat_projektsignal(z) -> bool:
+    """Der Dateiname trägt eine Projektnummer oder einen Projektnamen (Obergrenze der Projekterkennung)."""
+    ctx = z.get("ctx")
+    m = z["datei"].merkmale
+    if any(k.startswith("proj:") for k in m):
+        return True
+    toks = set(mk._tokens(mk._stamm_name(z["f"]["filename"])))
+    return bool(ctx) and any(p.tokens & toks for p in ctx.projekte.values())
+
+
+def projekt_kennzahlen(rows, par):
+    n = len(rows)
+    top1 = sum(1 for z in rows if z["pk"] and z["pk"][0].id == z["f"]["project_id"])
+    top3 = sum(1 for z in rows if any(c.id == z["f"]["project_id"] for c in z["pk"][:3]))
+    def eind(schwelle):
+        e = [z for z in rows if z["pk"] and z["pk"][0].p >= schwelle]
+        return len(e), sum(1 for z in e if z["pk"][0].id != z["f"]["project_id"])
+    return {"n": n, "top1": top1, "top3": top3, "sicher": eind(par.projekt_sicher), "eindeutig": eind(0.95),
+            "ms": [z["dt_p"] for z in rows]}
+
+
+def projekt_tabelle(rows, par):
+    k = projekt_kennzahlen(rows, par)
+    n = k["n"]
+    (s_n, s_f), (e_n, e_f) = k["sicher"], k["eindeutig"]
+    return (f"| Projekt Top-1 | {pct(k['top1'], n)} |\n|---|---:|\n| Projekt Top-3 | {pct(k['top3'], n)} |\n"
+            f"| Projekt „sicher\" (p ≥ {par.projekt_sicher}) | {pct(s_n, n)} ({s_n}), davon falsch {pct(s_f, s_n)} ({s_f}) |\n"
+            f"| Projekt „eindeutig\" (p ≥ 0.95) | {pct(e_n, n)} ({e_n}), davon falsch {pct(e_f, e_n)} ({e_f}) |\n"
+            f"| Laufzeit Projekt | Median {statistics.median(k['ms']) if k['ms'] else 0:.1f} ms · p95 {p95(k['ms']):.1f} ms |")
+
+
+def stufe(r, par):
+    """Aussage-Stufe eines Falls: -1 = keine Aussage (Projekt unklar), 0 = Projekt, 1 = Bereich/Phase, 2 = tiefer."""
+    z = r["z"]
+    if not (z["pk"] and z["pk"][0].p >= par.projekt_sicher):
+        return -1
+    return min(2, r["tiefe_roh"])
+
+
+def stufe_richtig(r) -> bool:
+    z = r["z"]
+    proj_ok = bool(z["pk"]) and z["pk"][0].id == z["f"]["project_id"]
+    return proj_ok and (r["tiefe_roh"] == 0 or r["sicher_ok"])
+
+
+def tiefe_tabelle(res, par):
+    """§2.1: Verteilung der Tiefe von `sicher_bis` mit Trefferquote je Stufe."""
+    res = [r for r in res if not r["ausser_wertung"]]
+    n = len(res)
+    namen = {-1: "keine Aussage (Projekt unklar)", 0: "Projekt", 1: "Bereich / Phase (Ebene 1)", 2: "tiefer (Ebene ≥ 2)"}
+    zeilen = ["| Stufe von `sicher_bis` | Anteil der Fälle | davon richtig |", "|---|---:|---:|"]
+    for st in (-1, 0, 1, 2):
+        sub = [r for r in res if stufe(r, par) == st]
+        rich = "–" if st == -1 else pct(sum(stufe_richtig(r) for r in sub), len(sub))
+        zeilen.append(f"| {namen[st]} | {pct(len(sub), n)} ({len(sub)}) | {rich} |")
+    return "\n".join(zeilen)
+
+
+def kurve(ctx, rows, par):
+    """§2.1: Abdeckung gegen Fehler für `schwelle_sicher` 0.60 … 0.95. Rückgabe (Markdown, gewählte Schwelle)."""
+    alt = par.schwelle_sicher
+    zeilen = ["| Schwelle | Aussage ≥ Projekt: Abdeckung / falsch | ≥ Bereich: Abdeckung / falsch | ≥ tiefer: Abdeckung / falsch |",
+              "|---:|---:|---:|---:|"]
+    gewaehlt, beste = None, -1.0
+    for t in SCHWELLEN:
+        par.schwelle_sicher = t
+        res = [r for r in auswerten_ordner(ctx, rows, par, False) if not r["ausser_wertung"]]
+        n = len(res)
+        zellen = []
+        for mind in (0, 1, 2):
+            sub = [r for r in res if stufe(r, par) >= mind]
+            falsch = sum(not stufe_richtig(r) for r in sub)
+            zellen.append((len(sub) / n if n else 0.0, falsch / len(sub) if sub else 0.0, len(sub)))
+            if mind == 1 and sub and falsch / len(sub) <= WAHL_MAX_FEHLER and len(sub) / n > beste:
+                gewaehlt, beste = t, len(sub) / n
+        zeilen.append(f"| {t:.2f} | " + " | ".join(f"{a * 100:.1f} % / {b * 100:.1f} %" for a, b, _ in zellen) + " |")
+    par.schwelle_sicher = alt
+    return "\n".join(zeilen), gewaehlt
+
+
+def hinweis_tabelle(ctx_fn, rows, par):
+    """§2.4: gleichnamige frühere Version als eigene Hinweiszeile statt als Rang. Gemessen wird, wie oft der wahre Zweig
+    unter den 3 Optionen ODER in der Hinweiszeile liegt."""
+    res = [r for r in auswerten_ordner(ctx_fn, rows, par, False) if not r["ausser_wertung"]]
+    n = len(res)
+    mit = nur_h = beides = gleicher_eltern = 0
+    for r in res:
+        z = r["z"]
+        ctx = z["ctx"]
+        pid = z["f"]["project_id"]
+        treffer = ctx.vorgaenger_fn(mk.vorgaenger_name(z["f"]["filename"]), pid) if ctx.vorgaenger_fn else []
+        ordner = []
+        for t in treffer:
+            if ctx.ordner[t[1]].path not in ordner:
+                ordner.append(ctx.ordner[t[1]].path)
+        ordner = ordner[:2]                               # die Hinweiszeile nennt höchstens 2 Orte
+        if not ordner:
+            if r["zweig3"]:
+                beides += 0
+            continue
+        mit += 1
+        wahr = z["wahr"]
+        im_hinweis = any(wahr == o or wahr.startswith(o.rstrip("/") + "/") for o in ordner)
+        gleicher_eltern += any(os.path.dirname(wahr) == os.path.dirname(o) for o in ordner)
+        nur_h += (im_hinweis and not r["zweig3"])
+        beides += (im_hinweis and r["zweig3"])
+    z3 = sum(r["zweig3"] for r in res)
+    return (f"| Fälle mit gleichnamiger früherer Version | {pct(mit, n)} ({mit}) |\n|---|---:|\n"
+            f"| Zweig in den 3 Optionen (heute) | {pct(z3, n)} |\n"
+            f"| Zweig in den 3 Optionen **oder** in der Hinweiszeile | {pct(z3 + nur_h, n)} (Zuwachs {pct(nur_h, n)}, in {nur_h} Fällen) |\n"
+            f"| Hinweiszeile trifft den Zweig (nur bei Fällen mit Vorgänger) | {pct(nur_h + beides, mit)} |\n"
+            f"| …Hinweisort liegt im selben Elternordner wie das Ziel (Geschwister) | {pct(gleicher_eltern, mit)} |")
+
+
+def bericht_menge(w, titel, ctx, rows, par, ausfuehrlich=False):
+    """Alle Nachtrag-Kennzahlen für eine Testmenge."""
+    w(f"#### {titel} (n={len(rows)})\n")
+    if not rows:
+        w("keine Fälle\n")
+        return None
+    w(projekt_tabelle(rows, par) + "\n")
+    res = auswerten_ordner(ctx, rows, par, False)
+    k = kennzahlen(res)
+    if k["n"]:
+        w(f"Ordner (bei bekanntem Projekt, n={k['n']}): Top-1 {pct(k['top1'], k['n'])} · Top-3 {pct(k['top3'], k['n'])} · "
+          f"Zweig in Option 1 {pct(k['zweig1'], k['n'])} · Zweig in einer der 3 Optionen {pct(k['zweig3'], k['n'])} · "
+          f"`sicher_bis` korrekt {pct(k['sicher_ok'], k['n'])}\n")
+    w("**Stufe von `sicher_bis`**\n")
+    w(tiefe_tabelle(res, par) + "\n")
+    gewaehlt = None
+    if ausfuehrlich:
+        w("**Abdeckung gegen Fehler (Schwelle `schwelle_sicher`)**\n")
+        tab, gewaehlt = kurve(ctx, rows, par)
+        w(tab + "\n")
+        w("**Vorgänger als Hinweiszeile** (§2.4)\n")
+        w(hinweis_tabelle(ctx, rows, par) + "\n")
+    return gewaehlt
+
+
 def cut_fuer(f, T, tage):
     """Stand der Statistik für eine Testdatei: Beginn ihres N-Tage-Fensters (mindestens der Stichtag T)."""
     if tage <= 0:
@@ -547,6 +711,9 @@ def main():
     ap.add_argument("--alpha", type=float, default=None)
     ap.add_argument("--idf-max", type=float, default=None)
     ap.add_argument("--prior-k", type=float, default=None)
+    ap.add_argument("--testmenge", choices=["alle", "drop"], default="alle",
+                    help="alle = alle Dateien ab dem Stichtag; drop = drop-typische Ereignisse (Nachtrag 1 §2.3: nur .pdf .docx "
+                         ".doc .xlsx .eml .msg .jpg .png .zip, ohne image001.png und CAD; gleicher Ordner/Tag/Endung = ein Ereignis)")
     ap.add_argument("--ohne-neu", action="store_true", help="nur Basiswert und Merkmale, keine neue Logik")
     ap.add_argument("--temperaturen", default="0.5,1,1.5,2,3,4,6,8,12", help="Raster der Softmax-Temperatur")
     ap.add_argument("--ausgabe", default=None, help="Berichtsdatei (Standard: ablage_messung_<datum>.md)")
@@ -569,6 +736,9 @@ def main():
     for d in dateien:
         by_proj[d["project_id"]].append(d)
     test_alle = [d for d in dateien if d["mod"] >= stichtag]
+    if args.testmenge == "drop":
+        alle_n = len(test_alle)
+        test_alle = ereignisse([d for d in test_alle if ist_drop_typisch(d)])
     test = (stichprobe(test_alle, args.stichprobe, rnd) if args.stichprobe_art == "gleich"
             else rnd.sample(test_alle, min(args.stichprobe, len(test_alle))))
 
@@ -577,7 +747,11 @@ def main():
     w(f"# Ablage-Messung {jetzt:%Y-%m-%d}\n")
     w(f"- Datenbank: `{args.db}` (nur lesend)")
     w(f"- Stichtag T: {stichtag} · Projekte: {len(by_id)} · Dateien: {len(dateien)} · "
-      f"davon ab T: {len(test_alle)} · Stichprobe: {len(test)} (Seed {args.seed})")
+      f"davon ab T: {len(test_alle)}{' Ablage-Ereignisse (aus ' + str(alle_n) + ' Dateien)' if args.testmenge == 'drop' else ''} · "
+      f"Stichprobe: {len(test)} (Seed {args.seed})")
+    if args.testmenge == "drop":
+        w("- **Testmenge: drop-typische Ereignisse** (gleicher Zielordner + Tag + Endung = ein Ereignis, Vertreter = erste Datei; "
+          "nur .pdf .docx .doc .xlsx .eml .msg .jpg .png .zip, ohne `imageNNN.png/jpg` und CAD/BIM)")
     if args.ab_projektnummer:
         w(f"- Nur Projekte ab Nummer {args.ab_projektnummer}")
     w("- Ordnerstruktur aus den Dateipfaden abgeleitet (leere Ordner fehlen, solange `ablage_ordner` nicht gefüllt ist)\n")
@@ -733,6 +907,17 @@ def main():
                 w(tabelle_bereiche([z for z in zs if not z["ausser_wertung"]]) + "\n")
                 w("**Häufigste Fehlertypen (Top-1 falsch)**\n")
                 w("\n".join(fehlertypen(zs)) + "\n")
+        # Nachtrag 1 §2: zusätzliche Kennzahlen (nur berichten)
+        w("### Nachtrag 1 — zusätzliche Kennzahlen (spätere Hälfte, Statistik allein)\n")
+        gewaehlt = bericht_menge(w, "Alle Fälle dieser Testmenge", ctx, held, par, ausfuehrlich=True)
+        w("**Schwellenwahl:** Regel = grösste Abdeckung ab Stufe „Bereich“, Fehler ≤ "
+          f"{WAHL_MAX_FEHLER:.0%}. Gewählt: **{gewaehlt if gewaehlt is not None else 'keine (Regel nirgends erfüllt) → 0.95'}** "
+          f"(aktueller Wert {par.schwelle_sicher}).\n")
+        mit_signal = [z for z in held if hat_projektsignal(z)]
+        ohne_signal = [z for z in held if not hat_projektsignal(z)]
+        w("**Aufteilung: trägt der Dateiname ein Projektsignal (Nummer oder Name)?** — zeigt die Obergrenze der Projekterkennung\n")
+        bericht_menge(w, "Name trägt ein Projektsignal: JA", ctx, mit_signal, par)
+        bericht_menge(w, "Name trägt ein Projektsignal: NEIN", ctx, ohne_signal, par)
         # Akzeptanz gegen die Ziele des Auftrags (§7), spätere Hälfte, Statistik allein
         kz = kennzahlen(auswerten_ordner(ctx, held, par, False))
         nn, ee = kz["n"], kz["eindeutig"]
