@@ -72,3 +72,10 @@ license:
   key: ""
 
 projects: []
+
+ablage:
+  # Datei-Ablage mit Vorschlag (Drop aufs Menüleisten-Symbol); Einstellungen → Ablage-Struktur
+  musterordner: ""               # Vorlage-Struktur (leer = aus den Projekten ableiten)
+  lernen_ab_projektnummer:       # nur Projekte ab dieser Nummer lernen mit (leer = alle)
+  # archiv_labels: [archiv, alt, old, ueberholt]   # Ordner, die als Archiv gelten
+  # projektnummer_regex: '^\s*(\d+)(?!\d)'

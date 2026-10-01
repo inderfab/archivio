@@ -1707,6 +1707,7 @@ async def _fda_missing_check() -> bool:
 async def settings_page(
     request: Request,
     saved:   str = Query(default=""),
+    ablage_fehler: str = Query(default=""),
 ):
     cfg = settings.load_all()
     # Einmal-Migration: altes mail-{} → mail_accounts: [{}]
@@ -1722,8 +1723,20 @@ async def settings_page(
     fda_missing = await _fda_missing_check()
     from db import backup as backup_mod
     from scanner import license as license_mod
+    ablage = None
+    try:
+        from scanner.ablage import vorlage as _vorlage
+        _c = connection.get_connection()
+        try:
+            ablage = _vorlage.struktur_uebersicht(_c)
+        finally:
+            _c.close()
+    except Exception as exc:
+        log.warning("Erkannte Struktur nicht lesbar: %s", exc)
     return templates.TemplateResponse("settings.html", {
         "request":     request,
+        "ablage":      ablage,
+        "ablage_fehler": ablage_fehler,
         "cfg":         cfg,
         "saved":       bool(saved),
         "fda_missing": fda_missing,
@@ -1732,6 +1745,65 @@ async def settings_page(
         "license_ui_visible": license_mod.ui_visible(),
         "license_check": license_mod.get_cached_check(),
     })
+
+
+@router.post("/ablage-settings")
+async def ablage_settings_save(request: Request):
+    """Musterordner und Lern-Grenze der Ablage-Struktur. Eigene Route, damit settings_save()
+    den Schlüssel `ablage` nie überschreibt (es mergt pro Sektion, siehe backup-settings)."""
+    from urllib.parse import quote
+    from scanner.ablage import vorlage
+    form = await request.form()
+    muster = (form.get("ablage_musterordner") or "").strip().rstrip("/")
+    ab_roh = (form.get("ablage_lernen_ab") or "").strip()
+    try:
+        ab = int(ab_roh) if ab_roh else None
+    except ValueError:
+        return RedirectResponse("/dashboard/settings?ablage_fehler=" + quote("Projektnummer muss eine Zahl sein.")
+                                + "#ablage", status_code=303)
+    alt = settings.get("ablage.musterordner") or ""
+
+    def _arbeit() -> str:
+        conn = connection.get_connection()
+        try:
+            if muster and (muster != alt or not conn.execute(
+                    "SELECT 1 FROM ablage_slot WHERE aus_vorlage = 1 LIMIT 1").fetchone()):
+                vorlage.importiere_musterordner(conn, muster)
+            elif not muster and alt:
+                vorlage.vorlage_entfernen(conn)
+            settings.save({"ablage": {"musterordner": muster, "lernen_ab_projektnummer": ab}})
+            vorlage.neu_berechnen(conn)
+            return ""
+        except FileNotFoundError:
+            return "Musterordner nicht gefunden. Ist das Laufwerk verbunden?"
+        finally:
+            conn.close()
+
+    with_lock = _scan_lock.acquire(blocking=False)
+    if not with_lock:
+        return RedirectResponse("/dashboard/settings?ablage_fehler=" + quote("Es läuft gerade ein Scan. Bitte danach nochmals speichern.")
+                                + "#ablage", status_code=303)
+    try:
+        fehler = await asyncio.to_thread(_arbeit)
+    finally:
+        _scan_lock.release()
+    if fehler:
+        return RedirectResponse("/dashboard/settings?ablage_fehler=" + quote(fehler) + "#ablage", status_code=303)
+    return RedirectResponse("/dashboard/settings?saved=1#ablage", status_code=303)
+
+
+@router.post("/ablage-struktur/neu")
+async def ablage_struktur_neu():
+    """Erkannte Struktur auf Knopfdruck neu berechnen."""
+    if not _scan_lock.acquire(blocking=False):
+        from urllib.parse import quote
+        return RedirectResponse("/dashboard/settings?ablage_fehler=" + quote("Es läuft gerade ein Scan.") + "#ablage",
+                                status_code=303)
+    try:
+        await asyncio.to_thread(_ablage_struktur_neu)
+    finally:
+        _scan_lock.release()
+    return RedirectResponse("/dashboard/settings#ablage", status_code=303)
 
 
 @router.post("/backup-settings")
@@ -2695,6 +2767,20 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
         _scan_lock.release()
 
 
+def _ablage_struktur_neu() -> dict | None:
+    """Slots und Ordner-Zuordnung neu berechnen (läuft unter dem Scan-Lock, nach dem Scan)."""
+    try:
+        from scanner.ablage import vorlage
+        conn = connection.get_connection()
+        try:
+            return vorlage.neu_berechnen(conn)
+        finally:
+            conn.close()
+    except Exception as exc:
+        log.warning("Ablage-Struktur konnte nicht berechnet werden: %s", exc)
+        return None
+
+
 def _run_fts_optimize():
     """Stösst FTS5-optimize an — koaleszierend und serialisiert mit Scans.
 
@@ -2720,6 +2806,7 @@ def _run_fts_optimize():
         _scan_lock.acquire()   # jetzt unbestritten
         try:
             optimize_fts()
+            _ablage_struktur_neu()
         finally:
             _scan_lock.release()
     except Exception as exc:

@@ -268,6 +268,71 @@
 
   <div class="settings-grid2">
 
+  {# ── Ablage-Struktur (eigene Route, eigenes Formular) ── #}
+  <div class="settings-section" id="ablage">
+    <div class="settings-section-header">
+      Ablage-Struktur
+      <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+      <div class="section-help-panel">
+        <p>Archivio lernt aus Ihren Projekten, welche Ordner es im Büro gibt und wofür sie da sind. Darauf stützt sich der Ablage-Vorschlag, wenn Sie eine Datei aufs Menüleisten-Symbol ziehen. Es wird nichts verschoben, bevor Sie bestätigen.</p>
+        <p><strong>Musterordner:</strong> eine leere Vorlage-Struktur, falls Ihr Büro eine hat (zum Beispiel „000 Musterordner Objekt"). Sie gibt die Struktur vor, auch für Ordner, die in einem neuen Projekt noch leer sind. Ohne Musterordner leitet Archivio die Struktur aus den Projekten ab. Der Musterordner selbst wird nie als Projekt vorgeschlagen.</p>
+        <p><strong>Lernen ab Projektnummer:</strong> ältere Projekte haben oft eine andere Struktur. Mit einer Grenze (zum Beispiel 184) lernt Archivio nur aus Projekten ab dieser Nummer. Leer = alle Projekte, wobei stark abweichende von selbst aussortiert werden.</p>
+        <p><strong>Erkannte Struktur:</strong> zeigt, was Archivio verstanden hat. Die Abdeckung ist der Anteil der Lern-Projekte, in denen der Ordner vorkommt. Namen mit Ordnungszahl oder Buchstaben („51a_Planstände", „31a_Planstände") gelten als derselbe Ordner. Sie wird nach jedem Scan aller Projekte neu berechnet.</p>
+      </div>
+    </div>
+    <div class="settings-body">
+      {% if ablage_fehler %}
+      <p style="font-size:13px; color:#991b1b; margin:0 0 10px;">{{ ablage_fehler }}</p>
+      {% endif %}
+      <form method="POST" action="/dashboard/ablage-settings" id="ablage-form"
+            style="display:flex; flex-direction:column; gap:14px;">
+        <div class="list-item">
+          <div class="list-item-box">
+            <span class="field-prefix" style="min-width:168px;">Musterordner</span>
+            <input type="text" name="ablage_musterordner" id="ablage-musterordner" class="list-item-value"
+                   value="{{ cfg.get('ablage', {}).get('musterordner', '') }}"
+                   placeholder="/Volumes/Server/Projekte/000 Musterordner Objekt">
+          </div>
+          <button type="button" class="browse-btn" title="Ordner im Finder auswählen"
+                  onclick="chooseAblageMuster()">📁</button>
+        </div>
+        <div class="field">
+          <span class="field-prefix">Lernen ab Projektnummer</span>
+          <input type="number" name="ablage_lernen_ab" min="0" placeholder="alle"
+                 value="{{ cfg.get('ablage', {}).get('lernen_ab_projektnummer') or '' }}">
+        </div>
+        <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap;">
+          <button type="submit" class="btn" style="padding:8px 20px;font-size:14px;">Speichern</button>
+          <button type="submit" class="add-btn" formaction="/dashboard/ablage-struktur/neu">Neu berechnen</button>
+        </div>
+      </form>
+
+      {% if ablage %}
+      <div style="margin-top:16px; font-size:13px;">
+        <strong>Erkannte Struktur:</strong>
+        {% if ablage.slots %}
+          {{ ablage.slots|length }} Ordner-Rollen aus {{ ablage.lern_projekte }} Projekten
+          ({{ 'Musterordner' if ablage.aus_vorlage else 'aus den Projekten abgeleitet' }})
+          <details style="margin-top:8px;">
+            <summary style="cursor:pointer;">Struktur anzeigen</summary>
+            <div style="max-height:360px; overflow:auto; margin-top:8px; font-size:12.5px; line-height:1.7;">
+              {% for sl in ablage.slots %}
+              <div style="display:flex; gap:10px; padding-left:{{ sl.tiefe * 18 }}px;">
+                <span style="flex:1;">{{ sl.anzeige }}</span>
+                <span style="width:48px; text-align:right; color:var(--muted, #6b7280);">{{ sl.abdeckung_pct }} %</span>
+                <span style="width:84px; text-align:right; color:var(--muted, #6b7280);">{{ sl.dateien }} Dateien</span>
+              </div>
+              {% endfor %}
+            </div>
+          </details>
+        {% else %}
+          noch nichts erkannt — zuerst Projekte scannen.
+        {% endif %}
+      </div>
+      {% endif %}
+    </div>
+  </div>
+
   {# ── Sicherung & Umzug (eigene Route, eigenes Formular) ── #}
   <div class="settings-section" id="sicherung">
     <div class="settings-section-header">
@@ -416,6 +481,17 @@ function startMetaBackfill(link) {
 // neue Zeilen (addBaseFolder() etc.) und der Folder-Picker melden sich über
 // markSettingsDirty() mit, ohne dass hier pro Feld etwas verdrahtet werden muss.
 // ── Sicherung & Umzug ────────────────────────────────────────────────────────
+
+function chooseAblageMuster() {
+  fetch(HELPER + '/choose-folder', { method: 'POST' })
+    .then(r => r.json())
+    .then(d => {
+      if (d.cancelled) return;
+      if (!d.ok) { alert('Fehler: ' + (d.error || 'unbekannt')); return; }
+      document.getElementById('ablage-musterordner').value = d.path.replace(/\/+$/, '');
+    })
+    .catch(() => alert('Archivio Helper läuft nicht. Bitte starten, oder den Pfad von Hand eintragen.'));
+}
 
 function chooseBackupFolder() {
   fetch(HELPER + '/choose-folder', { method: 'POST' })
