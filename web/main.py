@@ -265,6 +265,15 @@ def _startvorbereitung() -> None:
             logging.getLogger(__name__).debug("Ablage-Kontext nicht vorgewärmt: %s", _e)
     threading.Thread(target=_ablage_vorwaermen, daemon=True).start()
 
+    # Nach einem Update ist ablage_ordner leer: reine Ordner-Erfassung im Hintergrund (siehe dashboard._ablage_erst_erfassung)
+    def _ablage_erfassen():
+        try:
+            from web.dashboard import _ablage_erst_erfassung
+            _ablage_erst_erfassung()
+        except Exception as _e:
+            logging.getLogger(__name__).warning("Ablage-Erst-Erfassung fehlgeschlagen: %s", _e)
+    threading.Thread(target=_ablage_erfassen, daemon=True).start()
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

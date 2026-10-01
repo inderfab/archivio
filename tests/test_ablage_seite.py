@@ -321,3 +321,55 @@ def test_skript_der_seite_ist_syntaktisch_gueltig(welt, tmp_path):
         r = subprocess.run([jsc, str(pruefer)], capture_output=True, text=True)
         assert "ok" in r.stdout, r.stdout + r.stderr
     assert r.returncode == 0, r.stderr
+
+
+# ── Cache nicht blockierend, „Vorschläge werden vorbereitet" ───────────────────
+
+def test_vorbereitung_wenn_der_kontext_noch_laedt(welt, monkeypatch):
+    from scanner.ablage import kontext
+    echt = kontext.lade_kontext
+
+    def langsam(conn, jetzt=None):
+        time.sleep(0.8)
+        return echt(conn, jetzt)
+    monkeypatch.setattr(kontext, "lade_kontext", langsam)
+    original = kontext.holen_wartend
+    monkeypatch.setattr(kontext, "holen_wartend", lambda conn, warten_s=2.0: original(conn, min(warten_s, 0.05)))
+    kontext.invalidieren()
+    t0 = time.time()
+    token = _drop(welt, _datei(welt, "211_Protokoll BHS 1.txt"))
+    assert time.time() - t0 < 0.7                                       # der Drop wartet nicht auf das Laden
+    assert vorgang.holen(welt["conn"], token)["vorschlag"]["fall"] == "vorbereitung"
+    html = _seite(welt, token)
+    assert "Vorschläge werden vorbereitet" in html and 'hx-trigger="every 2s"' in html
+    assert "Anderen Ordner wählen" in html                              # Ordnerbrowser steht trotzdem bereit
+    assert 'class="ad-opt' not in html
+    # sobald der Kontext da ist, rechnet die Seite den Vorschlag nach und hört auf zu pollen
+    kontext._zustand["fertig"].wait(5)
+    r = welt["client"].get(f"/dashboard/ablage/datei?token={token}&idx=0")
+    assert r.status_code == 200 and 'hx-trigger="every 2s"' not in r.text and "211 Emmenhof" in r.text
+    assert vorgang.holen(welt["conn"], token)["vorschlag"]["fall"] != "vorbereitung"
+
+
+def test_kontext_cache_info_und_single_flight(welt, monkeypatch):
+    from scanner.ablage import kontext
+    kontext.invalidieren()
+    aufrufe = []
+    echt = kontext.lade_kontext
+    monkeypatch.setattr(kontext, "lade_kontext", lambda c, j=None: (aufrufe.append(1), time.sleep(0.3), echt(c, j))[2])
+    c = welt["conn"]
+    import threading
+    ergebnisse = []
+    ts = [threading.Thread(target=lambda: ergebnisse.append(kontext.holen_wartend(c, 3))) for _ in range(4)]
+    [t.start() for t in ts]
+    [t.join() for t in ts]
+    assert len(aufrufe) == 1 and all(e is not None for e in ergebnisse)       # ein Ladevorgang für alle
+    i = kontext.info()
+    assert i["bereit"] and i["ordner"] >= 0 and i["ladezeit_s"] is not None and i["mb_geschaetzt"] >= 0
+
+
+def test_diagnose_zeigt_den_ablage_cache(welt):
+    from scanner.ablage import kontext
+    kontext.holen(welt["conn"])
+    r = welt["client"].get("/api/debug/diagnostics")
+    assert r.status_code == 200 and "Ablage-Cache" in r.text and "Ordner" in r.text

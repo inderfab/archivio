@@ -536,3 +536,54 @@ def test_ausgeschlossener_ordner_ist_kein_vorschlag(welt):
     ctx = kontext.holen(welt["conn"])
     pfade = [k.pfad for k in ordner.kandidaten(ctx, welt["pid"])]
     assert not any(p.endswith("/Upload") for p in pfade) and any(p.endswith("c_Protokolle") for p in pfade)
+
+
+# ── .eml über den Drop ─────────────────────────────────────────────────────────
+
+_EML = (b"From: =?utf-8?Q?Daniel_Rietm=C3=A4nn?= <info@danielrietmann.ch>\r\nTo: rs@strut.ch\r\n"
+        b"Subject: =?utf-8?Q?AW=3A_Offerte_Elektroplanung_Flurhofstrasse?=\r\nDate: Tue, 15 Sep 2026 10:30:00 +0200\r\n"
+        b"Content-Type: text/plain; charset=utf-8\r\n\r\nHallo Roger, anbei die Offerte.\r\n")
+
+
+def test_eml_absender_betreff_und_datum_werden_gelesen(tmp_path):
+    p = tmp_path / "AW Offerte Elektroplanung.eml"
+    p.write_bytes(_EML)
+    m = vorgang.mail_aus_eml(p)
+    assert m["sender"] == "Daniel Rietmänn <info@danielrietmann.ch" or "danielrietmann.ch" in m["sender"]
+    assert m["subject"] == "AW: Offerte Elektroplanung Flurhofstrasse"
+    assert m["datum"].startswith("2026-09-15T10:30")
+
+
+def test_eml_defekt_wirft_nichts(tmp_path):
+    p = tmp_path / "kaputt.eml"
+    p.write_bytes(b"\x00\x01\x02 kein Mail")
+    assert vorgang.mail_aus_eml(p) is None
+    assert vorgang.mail_aus_eml(tmp_path / "gibtesnicht.eml") is None
+
+
+def test_eml_drop_liefert_mail_merkmale(welt):
+    p = welt["desktop"] / "AW Offerte Elektroplanung.eml"
+    p.write_bytes(_EML)
+    token = _drop(welt, p)
+    m = vorgang.holen(welt["conn"], token)["merkmale"]
+    assert m["dom:danielrietmann.ch"] == 1.0                          # Absender-Domain
+    assert "tok:elektroplanung" in m and "tok:flurhofstrasse" in m    # Betreff-Tokens
+    assert "doktyp:offerte" in m and "fp:elektro" in m and m["ext:.eml"] == 1.0
+
+
+def test_eml_domain_ist_signal_fuers_projekt(welt):
+    """Schreibt ein Absender bisher überwiegend zu einem Projekt, stützt das den Projektvorschlag."""
+    from scanner.ablage import kontext
+    conn = welt["conn"]
+    for i in range(4):
+        did = conn.execute("INSERT INTO documents (project_id, hash, filename, extension, filesize, source_type)"
+                           " VALUES (?,?,?,'.eml',1,'email')", (welt["pid"], f"mailh{i}", f"Mail {i}")).lastrowid
+        conn.execute("INSERT INTO mails (document_id, sender, subject) VALUES (?,?,?)",
+                     (did, "Daniel <info@danielrietmann.ch>", f"Betreff {i}"))
+    conn.commit()
+    kontext.invalidieren()
+    p = welt["desktop"] / "AW Offerte.eml"
+    p.write_bytes(_EML)
+    token = _drop(welt, p)
+    gruende = vorgang.holen(conn, token)["vorschlag"]["projekte"][0]["gruende"]
+    assert any("danielrietmann.ch" in g for g in gruende)

@@ -184,3 +184,69 @@ def test_migration_034_stellt_alte_zeilen_um(tmp_db):
     assert zeilen == {"Upload": ("normal", 1), "Archiv": ("archiv", 1)}
     migrations._m034(tmp_db)                                    # idempotent
     assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='034_ablage_ordner_ausgeschlossen'").fetchone()
+
+
+# ── Erst-Erfassung nach dem Update (nur Ordner) ────────────────────────────────
+
+def test_erst_erfassung_nur_ordner_ohne_dateien_zu_lesen(tmp_db, tmp_path, monkeypatch):
+    import os
+    from web import dashboard
+    root = tmp_path / "scan"
+    _baum(root)
+    root.mkdir(exist_ok=True)
+    pid = queries.insert_project(tmp_db, "Projekt", str(root))
+    tmp_db.commit()
+    gelesen = []
+    echtes_stat = os.stat
+    monkeypatch.setattr(os, "stat", lambda p, *a, **k: (gelesen.append(str(p)), echtes_stat(p, *a, **k))[1])
+    erg = dashboard._ablage_erst_erfassung()
+    monkeypatch.setattr(os, "stat", echtes_stat)
+    assert erg["projekte"] == 1 and erg["ordner"] >= 8
+    o = _ordner(tmp_db, pid)
+    assert o["51_Ausfuehrung/51a_Planstände"]["datei_anzahl"] == 2          # Namen gezählt
+    assert o["51_Ausfuehrung/51a_Planstände"]["letzte_aenderung"] is None     # aber nichts gestat
+    assert o["Upload"]["ausgeschlossen"] == 1 and "Upload/tief" not in o and ".versteckt" not in o
+    assert o["51_Ausfuehrung/51a_Planstände/z_Archiv"]["art"] == "archiv"
+    assert tmp_db.execute("SELECT COUNT(*) FROM documents").fetchone()[0] == 0   # keine Datei gelesen/indexiert
+    assert not [g for g in gelesen if g.endswith(".txt")]                         # kein stat() auf Dateien
+
+
+def test_erst_erfassung_einmalig_und_idempotent(tmp_db, tmp_path):
+    from web import dashboard
+    root = tmp_path / "scan"
+    _baum(root)
+    root.mkdir(exist_ok=True)
+    pid = queries.insert_project(tmp_db, "Projekt", str(root))
+    tmp_db.commit()
+    assert dashboard._ablage_erst_erfassung()["projekte"] == 1
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id = ?", (f"ablage_ordner_erfasst_{pid}",)).fetchone()
+    vorher = {k: v["id"] for k, v in _ordner(tmp_db, pid).items()}
+    assert dashboard._ablage_erst_erfassung() == {"projekte": 0, "ordner": 0, "uebersprungen": 0}
+    assert {k: v["id"] for k, v in _ordner(tmp_db, pid).items()} == vorher
+
+
+def test_erst_erfassung_ueberspringt_projekt_mit_ordnern_und_nicht_erreichbares(tmp_db, tmp_path):
+    from web import dashboard
+    # a) hat schon Ordner (ein Scan war schneller): nicht nochmals, aber als erledigt markiert
+    pid, root = _scan(tmp_db, tmp_path)
+    # b) Pfad nicht erreichbar (NAS nicht gemountet): übersprungen, keine Marke → nächster Start versucht es nochmals
+    weg = queries.insert_project(tmp_db, "Weg", str(tmp_path / "nicht_da"))
+    tmp_db.commit()
+    erg = dashboard._ablage_erst_erfassung()
+    assert erg == {"projekte": 0, "ordner": 0, "uebersprungen": 1}
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id = ?", (f"ablage_ordner_erfasst_{pid}",)).fetchone()
+    assert not tmp_db.execute("SELECT 1 FROM _migrations WHERE id = ?", (f"ablage_ordner_erfasst_{weg}",)).fetchone()
+    assert _ordner(tmp_db, weg) == {}
+
+
+def test_erst_erfassung_mailbox_und_musterordner_nie(tmp_db, tmp_path, monkeypatch):
+    from config import settings
+    from web import dashboard
+    muster = tmp_path / "000 Musterordner Objekt"
+    (muster / "a").mkdir(parents=True)
+    monkeypatch.setattr(settings, "_settings", {**settings._load(), "ablage": {"musterordner": str(muster)}})
+    tmp_db.execute("INSERT INTO projects (name, path) VALUES ('Muster', ?)", (str(muster),))
+    tmp_db.execute("INSERT INTO projects (name, path) VALUES ('Postfach', 'mailbox:Posteingang')")
+    tmp_db.commit()
+    assert dashboard._ablage_erst_erfassung() == {"projekte": 0, "ordner": 0, "uebersprungen": 0}
+    assert tmp_db.execute("SELECT COUNT(*) FROM ablage_ordner").fetchone()[0] == 0

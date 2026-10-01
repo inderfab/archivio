@@ -10,6 +10,7 @@ from __future__ import annotations
 import json
 import logging
 import os
+from pathlib import Path
 from datetime import datetime, timezone
 from functools import lru_cache
 
@@ -120,3 +121,34 @@ def schreibe_ordner(conn, project_id: int, sammler: OrdnerSammler) -> int:
         veraltet = [(r["id"],) for r in vorhanden.values() if r["id"] not in gesehen]
         conn.executemany("DELETE FROM ablage_ordner WHERE id = ?", veraltet)
     return len(daten)
+
+
+def nur_ordner_erfassen(conn, project_id: int, root: Path | str) -> dict:
+    """Reine Ordner-Erfassung eines Projekts: ein `os.walk` nur über die Ordnernamen, ohne eine Datei zu öffnen
+    oder zu `stat()`en. Für den Fall, dass `ablage_ordner` nach einem Update leer ist, damit die Ablage-Seite nicht
+    bis zum nächsten vollen Scan ohne Optionen dasteht. Gleiche Filter wie der Scan (versteckt, Sperrliste, ignoriert).
+    `datei_anzahl` zählt nur die Namen aus derselben Auflistung (ohne Müll), `letzte_aenderung` bleibt leer."""
+    import time
+    from config import settings
+    from scanner import walker
+    t0 = time.perf_counter()
+    root = Path(root)
+    exact, patterns = walker._excluded_folders()
+    ignoriert = {r[0] for r in conn.execute("SELECT path FROM ignored_paths WHERE project_id = ?", (project_id,))}
+    sammler = OrdnerSammler(str(root), settings.get("ablage.archiv_labels"))
+    for dirpath, dirnames, filenames in os.walk(root):
+        for d in dirnames:
+            if d.startswith(".") or Path(d).suffix.lower() in walker._FAKE_DIR_SUFFIXES:
+                continue
+            dp = str(Path(dirpath) / d)
+            sammler.ordner_gesehen(dp, d, ausgeschlossen=walker._is_excluded_name(d, exact, patterns) or dp in ignoriert)
+        dirnames[:] = [d for d in dirnames
+                       if not d.startswith(".")
+                       and not walker._is_excluded_name(d, exact, patterns)
+                       and Path(d).suffix.lower() not in walker._FAKE_DIR_SUFFIXES
+                       and str(Path(dirpath) / d) not in ignoriert]
+        n = sum(1 for f in filenames if not walker._is_junk_file(f))
+        if n:
+            sammler.dateien_gesehen(dirpath, n)
+    anzahl = schreibe_ordner(conn, project_id, sammler)
+    return {"ordner": anzahl, "dauer_s": time.perf_counter() - t0}

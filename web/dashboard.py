@@ -2642,6 +2642,58 @@ def _ablage_struktur_neu() -> dict | None:
         return None
 
 
+def _ablage_erst_erfassung() -> dict:
+    """Nach einem Update ist `ablage_ordner` leer (Migration 030 füllt nichts). Einmal pro Projekt eine reine
+    Ordner-Erfassung im Hintergrund (os.walk nur über Ordner, unter dem Scan-Lock), danach Slots und Statistik neu.
+    Läuft, wenn das Projekt noch keine Ordner hat und nicht schon erfasst wurde; ein nicht erreichbares NAS wird beim
+    nächsten Start nochmals versucht. Die Dauer steht im Log."""
+    from scanner.ablage import erfassung, vorlage
+    ergebnis = {"projekte": 0, "ordner": 0, "uebersprungen": 0}
+    conn = connection.get_connection()
+    try:
+        erfasst = {r[0] for r in conn.execute("SELECT id FROM _migrations WHERE id LIKE 'ablage_ordner_erfasst_%'")}
+        offen = []
+        for r in conn.execute("SELECT id, name, path FROM projects"):
+            if r["path"].startswith("mailbox:") or vorlage.ist_musterprojekt(r["path"]):
+                continue
+            if f"ablage_ordner_erfasst_{r['id']}" in erfasst:
+                continue
+            if conn.execute("SELECT 1 FROM ablage_ordner WHERE project_id = ? LIMIT 1", (r["id"],)).fetchone():
+                with conn:                       # ein Scan hat es schon erledigt
+                    conn.execute("INSERT OR IGNORE INTO _migrations (id) VALUES (?)", (f"ablage_ordner_erfasst_{r['id']}",))
+                continue
+            offen.append(r)
+        if not offen:
+            return ergebnis
+        t_alle = time.time()
+        for r in offen:
+            if not Path(r["path"]).is_dir():
+                log.info("Ablage: Ordner-Erfassung für %r übersprungen (Pfad nicht erreichbar), nächster Start", r["name"])
+                ergebnis["uebersprungen"] += 1
+                continue
+            with _scan_lock:                       # nie parallel zu einem Scan
+                try:
+                    erg = erfassung.nur_ordner_erfassen(conn, r["id"], r["path"])
+                    vorlage.zuordnen(conn, r["id"])
+                    with conn:
+                        conn.execute("INSERT OR IGNORE INTO _migrations (id) VALUES (?)", (f"ablage_ordner_erfasst_{r['id']}",))
+                except Exception as exc:
+                    log.warning("Ablage: Ordner-Erfassung für %r fehlgeschlagen: %s", r["name"], exc)
+                    continue
+            ergebnis["projekte"] += 1
+            ergebnis["ordner"] += erg["ordner"]
+            log.info("Ablage: Ordner erfasst in %r: %d Ordner in %.1f s (nur Ordner, keine Dateien gelesen)",
+                     r["name"], erg["ordner"], erg["dauer_s"])
+        if ergebnis["projekte"]:
+            with _scan_lock:
+                _ablage_struktur_neu()
+            log.info("Ablage: Erst-Erfassung abgeschlossen: %d Projekte, %d Ordner, %.0f s gesamt",
+                     ergebnis["projekte"], ergebnis["ordner"], time.time() - t_alle)
+    finally:
+        conn.close()
+    return ergebnis
+
+
 def _run_fts_optimize():
     """Stösst FTS5-optimize an — koaleszierend und serialisiert mit Scans.
 

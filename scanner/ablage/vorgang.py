@@ -92,6 +92,29 @@ def projekt_fuer_pfad(conn, pfad: str):
     return bestes
 
 
+# ── .eml: Absender, Betreff, Datum ─────────────────────────────────────────────
+
+_MAX_EML_BYTES = 524288      # wie der Extraktor: Header und Text, nie die Anhänge
+
+
+def mail_aus_eml(pfad: Path) -> dict | None:
+    """Absender, Betreff und Datum einer .eml mit der vorhandenen Mail-Logik (`scanner/mail_scanner.py`, kein neuer
+    Parser). Gibt die Felder zurück, die `merkmale()` für `dom:` und `tok:` braucht; bei Fehlern None."""
+    import email
+    from scanner import mail_scanner as ms
+    try:
+        with open(pfad, "rb") as f:
+            msg = email.message_from_bytes(f.read(_MAX_EML_BYTES))
+        name, adresse = ms.split_addresses(msg.get("From", ""))
+        sender = f"{name} <{adresse}>".strip(" <>") if adresse else name
+        mail = {"sender": sender, "subject": ms.decode_mime_header(msg.get("Subject", "")),
+                "datum": ms.parse_mail_date(msg.get("Date", ""))}
+    except Exception as exc:
+        log.debug("eml nicht lesbar (%s): %s", pfad.name, exc)
+        return None
+    return mail if (mail["sender"] or mail["subject"]) else None
+
+
 # ── Analyse ────────────────────────────────────────────────────────────────────
 
 def analysieren(conn, name: str, groesse: int | None, mtime: str | None, hash_: str | None, host: str | None,
@@ -99,13 +122,17 @@ def analysieren(conn, name: str, groesse: int | None, mtime: str | None, hash_: 
     """Vorschlag rechnen und als Vorgang speichern. `datei_pfad`: hochgeladene Kopie im Staging (oder die lokale
     Quelle bei einem Drop am Server-Mac). Gibt {token, vorschlag, projekt_pfad?} zurück."""
     aufraeumen(conn)
-    ctx = kontext.holen(conn)
+    ctx = kontext.holen_wartend(conn)                  # höchstens ~2 s warten, sonst „Vorschläge werden vorbereitet"
     text = text_extrahieren(datei_pfad) if datei_pfad is not None else None
-    mail = None
+    mail = mail_aus_eml(datei_pfad) if datei_pfad is not None and name.lower().endswith(".eml") else None
     datei = DateiInfo(name, groesse, mtime, hash_, text, mail, host)
-    datei.merkmale = mk.merkmale(name, groesse, mtime, text, mail,
-                                 bekannte_projekte={str(n) for n in ctx._nummern})
-    vs = vorschlagen(ctx, datei, par)
+    if ctx is None:
+        datei.merkmale = mk.merkmale(name, groesse, mtime, text, mail)
+        vs = {"fall": "vorbereitung", "projekte": [], "sicher_bis": None, "optionen": [], "dateiname_vorschlag": None}
+    else:
+        datei.merkmale = mk.merkmale(name, groesse, mtime, text, mail,
+                                     bekannte_projekte={str(n) for n in ctx._nummern})
+        vs = vorschlagen(ctx, datei, par)
     if vs.get("projekte") and vs["projekte"][0]["p"] >= (par.projekt_sicher if par else 0.6) \
             and vs["fall"] != "duplikat":
         try:
@@ -441,7 +468,7 @@ def gruppe_angleichen(conn, tokens: list[str], par=None) -> None:
         return
     vs_alle = [holen(conn, t) for t in tokens]
     vs_alle = [v for v in vs_alle if v and v["status"] == "offen"]
-    if len(vs_alle) < 2:
+    if len(vs_alle) < 2 or any((v["vorschlag"] or {}).get("fall") == "vorbereitung" for v in vs_alle):
         return
     ctx = kontext.holen(conn)
     sicher = [v for v in vs_alle if (v["vorschlag"].get("projekte") or [{}])[0].get("p", 0) >= 0.95
@@ -477,3 +504,27 @@ def gruppe_angleichen(conn, tokens: list[str], par=None) -> None:
                           gruppe_angeglichen=True)
                 with conn:
                     conn.execute("UPDATE ablage_vorgang SET vorschlag = ? WHERE token = ?", (json.dumps(vs), v["token"]))
+
+
+def vorschlag_nachholen(conn, token: str, par=None) -> dict | None:
+    """War der Kontext bei der Analyse noch nicht bereit (fall 'vorbereitung'), den Vorschlag jetzt rechnen — ohne
+    zu blockieren. Gibt den (neuen) Vorschlag zurück oder None, solange noch geladen wird."""
+    v = holen(conn, token)
+    if v is None or (v["vorschlag"] or {}).get("fall") != "vorbereitung":
+        return v["vorschlag"] if v else None
+    ctx = kontext.holen_wartend(conn, warten_s=0.0)
+    if ctx is None:
+        return None
+    d = _datei_aus_vorgang(v)
+    vs = vorschlagen(ctx, d, par)
+    if vs.get("projekte") and vs["projekte"][0]["p"] >= (par.projekt_sicher if par else 0.6) and vs["fall"] != "duplikat":
+        try:
+            from web.dashboard import _render_filename_template
+            n = _render_filename_template(connection_setting("upload.filename_template") or "{dateiname}",
+                                          project_name=vs["projekte"][0]["name"], original_name=v["dateiname"])
+            vs["dateiname_vorschlag"] = None if n == v["dateiname"] else n
+        except Exception:
+            pass
+    with conn:
+        conn.execute("UPDATE ablage_vorgang SET vorschlag = ? WHERE token = ?", (json.dumps(vs), token))
+    return vs

@@ -7,8 +7,10 @@ fasst das NAS nie an: alles kommt aus der DB (Auftrag §0).
 """
 from __future__ import annotations
 
+import logging
 import math
 import threading
+import time
 from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
@@ -16,6 +18,8 @@ from datetime import datetime, timezone
 from config import settings
 from scanner.ablage import vorlage
 from scanner.ablage.normalisieren import pfad_schluessel
+
+log = logging.getLogger(__name__)
 
 N = "_n"
 
@@ -247,16 +251,92 @@ def _stempel(conn) -> tuple:
             conn.execute("SELECT COALESCE(MAX(zuletzt_gesehen), '') FROM ablage_ordner").fetchone()[0])
 
 
-def holen(conn) -> Kontext:
-    """Gecachter Kontext der Produktion. Das Laden braucht ein, zwei Sekunden, der Vorschlag selbst
-    soll nur noch rechnen. Der Stempel fängt Änderungen ab, die niemand `invalidieren()` gemeldet hat."""
+_lade_lock = threading.Lock()
+_zustand: dict = {"laedt": False, "fertig": threading.Event(), "dauer_s": None, "geladen_um": None, "fehler": None}
+_zustand["fertig"].set()
+
+
+def _info_von(ctx: "Kontext") -> dict:
+    eintraege = sum(len(z) for z in ctx.stats.values())
+    return {"ordner": len(ctx.ordner), "projekte": len(ctx.projekte), "slots": len(ctx.slots),
+            "stats_gruppen": len(ctx.stats), "stats_eintraege": eintraege,
+            # grobe Schätzung: ~110 Bytes je Statistik-Eintrag, ~700 je Ordner (Objekt + Strings)
+            "mb_geschaetzt": round((eintraege * 110 + len(ctx.ordner) * 700) / 1e6, 1)}
+
+
+def _laden_im_hintergrund() -> None:
+    """Genau ein Ladevorgang gleichzeitig (Single-Flight); alle anderen warten auf dasselbe Ergebnis."""
+    from db import connection
+    t0 = time.perf_counter()
+    conn = connection.get_connection()
+    try:
+        stempel = _stempel(conn)
+        ctx = lade_kontext(conn)
+        with _cache_lock:
+            _cache["ctx"], _cache["stempel"] = ctx, stempel
+        _zustand.update(dauer_s=round(time.perf_counter() - t0, 2), fehler=None,
+                        geladen_um=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"), info=_info_von(ctx))
+    except Exception as exc:
+        _zustand["fehler"] = str(exc)
+        log.warning("Ablage-Kontext konnte nicht geladen werden: %s", exc)
+    finally:
+        conn.close()
+        _zustand["laedt"] = False
+        _zustand["fertig"].set()
+
+
+def starte_laden() -> None:
+    with _lade_lock:
+        if _zustand["laedt"]:
+            return
+        _zustand["laedt"] = True
+        _zustand["fertig"] = threading.Event()
+    threading.Thread(target=_laden_im_hintergrund, daemon=True, name="ablage-kontext").start()
+
+
+def holen_wartend(conn, warten_s: float = 2.0) -> "Kontext | None":
+    """Kontext, ohne den Nutzer lange warten zu lassen: ist er aktuell im Cache, sofort. Sonst wird im Hintergrund
+    geladen und höchstens `warten_s` gewartet. Dauert es länger, gibt es den alten Stand zurück (falls vorhanden) oder
+    None: die Seite zeigt dann „Vorschläge werden vorbereitet…" und lädt nach."""
     stempel = _stempel(conn)
     with _cache_lock:
         if _cache["ctx"] is not None and _cache["stempel"] == stempel:
             return _cache["ctx"]
+    starte_laden()
+    _zustand["fertig"].wait(warten_s)
+    with _cache_lock:
+        return _cache["ctx"]
+
+
+def bereit(conn=None) -> bool:
+    with _cache_lock:
+        return _cache["ctx"] is not None
+
+
+def info() -> dict:
+    """Für den Diagnose-Endpunkt: Zustand und Grösse des Ablage-Caches, Ladezeit."""
+    with _cache_lock:
+        ctx = _cache["ctx"]
+    d = {"bereit": ctx is not None, "laedt": bool(_zustand["laedt"]), "ladezeit_s": _zustand["dauer_s"],
+         "geladen_um": _zustand["geladen_um"], "fehler": _zustand["fehler"]}
+    if ctx is not None:
+        d.update(_zustand.get("info") or _info_von(ctx))
+    return d
+
+
+def holen(conn) -> Kontext:
+    """Gecachter Kontext der Produktion, blockierend (Skripte, Tests, Vorwärmen). Das Laden braucht bei grossen
+    Beständen ein, zwei Sekunden. Der Stempel fängt Änderungen ab, die niemand `invalidieren()` gemeldet hat."""
+    stempel = _stempel(conn)
+    with _cache_lock:
+        if _cache["ctx"] is not None and _cache["stempel"] == stempel:
+            return _cache["ctx"]
+    t0 = time.perf_counter()
     ctx = lade_kontext(conn)
     with _cache_lock:
         _cache["ctx"], _cache["stempel"] = ctx, stempel
+    _zustand.update(dauer_s=round(time.perf_counter() - t0, 2), fehler=None, info=_info_von(ctx),
+                    geladen_um=datetime.now(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
     return ctx
 
 

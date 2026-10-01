@@ -2102,6 +2102,20 @@ async def diagnostics():
          detail="" if data_dir else "Variable fehlt — Pfade evtl. falsch")
     _chk("HOME", os.environ.get("HOME", "(nicht gesetzt)"))
 
+    # Ablage-Vorschlag: Cache (Grösse, Ladezeit); das Vorwärmen läuft im Hintergrund und blockiert den Start nicht
+    try:
+        from scanner.ablage import kontext as _ak
+        _i = _ak.info()
+        if _i["bereit"]:
+            _chk("Ablage-Cache", f"{_i['ordner']} Ordner, {_i['stats_eintraege']} Statistik-Einträge "
+                 f"(≈ {_i['mb_geschaetzt']} MB geschätzt)",
+                 detail=f"Ladezeit {_i['ladezeit_s']} s, geladen {_i['geladen_um']}")
+        else:
+            _chk("Ablage-Cache", "wird vorbereitet…" if _i["laedt"] else "noch nicht geladen",
+                 ok=None if _i["laedt"] else True, detail=_i["fehler"] or "")
+    except Exception as _e:
+        _chk("Ablage-Cache", "nicht lesbar", ok=None, detail=str(_e))
+
     # Config
     from config import settings as _s
     cfg_path   = _s._CONFIG_PATH

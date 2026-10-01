@@ -1,6 +1,7 @@
 {# Eine Datei der Ablage-Seite. Wird auch einzeln per htmx ausgetauscht, wenn ein Projekt gewählt wird. #}
 {% set erste = d.optionen[0] if d.optionen else none %}
 <section class="ad" id="datei-{{ d.idx }}" data-idx="{{ d.idx }}" data-token="{{ d.token }}"
+         {% if d.vorbereitung %}hx-get="/dashboard/ablage/datei?token={{ d.token }}&idx={{ d.idx }}" hx-trigger="every 2s" hx-swap="outerHTML"{% endif %}
          data-lokal="{{ '1' if d.lokal else '' }}" data-fall="{{ d.fall }}"
          data-start="{{ d.start_pfad }}" data-sicher="{{ d.sicher_pfad }}"
          data-dest="{{ erste.pfad if erste else '' }}" data-neu="{{ '1' if erste and erste.neu_anlegen else '' }}">
@@ -15,7 +16,10 @@
     {% endif %}
   </div>
 
-  {% if d.fall == 'duplikat' %}
+  {% if d.fall == 'vorbereitung' %}
+    <div class="ad-satz">Vorschläge werden vorbereitet… <span class="ad-leise">Den Ordner kann man schon wählen.</span></div>
+
+  {% elif d.fall == 'duplikat' %}
     <div class="ad-warnung">
       <strong>Diese Datei liegt bereits im Archiv:</strong>
       <ul>{% for x in d.duplikate %}<li>{{ x.pfad }}</li>{% endfor %}</ul>

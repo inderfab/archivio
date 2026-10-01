@@ -48,7 +48,8 @@ def _ansicht(idx: int, v: dict) -> dict:
                "projekte": projekte, "optionen": [], "krumen": [], "sicher_pfad": "", "start_pfad": "",
                "projekt": None, "duplikate": vs.get("duplikate") or [],
                "angeboten": vs.get("projekte_angeboten") or [], "angeglichen": bool(vs.get("angeglichen"))}
-    if fall in ("duplikat", "projekt_unklar") or not top:
+    d["vorbereitung"] = fall == "vorbereitung"
+    if fall in ("duplikat", "projekt_unklar", "vorbereitung") or not top:
         base = settings.get("scanner.base_folders", []) or []
         d["start_pfad"] = base[0]["path"] if base else ""
         return d
@@ -86,6 +87,8 @@ def _tokens(t: str) -> list[str]:
 def _laden(tokens: list[str]) -> list[dict]:
     conn = connection.get_connection()
     try:
+        for t in tokens:
+            vorgang.vorschlag_nachholen(conn, t)             # war der Kontext noch nicht bereit: jetzt, ohne zu blockieren
         vorgang.gruppe_angleichen(conn, tokens)
         return [v for v in (vorgang.holen(conn, t) for t in tokens) if v]
     finally:
@@ -112,6 +115,8 @@ async def ablage_datei(request: Request, token: str = Query(...), idx: int = Que
         try:
             if projekt:
                 vorgang.projekt_waehlen(conn, token, projekt)
+            else:
+                vorgang.vorschlag_nachholen(conn, token)
             return vorgang.holen(conn, token)
         finally:
             conn.close()
