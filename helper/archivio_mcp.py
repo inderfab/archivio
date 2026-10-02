@@ -38,7 +38,7 @@ _READ_ONLY = ToolAnnotations(
     readOnlyHint=True, destructiveHint=False, idempotentHint=True, openWorldHint=False,
 )
 
-# merge_documents_to_pdf legt neu eine Datei in ~/Downloads an -- anders als die
+# merge_documents_to_pdf/copy_documents_to_folder legen neu Dateien in ~/Downloads an -- anders als die
 # übrigen, rein lesenden Tools deshalb NICHT readOnlyHint=True (das würde MCP-Clients
 # fälschlich sagen, der Aufruf verändere nichts auf der Platte). Nicht destruktiv
 # (überschreibt/löscht keine bestehende Datei, jeder Aufruf bekommt einen eigenen
@@ -394,6 +394,98 @@ def merge_documents_to_pdf(document_ids: str, title: str = "Zusammengeführte Do
         lines.append("\nÜbersprungen:")
         for s in data["skipped"]:
             lines.append(f"- {s.get('filename')}: {s.get('reason')}")
+    return "\n".join(lines)
+
+
+def _unique_name(folder: Path, name: str) -> Path:
+    """Dateiname im Zielordner, ohne etwas zu überschreiben: bei Namensgleichheit
+    (gleicher Dateiname aus verschiedenen Projekten) wird " (2)", " (3)" … angehängt."""
+    target = folder / name
+    n = 2
+    while target.exists():
+        target = folder / f"{Path(name).stem} ({n}){Path(name).suffix}"
+        n += 1
+    return target
+
+
+@mcp.tool(annotations=_WRITES_NEW_FILE)
+def copy_documents_to_folder(document_ids: str, title: str = "Gesammelte Dokumente") -> str:
+    """Kopiert die ORIGINALDATEIEN mehrerer über search() gefundener Dokumente
+    unverändert in einen NEUEN Ordner im Downloads-Ordner dieses Rechners -- z.B. wenn
+    alle Treffer (Word, PDF, Pläne, Mails, …) in ihrem ursprünglichen Format
+    gesammelt werden sollen. Die Originale auf dem NAS bleiben unangetastet. Mails
+    werden als .eml-Datei abgelegt. (Für EINE gemeinsame PDF-Datei: merge_documents_to_pdf,
+    das aber nur PDFs kann.)
+
+    document_ids: kommagetrennte Liste der [ID nnn]-Werte aus vorherigen
+    search()-Treffern, z.B. "142,891,203". Dokumente ohne Leserecht (nicht
+    freigegebenes Projekt, erkannte Norm, Sperrliste) oder ohne Datei werden
+    übersprungen und im Ergebnis einzeln mit Grund gemeldet.
+    title: kurzer, sprechender Name für den neuen Ordner -- passend zum Inhalt wählen,
+    z.B. "Brandschutz Emmenhof".
+    """
+    import base64
+    import re
+    import shutil
+    import time
+
+    base = _server_url()
+    try:
+        resp = requests.get(
+            f"{base}/api/mcp/copy-files",
+            params={"document_ids": document_ids, "session_id": _SESSION_ID},
+            timeout=60,
+        )
+    except Exception as e:
+        return f"Fehler beim Zugriff auf Archivio ({base}): {e}"
+    if resp.status_code not in (200, 400):
+        return f"Archivio-Fehler ({resp.status_code}) beim Kopieren."
+
+    data = resp.json()
+    skipped = list(data.get("skipped", []))
+    if not data.get("ok"):
+        lines = [data.get("error") or "Kopieren fehlgeschlagen."]
+        lines += [f"- {s.get('filename')}: {s.get('reason')}" for s in skipped]
+        return "\n".join(lines)
+
+    safe_title = re.sub(r"[^\w\-äöüÄÖÜ ]", "", title).strip() or "Gesammelte Dokumente"
+    folder = Path.home() / "Downloads" / f"{safe_title}_{time.strftime('%Y%m%d-%H%M%S')}"
+    try:
+        folder.mkdir(parents=True)
+    except Exception as e:
+        return f"Ordner konnte nicht angelegt werden ({folder}): {e}"
+
+    copied = 0
+    for f in data["files"]:
+        name = f.get("filename") or f"dokument_{f.get('id')}"
+        # Pfadtrenner im Namen (z.B. "/" in Mail-Betreffs) würden aus dem Ordner ausbrechen
+        name = name.replace("/", "-").replace("\\", "-")
+        try:
+            if f.get("path"):
+                shutil.copy2(f["path"], _unique_name(folder, name))
+            else:
+                _unique_name(folder, name).write_bytes(base64.b64decode(f["eml_base64"]))
+            copied += 1
+        except Exception as e:
+            skipped.append({"filename": name, "reason": f"nicht kopierbar: {e}"})
+
+    if copied == 0:
+        try:
+            folder.rmdir()
+        except OSError:
+            pass
+        lines = ["Keine Datei konnte kopiert werden."]
+        lines += [f"- {s.get('filename')}: {s.get('reason')}" for s in skipped]
+        return "\n".join(lines)
+
+    lines = [
+        f"✓ {copied} Datei{'en' if copied != 1 else ''} in den neuen Ordner „{folder.name}“ kopiert.",
+        f"Pfad: {folder}",
+        _archivio_link_markdown(str(folder)),
+    ]
+    if skipped:
+        lines.append("\nÜbersprungen:")
+        lines += [f"- {s.get('filename')}: {s.get('reason')}" for s in skipped]
     return "\n".join(lines)
 
 
