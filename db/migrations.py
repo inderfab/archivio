@@ -43,6 +43,46 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "027_embeddings_float16", _m027)
     _apply(conn, "028_chunks_ohne_created_at", _m028)
     _apply(conn, "029_chunks_ohne_embedding", _m029)
+    _apply(conn, "030_photo_tags_project", _m030)
+    _apply(conn, "031_photo_tags_mailbox", _m031)
+
+
+def _m030(conn: sqlite3.Connection):
+    """Tags gehören optional zu einem Projekt: project_id NULL = global (vergeben bei
+    "Alle Projekte"), sonst nur in diesem Projekt sichtbar. Bestehende Tags bleiben
+    global. Gleicher Name darf je Projekt einmal vorkommen (UNIQUE-Constraint auf
+    name allein fällt weg -> Tabelle neu aufbauen, Zuweisungen bleiben per id erhalten).
+    """
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript("""
+        CREATE TABLE photo_tags_new (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL COLLATE NOCASE,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE
+        );
+        INSERT INTO photo_tags_new (id, name, created_at)
+            SELECT id, name, created_at FROM photo_tags;
+        DROP TABLE photo_tags;
+        ALTER TABLE photo_tags_new RENAME TO photo_tags;
+        CREATE UNIQUE INDEX idx_photo_tags_name_project
+            ON photo_tags(name COLLATE NOCASE, COALESCE(project_id, 0));
+    """)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.commit()
+
+
+def _m031(conn: sqlite3.Connection):
+    """Tags für Postfächer ohne Projektzuordnung: mailbox_name statt project_id.
+    Ist ein Postfach mit einem Projekt verknüpft, laufen seine Mails über dessen
+    project_id und teilen sich die Tags mit dem Projekt."""
+    conn.executescript("""
+        ALTER TABLE photo_tags ADD COLUMN mailbox_name TEXT;
+        DROP INDEX idx_photo_tags_name_project;
+        CREATE UNIQUE INDEX idx_photo_tags_name_scope
+            ON photo_tags(name COLLATE NOCASE, COALESCE(project_id, 0), COALESCE(mailbox_name, ''));
+    """)
+    conn.commit()
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
