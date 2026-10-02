@@ -512,18 +512,20 @@ async def foto_bewertung(document_id: int, body: RatingBody):
 
 
 @router.get("/tags/suggest")
-async def tags_suggest(q: str = Query(default="")):
+async def tags_suggest(q: str = Query(default=""), project_id: str = Query(default="")):
     """Autocomplete für die Tag-Eingabemaske (Taste T) -- bestehende Tags, die q
     enthalten, alphabetisch, max. 20."""
     q = q.strip()
     if not q:
         return JSONResponse({"tags": []})
     escaped = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+    scope_sql, scope_params = queries.tag_scope_sql(queries.parse_tag_scope(project_id), "t")
     conn = connection.get_connection()
     try:
         rows = conn.execute(
-            "SELECT id, name FROM photo_tags WHERE name LIKE ? ESCAPE '\\' ORDER BY name COLLATE NOCASE LIMIT 20",
-            (f"%{escaped}%",),
+            "SELECT t.id, t.name FROM photo_tags t WHERE t.name LIKE ? ESCAPE '\\' "
+            f"AND {scope_sql} ORDER BY t.name COLLATE NOCASE LIMIT 20",
+            (f"%{escaped}%", *scope_params),
         ).fetchall()
     finally:
         conn.close()
@@ -531,18 +533,21 @@ async def tags_suggest(q: str = Query(default="")):
 
 
 @router.get("/galerie/tags")
-async def galerie_tags():
-    """Alle global vergebenen Tags -- Basis für die Tag-Filter-Chips (nicht
-    projektgebunden, im Unterschied zum Ordner-Filter)."""
+async def galerie_tags(project_id: str = Query(default="")):
+    """Tags für die Filter-Chips: globale (bei "Alle Projekte" vergeben) plus die
+    des aktiven Projekts; bei "Alle Projekte" nur die globalen."""
+    scope_sql, scope_params = queries.tag_scope_sql(queries.parse_tag_scope(project_id), "t")
     conn = connection.get_connection()
     try:
         rows = conn.execute(
-            """
+            f"""
             SELECT t.id AS id, t.name AS name
             FROM photo_tags t
             WHERE EXISTS (SELECT 1 FROM photo_tag_assignments a WHERE a.tag_id = t.id)
+              AND {scope_sql}
             ORDER BY t.name COLLATE NOCASE
-            """
+            """,
+            scope_params,
         ).fetchall()
     finally:
         conn.close()
@@ -551,6 +556,7 @@ async def galerie_tags():
 
 class TagBody(BaseModel):
     name: str
+    project_id: str = ""
 
 
 @router.get("/foto/{document_id}/tags")
@@ -573,7 +579,8 @@ async def foto_add_tag(document_id: int, body: TagBody):
         row = conn.execute("SELECT id FROM documents WHERE id = ?", (document_id,)).fetchone()
         if not row:
             return JSONResponse({"ok": False, "error": "Dokument nicht gefunden"}, status_code=404)
-        tag_id = queries.get_or_create_tag(conn, name)
+        tag_id = queries.get_or_create_tag(
+            conn, name, queries.parse_tag_scope(body.project_id))
         queries.assign_photo_tag(conn, document_id, tag_id)
         tags = queries.get_photo_tags(conn, document_id)
     finally:

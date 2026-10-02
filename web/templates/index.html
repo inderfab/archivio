@@ -39,7 +39,7 @@
     <select name="project_id" id="project_id_select" style="max-width:220px; flex-shrink:0; font-weight:600;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
-      onchange="updateChips(); if (currentMode === 'gallery') { refreshOrdnerTags(); reloadGallery(); }">
+      onchange="updateChips(); refreshSearchTagFilterList(); if (currentMode === 'gallery') { refreshOrdnerTags(); refreshTagFilterList(); reloadGallery(); }">
       <option value="">Alle Projekte</option>
       {% for p in projects %}
         {% if p.children %}
@@ -1266,7 +1266,7 @@ function refreshTagFilterList() {
   var searchEl = document.getElementById('gallery-tag-search');
   row.dataset.selected = '[]';
   searchEl.value = '';
-  fetch('/galerie/tags')
+  fetch('/galerie/tags?project_id=' + encodeURIComponent(document.getElementById('project_id_select').value))
     .then(function(r) { return r.json(); })
     .then(function(d) {
       document.querySelector('#gallery-tag-row .scope-btn[data-tag=""]').classList.add('active');
@@ -1331,7 +1331,7 @@ function refreshSearchTagFilterList() {
   var listEl   = document.getElementById('search-tag-list');
   var searchEl = document.getElementById('search-tag-search');
   searchEl.value = '';
-  fetch('/galerie/tags')
+  fetch('/galerie/tags?project_id=' + encodeURIComponent(document.getElementById('project_id_select').value))
     .then(function(r) { return r.json(); })
     .then(function(d) {
       if (!d.tags || !d.tags.length) { listEl.innerHTML = ''; return; }
@@ -1449,7 +1449,7 @@ function onTagFlyoverInput() {
   var q = document.getElementById('tag-flyover-input').value.trim();
   _tagSuggestTimer = setTimeout(function() {
     if (!q) { renderTagSuggestions([]); return; }
-    fetch('/tags/suggest?q=' + encodeURIComponent(q))
+    fetch('/tags/suggest?q=' + encodeURIComponent(q) + '&project_id=' + encodeURIComponent(document.getElementById('project_id_select').value))
       .then(function(r) { return r.json(); })
       .then(function(d) { renderTagSuggestions(d.tags || [], q); });
   }, 150);
@@ -1487,7 +1487,7 @@ function pickTagSuggestion(name) {
     return fetch('/foto/' + id + '/tags', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ name: name }),
+      body: JSON.stringify({ name: name, project_id: document.getElementById('project_id_select').value }),
     });
   });
   Promise.all(requests).then(function() {

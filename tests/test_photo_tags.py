@@ -257,3 +257,45 @@ def test_rename_tag_rejects_empty_name(tmp_db):
     c = _client()
     r = c.post(f"/tags/{tag_id}/umbenennen", json={"name": "   "})
     assert r.status_code == 400
+
+
+def test_tags_are_scoped_to_project(tmp_db, tmp_path):
+    pid = queries.insert_project(tmp_db, "200_Keller", str(tmp_path / "k"))
+    glob = queries.get_or_create_tag(tmp_db, "Global")
+    proj = queries.get_or_create_tag(tmp_db, "Global", (pid, None))
+    assert glob != proj  # gleicher Name, anderer Scope
+    assert queries.get_or_create_tag(tmp_db, "global", (pid, None)) == proj
+    tmp_db.commit()
+    assert queries.parse_tag_scope("") == (None, None)
+    assert queries.parse_tag_scope("mailbox:acc/INBOX") == (None, "acc/INBOX")
+    assert queries.parse_tag_scope(str(pid)) == (pid, None)
+    mb = queries.get_or_create_tag(tmp_db, "Global", (None, "acc/INBOX"))
+    assert mb not in (glob, proj)
+
+
+def test_endpoints_respect_project_scope(tmp_db, tmp_path):
+    pid = queries.insert_project(tmp_db, "200_Keller", str(tmp_path / "k"))
+    (tmp_path / "k").mkdir()
+    photo = tmp_path / "k" / "a.jpg"
+    photo.write_bytes(_jpeg_bytes())
+    doc_id = _make_photo(tmp_db, pid, photo)
+    c = _client()
+    c.post(f"/foto/{doc_id}/tags", json={"name": "Diamant", "project_id": str(pid)})
+    c.post(f"/foto/{doc_id}/tags", json={"name": "Allgemein", "project_id": ""})
+    names = lambda r: sorted(t["name"] for t in r.json()["tags"])
+    assert names(c.get("/galerie/tags", params={"project_id": str(pid)})) == ["Allgemein", "Diamant"]
+    assert names(c.get("/galerie/tags")) == ["Allgemein"]
+    assert names(c.get("/tags/suggest", params={"q": "dia"})) == []
+    assert names(c.get("/tags/suggest", params={"q": "dia", "project_id": str(pid)})) == ["Diamant"]
+
+
+def test_mailbox_tags_scoped_to_unassigned_mailbox(tmp_db):
+    c = _client()
+    queries.get_or_create_tag(tmp_db, "Offerte", (None, "acc/INBOX"))
+    tmp_db.commit()
+    r = c.get("/tags/suggest", params={"q": "offe", "project_id": "mailbox:acc/INBOX"})
+    assert [t["name"] for t in r.json()["tags"]] == ["Offerte"]
+    r = c.get("/tags/suggest", params={"q": "offe", "project_id": "mailbox:andere"})
+    assert r.json()["tags"] == []
+    r = c.get("/tags/suggest", params={"q": "offe"})
+    assert r.json()["tags"] == []

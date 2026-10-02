@@ -138,13 +138,49 @@ def set_photo_rating(conn: sqlite3.Connection, document_id: int, rating: int) ->
     conn.commit()
 
 
-def get_or_create_tag(conn: sqlite3.Connection, name: str) -> int:
+def parse_tag_scope(project_id) -> tuple[int | None, str | None]:
+    """Aktiver Projektfilter -> Tag-Scope (project_id, mailbox_name). Leer
+    ("Alle Projekte") = global (None, None); "mailbox:NAME" = Postfach ohne Projekt."""
+    raw = "" if project_id is None else str(project_id)
+    if raw.startswith("mailbox:"):
+        return None, raw[8:] or None
+    try:
+        return (int(raw) if raw else None), None
+    except ValueError:
+        return None, None
+
+
+def get_or_create_tag(conn: sqlite3.Connection, name: str,
+                      scope: tuple[int | None, str | None] = (None, None)) -> int:
+    """Tag mit Namen im Scope (project_id, mailbox_name) holen oder anlegen;
+    (None, None) = global."""
     name = name.strip()
-    conn.execute("INSERT OR IGNORE INTO photo_tags (name) VALUES (?)", (name,))
+    project_id, mailbox = scope
     row = conn.execute(
-        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE", (name,)
+        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE "
+        "AND COALESCE(project_id, 0) = COALESCE(?, 0) "
+        "AND COALESCE(mailbox_name, '') = COALESCE(?, '')",
+        (name, project_id, mailbox),
     ).fetchone()
-    return row["id"]
+    if row:
+        return row["id"]
+    cur = conn.execute(
+        "INSERT INTO photo_tags (name, project_id, mailbox_name) VALUES (?, ?, ?)",
+        (name, project_id, mailbox),
+    )
+    return cur.lastrowid
+
+
+def tag_scope_sql(scope: tuple[int | None, str | None], alias: str = "t") -> tuple[str, list]:
+    """SQL-Fragment: Tags, die im aktiven Filter sichtbar sind -- global immer,
+    projekt-/postfachgebundene nur im eigenen Scope (bei "Alle Projekte" nur globale)."""
+    project_id, mailbox = scope
+    glob = f"({alias}.project_id IS NULL AND {alias}.mailbox_name IS NULL)"
+    if project_id is not None:
+        return f"({glob} OR {alias}.project_id = ?)", [project_id]
+    if mailbox is not None:
+        return f"({glob} OR {alias}.mailbox_name = ?)", [mailbox]
+    return glob, []
 
 
 def assign_photo_tag(conn: sqlite3.Connection, document_id: int, tag_id: int) -> None:
@@ -172,8 +208,10 @@ def rename_tag(conn: sqlite3.Connection, tag_id: int, new_name: str) -> bool:
     if not new_name:
         return False
     clash = conn.execute(
-        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE AND id != ?",
-        (new_name, tag_id),
+        "SELECT id FROM photo_tags WHERE name = ? COLLATE NOCASE AND id != ? "
+        "AND COALESCE(project_id, 0) = COALESCE((SELECT project_id FROM photo_tags WHERE id = ?), 0) "
+        "AND COALESCE(mailbox_name, '') = COALESCE((SELECT mailbox_name FROM photo_tags WHERE id = ?), '')",
+        (new_name, tag_id, tag_id, tag_id),
     ).fetchone()
     if clash:
         return False
