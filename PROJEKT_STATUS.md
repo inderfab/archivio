@@ -565,7 +565,7 @@ Ordner-Erfassung) · `vorlage` (Musterordner/Herleitung → Slots) · `merkmale`
 `produktion` (SQL-Haken) · `vorgang` (Server-Seite des Drops) · `lernen` (Statistik +1/−1) · `suche` · Transport und Dateioperationen
 in `shared/ablage_transport.py` (Helper UND Server, ohne rumps).
 
-### Datenmodell (Migrationen 030–035)
+### Datenmodell (Migrationen 032–037; 030/031 sind die Tag-Migrationen)
 
 `ablage_ordner` (jeder gesehene Ordner, auch leere; `art` normal/archiv/trenner; **`ausgeschlossen`** ist eine eigene Spalte —
 ein ausgeschlossenes `z_Archiv` bleibt ein Archiv), `ablage_slot` (Vorlage-Rollen, Schlüssel = Label-Pfad), `ablage_stats`

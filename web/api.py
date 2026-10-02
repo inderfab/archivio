@@ -533,6 +533,136 @@ async def mcp_merge_pdf(document_ids: str, session_id: str = ""):
         conn.close()
 
 
+def _resolve_doc_file(conn, document_id: int) -> tuple[Path | None, str | None]:
+    """Löst document_id -> Pfad der Originaldatei auf, geprüft gegen die konfigurierten
+    NAS-Wurzelpfade (wie _resolve_pdf_path, aber ohne PDF-Beschränkung)."""
+    row = conn.execute(
+        "SELECT path FROM document_paths WHERE document_id = ? AND is_primary = 1",
+        (document_id,),
+    ).fetchone()
+    if not row:
+        return None, "keine Datei auf dem NAS"
+    allowed = [f.get("path") for f in settings.get("scanner.base_folders", []) if f.get("path")]
+    if not allowed:
+        return None, "keine NAS-Ordner konfiguriert"
+    try:
+        target = Path(row["path"]).resolve()
+    except Exception as e:
+        return None, f"ungültiger Pfad: {e}"
+    if not any(target == Path(a).resolve() or Path(a).resolve() in target.parents for a in allowed):
+        return None, "Pfad ausserhalb der erlaubten Archivio-Ordner"
+    if not target.exists():
+        return None, "Datei nicht gefunden"
+    return target, None
+
+
+def _build_eml(conn, document_id: int) -> bytes | None:
+    """Baut aus den in der DB gespeicherten Mail-Daten eine .eml-Datei (für Postfach-Mails,
+    die keine Datei auf dem NAS haben). Enthält Kopfzeilen + extrahierten Text, keine
+    Anhänge/HTML (die hat Archivio nicht gespeichert)."""
+    from email.message import EmailMessage
+    from email.utils import parsedate_to_datetime
+
+    m = conn.execute(
+        "SELECT sender, recipients, cc, subject, date FROM mails WHERE document_id=?", (document_id,)
+    ).fetchone()
+    if not m:
+        return None
+    c = conn.execute("SELECT content FROM document_content WHERE document_id=?", (document_id,)).fetchone()
+    msg = EmailMessage()
+    if m["sender"]:
+        msg["From"] = m["sender"]
+    if m["recipients"]:
+        msg["To"] = m["recipients"]
+    if m["cc"]:
+        msg["Cc"] = m["cc"]
+    msg["Subject"] = m["subject"] or ""
+    if m["date"]:
+        try:
+            msg["Date"] = parsedate_to_datetime(m["date"])
+        except Exception:
+            try:
+                msg["Date"] = datetime.fromisoformat(m["date"].replace("Z", "+00:00"))
+            except Exception:
+                pass
+    msg.set_content((c["content"] if c else "") or "")
+    return msg.as_bytes()
+
+
+@router.get("/mcp/copy-files")
+async def mcp_copy_files(document_ids: str, session_id: str = ""):
+    """Liefert für die übergebenen Dokumente die ORIGINALDATEIEN -- der MCP-Server
+    (copy_documents_to_folder) kopiert sie danach lokal in einen neuen Ordner. Jede Id
+    durchläuft dieselbe Freigabekette wie mcp_document()/mcp_merge_pdf: Projekt-Whitelist,
+    Normen-Sperre, Sperrliste. Dateien auf dem NAS kommen als Pfad zurück; Postfach-Mails
+    (ohne Datei) werden als .eml gebaut und als eml_base64 mitgeschickt."""
+    try:
+        ids = [int(x) for x in document_ids.split(",") if x.strip()]
+    except ValueError:
+        return JSONResponse({"ok": False, "error": "Ungültige document_ids"}, status_code=400)
+    if not ids:
+        return JSONResponse({"ok": False, "error": "Keine Dokumente angegeben"}, status_code=400)
+
+    from scanner.block_list import is_blocked as block_is_blocked
+    from scanner.mcp_log import log_access
+    from scanner.norms import is_norm_doc
+
+    conn = connection.get_connection()
+    allowed_ids = _mcp_allowed_doc_ids(conn, ids)
+    files: list[dict] = []
+    sent: list[dict] = []
+    skipped: list[dict] = []
+    try:
+        for doc_id in ids:
+            row = conn.execute(
+                "SELECT filename, extension, source_type, project_id FROM documents WHERE id=?", (doc_id,)
+            ).fetchone()
+            if not row:
+                skipped.append({"path": None, "filename": str(doc_id), "reason": "Dokument nicht gefunden"})
+                continue
+            path_row = conn.execute(
+                "SELECT path FROM document_paths WHERE document_id=? AND is_primary=1", (doc_id,)
+            ).fetchone()
+            filepath = path_row["path"] if path_row else None
+
+            if doc_id not in allowed_ids:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": "Nicht für Claude freigegeben"})
+                continue
+            if is_norm_doc(conn, doc_id, filepath):
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": "Norm erkannt"})
+                continue
+            is_blk, block_reason = block_is_blocked(conn, doc_id, filepath, row["project_id"])
+            if is_blk:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": block_reason})
+                continue
+
+            path, err = _resolve_doc_file(conn, doc_id)
+            if path is not None:
+                files.append({"id": doc_id, "filename": row["filename"], "path": str(path)})
+            elif row["source_type"] == "email":
+                eml = _build_eml(conn, doc_id)
+                if eml is None:
+                    skipped.append({"path": filepath, "filename": row["filename"], "reason": "Mail-Daten fehlen"})
+                    continue
+                name = row["filename"] if row["filename"].lower().endswith(".eml") else row["filename"] + ".eml"
+                files.append({"id": doc_id, "filename": name, "path": None,
+                              "eml_base64": base64.b64encode(eml).decode("ascii")})
+            else:
+                skipped.append({"path": filepath, "filename": row["filename"], "reason": err})
+                continue
+            sent.append({"id": doc_id, "path": filepath, "filename": row["filename"],
+                         "extension": row["extension"]})
+
+        log_access(conn, "copy_files", document_ids, None, sent, skipped, session_id=session_id)
+        if not files:
+            return JSONResponse(
+                {"ok": False, "error": "Keine freigegebenen Dokumente zum Kopieren in der Auswahl",
+                 "skipped": skipped}, status_code=400)
+        return JSONResponse({"ok": True, "files": files, "skipped": skipped})
+    finally:
+        conn.close()
+
+
 @router.get("/mcp/base-folders")
 async def mcp_base_folders():
     """Gibt die Ordnerpfade der für Claude freigegebenen Projekte zurück — der

@@ -36,7 +36,7 @@ def _scan(conn, tmp_path, name="Projekt"):
 
 def test_migrationen_030_031_vorhanden(tmp_db):
     ids = {r[0] for r in tmp_db.execute("SELECT id FROM _migrations")}
-    assert {"030_ablage_ordner", "031_ablage_slot"} <= ids
+    assert {"032_ablage_ordner", "033_ablage_slot"} <= ids
     spalten = {r[1] for r in tmp_db.execute("PRAGMA table_info(ablage_ordner)")}
     assert {"project_id", "path", "parent_id", "rel_path", "depth", "label", "praefix",
             "codes", "slot_id", "art", "datei_anzahl", "letzte_aenderung",
@@ -179,11 +179,11 @@ def test_migration_034_stellt_alte_zeilen_um(tmp_db):
             "INSERT INTO ablage_ordner (project_id, path, rel_path, depth, name, label, art, zuletzt_gesehen)"
             " VALUES (?,?,?,1,?,?,'ausgeschlossen','x')", (pid, f"/p/{name}", name, name, label))
     tmp_db.commit()
-    migrations._m034(tmp_db)
+    migrations._m036(tmp_db)
     zeilen = {r["name"]: (r["art"], r["ausgeschlossen"]) for r in tmp_db.execute("SELECT name, art, ausgeschlossen FROM ablage_ordner")}
     assert zeilen == {"Upload": ("normal", 1), "Archiv": ("archiv", 1)}
-    migrations._m034(tmp_db)                                    # idempotent
-    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='034_ablage_ordner_ausgeschlossen'").fetchone()
+    migrations._m036(tmp_db)                                    # idempotent
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='036_ablage_ordner_ausgeschlossen'").fetchone()
 
 
 # ── Erst-Erfassung nach dem Update (nur Ordner) ────────────────────────────────

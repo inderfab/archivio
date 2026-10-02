@@ -143,3 +143,44 @@ def test_empty_document_ids_returns_400(tmp_db):
 def test_invalid_document_ids_returns_400(tmp_db):
     r = _client().get("/api/mcp/merge-pdf", params={"document_ids": "abc,def"})
     assert r.status_code == 400
+
+
+def test_copy_files_returns_originals_and_builds_eml_for_mailbox_mails(tmp_db, tmp_path):
+    from config import settings
+
+    settings._settings.setdefault("scanner", {})["base_folders"] = [{"path": str(tmp_path)}]
+    p = _enabled_project(tmp_db)
+    w = tmp_path / "offerte.docx"
+    w.write_bytes(b"docx")
+    doc_w = _make_document(tmp_db, p, w, "offerte.docx", extension=".docx")
+    mail_doc = queries.upsert_document(tmp_db, {
+        "project_id": p, "hash": "h-mail", "filename": "Betreff X", "extension": "",
+        "filesize": 1, "modified_at": "2026-01-01T00:00:00Z", "source_type": "email",
+    })
+    queries.upsert_content(tmp_db, mail_doc, "Mailtext äöü")
+    tmp_db.execute(
+        "INSERT INTO mails (document_id, sender, recipients, subject, date) VALUES (?,?,?,?,?)",
+        (mail_doc, "a@b.ch", "c@d.ch", "Betreff X", "2026-01-02T10:00:00+00:00"))
+    other = queries.insert_project(tmp_db, "Gesperrt", "/other")
+    closed = tmp_path / "geheim.docx"
+    closed.write_bytes(b"x")
+    doc_c = _make_document(tmp_db, other, closed, "geheim.docx", extension=".docx")
+    tmp_db.commit()
+
+    r = _client().get("/api/mcp/copy-files", params={"document_ids": f"{doc_w},{mail_doc},{doc_c}"})
+    assert r.status_code == 200
+    data = r.json()
+    by_name = {f["filename"]: f for f in data["files"]}
+    assert by_name["offerte.docx"]["path"] == str(w.resolve())
+
+    import base64
+    import email
+    eml = by_name["Betreff X.eml"]
+    assert eml["path"] is None
+    msg = email.message_from_bytes(base64.b64decode(eml["eml_base64"]))
+    assert msg["From"] == "a@b.ch" and msg["Subject"] == "Betreff X" and msg["Date"]
+    assert "Mailtext äöü" in msg.get_payload(decode=True).decode("utf-8")
+
+    assert [s["filename"] for s in data["skipped"]] == ["geheim.docx"]
+    row = tmp_db.execute("SELECT * FROM mcp_log WHERE tool='copy_files' ORDER BY id DESC LIMIT 1").fetchone()
+    assert row is not None

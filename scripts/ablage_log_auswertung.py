@@ -55,7 +55,7 @@ def auswerten(conn, seit: str | None = None, host: str | None = None) -> str:
                f"· 90. Perzentil {sekunden(perzentil([r['seite_ms'] for r in mit_zeit], 0.9))} (n={len(mit_zeit)})")
     ohne = sum(1 for r in rows if not r["quelle"])
     if ohne:
-        out.append(f"- {ohne} ältere Einträge ohne Kennzeichen (vor Migration 035) zählen unter „Unbekannt“")
+        out.append(f"- {ohne} ältere Einträge ohne Kennzeichen (vor Migration 037) zählen unter „Unbekannt“")
     out += ["", "## Welcher Weg wurde benutzt?", "", "| Weg | Anteil | Anzahl | Median Zeit | 90. Perzentil |", "|---|---:|---:|---:|---:|"]
     nach = defaultdict(list)
     for r in rows:

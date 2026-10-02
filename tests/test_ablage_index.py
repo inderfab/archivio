@@ -140,4 +140,4 @@ def test_neu_aufbauen_ohne_lern_projekte_leer(tmp_db):
 
 
 def test_migration_032(tmp_db):
-    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='032_ablage_stats'").fetchone()
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='034_ablage_stats'").fetchone()

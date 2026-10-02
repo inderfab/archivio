@@ -572,7 +572,7 @@ def test_log_unbekannte_quelle_und_unsinnige_zeit_werden_abgefangen(welt):
 def test_migration_035(tmp_db):
     spalten = {r[1] for r in tmp_db.execute("PRAGMA table_info(ablage_log)")}
     assert {"quelle", "seite_ms"} <= spalten
-    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='035_ablage_log_quelle'").fetchone()
+    assert tmp_db.execute("SELECT 1 FROM _migrations WHERE id='037_ablage_log_quelle'").fetchone()
 
 
 # ── Inkrementelle Statistik nach jeder Ablage (Etappe 8, reduziert) ────────────

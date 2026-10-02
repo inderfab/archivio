@@ -2643,7 +2643,7 @@ def _ablage_struktur_neu() -> dict | None:
 
 
 def _ablage_erst_erfassung() -> dict:
-    """Nach einem Update ist `ablage_ordner` leer (Migration 030 füllt nichts). Einmal pro Projekt eine reine
+    """Nach einem Update ist `ablage_ordner` leer (Migration 032 füllt nichts). Einmal pro Projekt eine reine
     Ordner-Erfassung im Hintergrund (os.walk nur über Ordner, unter dem Scan-Lock), danach Slots und Statistik neu.
     Läuft, wenn das Projekt noch keine Ordner hat und nicht schon erfasst wurde; ein nicht erreichbares NAS wird beim
     nächsten Start nochmals versucht. Die Dauer steht im Log."""

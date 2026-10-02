@@ -146,7 +146,7 @@ Halte das Muster in `db/migrations.py` ein (`_apply(conn, "030_…", _m030)`). E
 `db/schema.sql` für frische Datenbanken. SQLite 3.53 (PROJEKT_STATUS §12).
 
 ```sql
--- 030_ablage_ordner: jeder Ordner, den der Scan sieht, AUCH leere und ausgeschlossene
+-- 032_ablage_ordner: jeder Ordner, den der Scan sieht, AUCH leere und ausgeschlossene
 CREATE TABLE ablage_ordner (
     id            INTEGER PRIMARY KEY AUTOINCREMENT,
     project_id    INTEGER NOT NULL REFERENCES projects(id) ON DELETE CASCADE,
@@ -168,7 +168,7 @@ CREATE TABLE ablage_ordner (
 CREATE INDEX idx_ablage_ordner_project ON ablage_ordner(project_id);
 CREATE INDEX idx_ablage_ordner_slot    ON ablage_ordner(slot_id);
 
--- 031_ablage_slot: die büroweite "Vorlage" (aus Musterordner importiert und/oder aus Projekten hergeleitet)
+-- 033_ablage_slot: die büroweite "Vorlage" (aus Musterordner importiert und/oder aus Projekten hergeleitet)
 CREATE TABLE ablage_slot (
     id          INTEGER PRIMARY KEY AUTOINCREMENT,
     label_pfad  TEXT NOT NULL UNIQUE,   -- z.B. "ausfuehrung/planstaende" (Labels, mit "/" verbunden)
@@ -178,7 +178,7 @@ CREATE TABLE ablage_slot (
     aus_vorlage INTEGER NOT NULL DEFAULT 0
 );
 
--- 032_ablage_stats: Merkmalszählungen, gewichtet nach Alter (§6.3)
+-- 034_ablage_stats: Merkmalszählungen, gewichtet nach Alter (§6.3)
 CREATE TABLE ablage_stats (
     ebene    TEXT    NOT NULL CHECK (ebene IN ('ordner','slot','rolle','global')),
     key_id   INTEGER NOT NULL,          -- ablage_ordner.id / ablage_slot.id / Hash(rolle) / 0
@@ -187,7 +187,7 @@ CREATE TABLE ablage_stats (
     PRIMARY KEY (ebene, key_id, merkmal)
 ) WITHOUT ROWID;
 
--- 033_ablage_vorgang + ablage_log + ablage_regel
+-- 035_ablage_vorgang + ablage_log + ablage_regel
 CREATE TABLE ablage_vorgang (           -- ein Drop, bis zur Ablage (TTL 24 h, dann aufräumen)
     token TEXT PRIMARY KEY, erstellt TEXT NOT NULL, host TEXT, dateiname TEXT NOT NULL,
     groesse INTEGER, mtime TEXT, hash TEXT, staging_pfad TEXT,

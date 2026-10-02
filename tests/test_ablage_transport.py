@@ -496,7 +496,7 @@ def test_bridge_ohne_registry_kennt_den_endpunkt_nicht(welt):
 
 def test_migration_033(tmp_db):
     ids = {r[0] for r in tmp_db.execute("SELECT id FROM _migrations")}
-    assert "033_ablage_vorgang" in ids
+    assert "035_ablage_vorgang" in ids
     for t in ("ablage_vorgang", "ablage_log", "ablage_regel"):
         assert tmp_db.execute("SELECT 1 FROM sqlite_master WHERE name = ?", (t,)).fetchone()
 

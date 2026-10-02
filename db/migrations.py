@@ -43,12 +43,52 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "027_embeddings_float16", _m027)
     _apply(conn, "028_chunks_ohne_created_at", _m028)
     _apply(conn, "029_chunks_ohne_embedding", _m029)
-    _apply(conn, "030_ablage_ordner", _m030)
-    _apply(conn, "031_ablage_slot", _m031)
-    _apply(conn, "032_ablage_stats", _m032)
-    _apply(conn, "033_ablage_vorgang", _m033)
-    _apply(conn, "034_ablage_ordner_ausgeschlossen", _m034)
-    _apply(conn, "035_ablage_log_quelle", _m035)
+    _apply(conn, "030_photo_tags_project", _m030)
+    _apply(conn, "031_photo_tags_mailbox", _m031)
+    _apply(conn, "032_ablage_ordner", _m032)
+    _apply(conn, "033_ablage_slot", _m033)
+    _apply(conn, "034_ablage_stats", _m034)
+    _apply(conn, "035_ablage_vorgang", _m035)
+    _apply(conn, "036_ablage_ordner_ausgeschlossen", _m036)
+    _apply(conn, "037_ablage_log_quelle", _m037)
+
+
+def _m030(conn: sqlite3.Connection):
+    """Tags gehören optional zu einem Projekt: project_id NULL = global (vergeben bei
+    "Alle Projekte"), sonst nur in diesem Projekt sichtbar. Bestehende Tags bleiben
+    global. Gleicher Name darf je Projekt einmal vorkommen (UNIQUE-Constraint auf
+    name allein fällt weg -> Tabelle neu aufbauen, Zuweisungen bleiben per id erhalten).
+    """
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.executescript("""
+        CREATE TABLE photo_tags_new (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            name       TEXT NOT NULL COLLATE NOCASE,
+            created_at TEXT NOT NULL DEFAULT (strftime('%Y-%m-%dT%H:%M:%SZ', 'now')),
+            project_id INTEGER REFERENCES projects(id) ON DELETE CASCADE
+        );
+        INSERT INTO photo_tags_new (id, name, created_at)
+            SELECT id, name, created_at FROM photo_tags;
+        DROP TABLE photo_tags;
+        ALTER TABLE photo_tags_new RENAME TO photo_tags;
+        CREATE UNIQUE INDEX idx_photo_tags_name_project
+            ON photo_tags(name COLLATE NOCASE, COALESCE(project_id, 0));
+    """)
+    conn.execute("PRAGMA foreign_keys = ON")
+    conn.commit()
+
+
+def _m031(conn: sqlite3.Connection):
+    """Tags für Postfächer ohne Projektzuordnung: mailbox_name statt project_id.
+    Ist ein Postfach mit einem Projekt verknüpft, laufen seine Mails über dessen
+    project_id und teilen sich die Tags mit dem Projekt."""
+    conn.executescript("""
+        ALTER TABLE photo_tags ADD COLUMN mailbox_name TEXT;
+        DROP INDEX idx_photo_tags_name_project;
+        CREATE UNIQUE INDEX idx_photo_tags_name_scope
+            ON photo_tags(name COLLATE NOCASE, COALESCE(project_id, 0), COALESCE(mailbox_name, ''));
+    """)
+    conn.commit()
 
 
 def _apply(conn: sqlite3.Connection, migration_id: str, fn):
@@ -799,12 +839,12 @@ def _m029(conn: sqlite3.Connection):
         log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
 
 
-def _m030(conn: sqlite3.Connection):
+def _m032(conn: sqlite3.Connection):
     """ablage_ordner: jeder Ordner, den der Scan sieht -- auch leere und ausgeschlossene.
 
     Grundlage des Ablage-Vorschlags (planung/datei-drop-ablage.md). Die Tabelle fuellt
     sich beim naechsten normalen Scan eines Projekts von selbst, einen Backfill gibt es
-    nicht. slot_id verweist auf ablage_slot (Migration 031, wird dort befuellt).
+    nicht. slot_id verweist auf ablage_slot (Migration 033, wird dort befuellt).
     """
     conn.execute("""
         CREATE TABLE IF NOT EXISTS ablage_ordner (
@@ -831,7 +871,7 @@ def _m030(conn: sqlite3.Connection):
     conn.commit()
 
 
-def _m031(conn: sqlite3.Connection):
+def _m033(conn: sqlite3.Connection):
     """ablage_slot: die bueroweite Vorlage (aus Musterordner importiert und/oder aus den
     Projekten hergeleitet). Schluessel ist der Label-Pfad, nie Praefix oder BKP-Code."""
     conn.execute("""
@@ -847,7 +887,7 @@ def _m031(conn: sqlite3.Connection):
     conn.commit()
 
 
-def _m032(conn: sqlite3.Connection):
+def _m034(conn: sqlite3.Connection):
     """ablage_stats: nach Alter gewichtete Merkmalszaehlungen je Ordner, Slot, Rolle und
     global (Naive-Bayes-Grundlage des Ablage-Vorschlags). Die Zeile `_n` je Schluessel
     haelt das Gesamtgewicht. Wird komplett von scanner/ablage/index.py neu aufgebaut."""
@@ -863,7 +903,7 @@ def _m032(conn: sqlite3.Connection):
     conn.commit()
 
 
-def _m033(conn: sqlite3.Connection):
+def _m035(conn: sqlite3.Connection):
     """Datei-Drop: ablage_vorgang (ein Drop bis zur Ablage, 24 h), ablage_log (dauerhaft, fuer Messung und
     Lernen), ablage_regel (explizite Regeln, nie automatisch aktiv)."""
     conn.execute("""
@@ -890,7 +930,7 @@ def _m033(conn: sqlite3.Connection):
     conn.commit()
 
 
-def _m034(conn: sqlite3.Connection):
+def _m036(conn: sqlite3.Connection):
     """ablage_ordner.ausgeschlossen: die Art eines Ordners und sein Ausschluss vom Scan sind zwei verschiedene Dinge.
 
     Vorher wurde ein ausgeschlossener Ordner mit art='ausgeschlossen' erfasst und verlor dabei seine Art: ein
@@ -911,7 +951,7 @@ def _m034(conn: sqlite3.Connection):
         log.info("%d Ordner auf die Spalte ausgeschlossen umgestellt", len(zeilen))
 
 
-def _m035(conn: sqlite3.Connection):
+def _m037(conn: sqlite3.Connection):
     """ablage_log: Kennzeichen, WIE der Nutzer das Ziel gewaehlt hat (option | zuletzt | suche | browser |
     neuer_ordner) und die Zeit von Seitenaufruf bis Ablegen. Daraus wertet Fabio nach 2-3 Wochen aus, ob die Funktion
     im Alltag schneller ist als selbst suchen (Nachtrag 1 §5)."""
