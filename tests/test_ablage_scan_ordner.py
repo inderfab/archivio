@@ -250,3 +250,20 @@ def test_erst_erfassung_mailbox_und_musterordner_nie(tmp_db, tmp_path, monkeypat
     tmp_db.commit()
     assert dashboard._ablage_erst_erfassung() == {"projekte": 0, "ordner": 0, "uebersprungen": 0}
     assert tmp_db.execute("SELECT COUNT(*) FROM ablage_ordner").fetchone()[0] == 0
+
+
+def test_erst_erfassung_nummerierte_projekte_zuerst_neueste_vorn(tmp_db, tmp_path, monkeypatch):
+    from scanner.ablage import erfassung
+    from web import dashboard
+    reihenfolge = []
+    echt = erfassung.nur_ordner_erfassen
+    monkeypatch.setattr(erfassung, "nur_ordner_erfassen", lambda c, pid, root: (reihenfolge.append(Path(str(root)).name), echt(c, pid, root))[1])
+    from pathlib import Path
+    for name in ("Ordner 2 Computer", "204 Moosfeld", "215 Flurhof", "182 Bushof", "Ordner 3 Behoerden"):
+        d = tmp_path / name
+        d.mkdir()
+        (d / "a").mkdir()
+        queries.insert_project(tmp_db, name, str(d))
+    tmp_db.commit()
+    dashboard._ablage_erst_erfassung()
+    assert reihenfolge == ["215 Flurhof", "204 Moosfeld", "182 Bushof", "Ordner 2 Computer", "Ordner 3 Behoerden"]

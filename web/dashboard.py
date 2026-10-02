@@ -2665,6 +2665,12 @@ def _ablage_erst_erfassung() -> dict:
             offen.append(r)
         if not offen:
             return ergebnis
+        # Nummerierte Projekte zuerst, neueste vorn: die brauchen die Ablage am ehesten. Riesige Ordner ohne Projektnummer
+        # (z. B. ein ganzer Office-Ordner mit 4000 Ordnern, auf dem NAS 18 Minuten) kommen zuletzt und blockieren nichts.
+        def _reihe(r):
+            nr = vorlage.projekt_nummer(r["name"], r["path"])
+            return (nr is None, -(nr or 0), r["id"])
+        offen.sort(key=_reihe)
         t_alle = time.time()
         for r in offen:
             if not Path(r["path"]).is_dir():
