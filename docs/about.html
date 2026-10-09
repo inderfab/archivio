@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Über Archivio – lokale Dokumentensuche für Architekturbüros</title>
+  <meta name="description" content="Wer hinter Archivio steht, warum es entstanden ist und nach welchen Grundsätzen die lokale Dokumentensuche für Architekturbüros gebaut ist.">
+  <link rel="canonical" href="https://architools.ch/about.html">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff; color: #111; line-height: 1.7;
+    }
+    header {
+      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
+    }
+    .back-link { font-size: 13px; color: #999; text-decoration: none; }
+    .back-link:hover { color: #111; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
+    h2 { font-size: 18px; font-weight: 700; margin: 34px 0 10px; letter-spacing: -0.2px; }
+    p { margin-bottom: 14px; color: #333; }
+    p:last-child { margin-bottom: 0; }
+    a { color: #111; }
+    ul { margin: 0 0 14px 20px; color: #333; }
+    li { margin-bottom: 6px; }
+
+    .callout {
+      background: #f7f7f7; border-left: 3px solid #111; padding: 14px 18px;
+      border-radius: 0 6px 6px 0; margin: 20px 0; font-size: 14px; color: #444;
+    }
+    .callout strong { color: #111; }
+
+    footer {
+      border-top: 1px solid #e8e8e8; padding: 32px 48px;
+      display: flex; justify-content: space-between; align-items: center;
+      font-size: 13px; color: #999; flex-wrap: wrap; gap: 8px;
+    }
+    footer a { color: #999; text-decoration: none; }
+    footer a:hover { color: #111; }
+
+    @media print {
+      header, footer { display: none; }
+      .page { padding: 0; max-width: none; }
+      a { color: #111; text-decoration: none; }
+    }
+    @media (max-width: 600px) {
+      header { padding: 20px 24px; }
+      footer { padding: 24px; flex-direction: column; align-items: flex-start; }
+    }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <main class="page">
+    <h1>Über Archivio</h1>
+
+    <p>Archivio ist eine lokale Dokumentenverwaltung und Volltextsuche für Architekturbüros. Die Software wird von Fabio, Architekt aus Winterthur, entwickelt und ist aus dem eigenen Büroalltag entstanden: Pläne, Protokolle, Offerten, Mails und Fotos liegen über Jahre verteilt in Projektordnern, Postfächern und auf dem Server. Wer eine bestimmte Planversion, eine Abmachung aus einer alten Mail oder ein Baustellenfoto sucht, verliert dabei oft viel Zeit mit der Suche. Gerade wenn man die Dokumente nicht selber bearbeitet und abgelegt hat, sind sie schwer zu finden.</p>
+
+    <p>Archivio macht diesen Bestand mit einer übergreifenden Suche zugänglich, unabhängig von Ordnerstruktur, Dateiformat oder Projekt. Es ersetzt keine Ablage und keine Datensicherung, sondern macht die bestehende Ablage durchsuchbar.</p>
+
+    <h2>Grundsätze</h2>
+    <ul>
+      <li><strong>Vollständig lokal:</strong> Archivio läuft auf einem Mac im Büronetz. Es gibt keinen Cloud-Dienst und kein Benutzerkonto, die Daten verlassen das Büro nicht.</li>
+      <li><strong>Nur lesend:</strong> Archivio verändert, verschiebt oder löscht keine Dateien. Es baut lediglich einen eigenen Suchindex auf.</li>
+      <li><strong>Keine eingebaute KI:</strong> Die Suche funktioniert ohne KI. Eine Anbindung an einen externen KI-Assistenten (MCP) ist optional, standardmässig ausgeschaltet und pro Projekt einzeln freizugeben.</li>
+      <li><strong>Das Büro entscheidet:</strong> Welche Ordner und Postfächer indexiert werden, wird pro Ordner festgelegt. Sensible Bereiche lassen sich vollständig ausschliessen.</li>
+    </ul>
+
+    <h2>Stand des Projekts</h2>
+    <p>Archivio ist für macOS verfügbar und zurzeit kostenlos. Die Software wird laufend weiterentwickelt und mit ersten Architekturbüros im täglichen Einsatz erprobt. Rückmeldungen aus der Praxis fliessen direkt in die Weiterentwicklung ein.</p>
+
+    <h2>Anbieter</h2>
+    <p>architools<br>
+    Fabio Indergand, Architekt MSc ETH SIA<br>
+    Winterthur, Schweiz<br>
+    E-Mail: <a href="mailto:info@architools.ch">info@architools.ch</a><br>
+    Weitere Angaben: <a href="contact.html">Kontakt</a>, <a href="privacy.html">Datenschutz</a>, <a href="merkblatt.html">Merkblatt zu euren Daten</a>, <a href="haftungsausschluss.html">Haftungsausschluss</a></p>
+  </main>
+
+  <footer>
+    <a href="mailto:info@architools.ch">info@architools.ch</a>
+    <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
+      <a href="docs.html">Anleitung</a>
+      <a href="about.html">Über Archivio</a>
+      <a href="contact.html">Kontakt</a>
+      <a href="privacy.html">Datenschutz</a>
+      <a href="haftungsausschluss.html">Haftungsausschluss</a>
+      <span>© 2026 Archivio</span>
+    </div>
+  </footer>
+
+</body>
+</html>

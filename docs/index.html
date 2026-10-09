@@ -38,16 +38,140 @@
       "price": "0",
       "priceCurrency": "CHF"
     },
+    "author": {
+      "@type": "Person",
+      "name": "Fabio Indergand",
+      "jobTitle": "Architekt MSc ETH SIA",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Winterthur",
+        "addressCountry": "CH"
+      }
+    },
     "publisher": {
       "@type": "Organization",
-      "name": "Archivio",
-      "url": "https://architools.ch/"
+      "name": "architools",
+      "url": "https://architools.ch/",
+      "founder": {
+        "@type": "Person",
+        "name": "Fabio Indergand"
+      },
+      "email": "info@architools.ch",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "customer support",
+        "email": "info@architools.ch",
+        "url": "https://architools.ch/contact.html",
+        "availableLanguage": ["de"]
+      },
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Winterthur",
+        "addressCountry": "CH"
+      }
     },
     "audience": {
       "@type": "Audience",
       "audienceType": "Architekturbüros"
     }
   }
+  </script>
+
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Muss jeder im Büro Archivio installieren?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio wird nur auf einem einzigen Mac im Büro installiert. Dieser Mac ist der Archivio-Server: Er ist mit dem Datei-Server oder NAS verbunden, liest die freigegebenen Ordner und baut den Suchindex auf. Alle anderen im Büro öffnen Archivio einfach im Browser, wie eine Website, und suchen dort. Wer möchte, installiert zusätzlich den kleinen Helper, der Treffer direkt im passenden Programm öffnet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Was braucht der Server-Mac?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft, per Kabel am Netz hängt und 32 GB RAM hat: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Verlassen unsere Daten das Büro?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann ich Archivio von überall im Internet öffnen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio sieht aus wie eine Website und wird im Browser geöffnet, ist aber keine Website im Internet. Die Suche läuft auf dem Archivio-Mac in eurem Büro und ist nur von Geräten erreichbar, die im selben Büronetzwerk sind: per Netzwerkkabel oder über das Büro-WLAN, nicht über ein Gäste-WLAN. Von zu Hause oder unterwegs geht es nur, wenn euer Büro einen VPN-Zugang ins Büronetz hat. Das ist gewollt: So kommt niemand von aussen an eure Daten."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann Archivio Dateien verändern oder löschen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio greift ausschliesslich lesend auf freigegebene Ordner und Postfächer zu. Es verändert, verschiebt, benennt oder löscht keine Dateien, sondern baut nur einen eigenen Suchindex auf."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wer im Büro sieht was?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Die Oberfläche ist nur im internen Netzwerk erreichbar und hat keine eigene Benutzerverwaltung: Alle im Büronetz sehen, was indexiert ist. Deshalb legt ihr pro Ordner fest, was Archivio sehen darf, und schliesst Bereiche wie Personaldossiers oder Verträge vollständig aus."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wie werden Mail-Zugangsdaten gespeichert?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Die Mail-Anbindung ist optional. Wenn ihr sie nutzt, werden Server, Benutzername und Passwort lokal in der Konfiguration auf dem Server-Mac gespeichert und nie übermittelt. Für einen ersten Test könnt ihr Archivio auch ganz ohne Mail betreiben und Postfächer später hinzufügen."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Ist die Software vertrauenswürdig signiert?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ja. Archivio ist mit einer Apple Developer ID signiert und von Apple notarisiert. macOS prüft das Installationspaket deshalb bei der Installation und blockiert es nicht."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wie kommen Updates?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Archivio prüft einmal täglich, ob eine neue Version verfügbar ist, und zeigt sie im Menü an. Installiert wird das Update erst, wenn ihr es bestätigt."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Können wir Archivio zuerst im Kleinen testen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ja. Am einfachsten startet ihr mit ein oder zwei Projektordnern und ohne Mail-Anbindung. Wenn die Suche im Alltag überzeugt, gebt ihr weitere Ordner frei."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Was kostet Archivio?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Archivio ist zurzeit kostenlos. Fragen beantworten wir gerne per E-Mail an info@architools.ch."
+      }
+    }
+  ]
+}
   </script>
 
   <style>
@@ -200,6 +324,86 @@
       .feature-text p { max-width: none; }
     }
 
+    /* ── So funktioniert's ── */
+    .steps-section {
+      max-width: 1100px;
+      margin: 110px auto;
+      padding: 0 24px;
+    }
+    .section-title {
+      font-size: clamp(26px, 3vw, 34px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+      list-style: none;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #f2f2f2;
+      color: #111;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .steps h3 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      margin-bottom: 6px;
+    }
+    .steps p { font-size: 15px; color: #333; }
+    @media (max-width: 767px) {
+      .steps { grid-template-columns: 1fr; gap: 28px; }
+      .steps-section { margin: 72px auto; }
+    }
+
+    /* ── FAQ ── */
+    .faq-section {
+      max-width: 680px;
+      margin: 0 auto 90px;
+      padding: 0 24px;
+    }
+    .faq-section details {
+      border-top: 1px solid #e8e8e8;
+      padding: 18px 0;
+    }
+    .faq-section details:last-of-type { border-bottom: 1px solid #e8e8e8; }
+    .faq-section summary {
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .faq-section summary::-webkit-details-marker { display: none; }
+    .faq-section summary::after {
+      content: "+";
+      color: #999;
+      font-weight: 400;
+      font-size: 20px;
+      line-height: 1;
+    }
+    .faq-section details[open] summary::after { content: "–"; }
+    .faq-section details p {
+      margin-top: 10px;
+      font-size: 15px;
+      color: #333;
+    }
+
     /* ── Abschluss & CTA ── */
     .cta-section {
       max-width: 680px;
@@ -334,6 +538,27 @@
       </div>
     </section>
 
+    <section class="steps-section" id="so-funktionierts">
+      <h2 class="section-title">So funktioniert’s</h2>
+      <ol class="steps">
+        <li>
+          <span class="step-num">1</span>
+          <h3>Installieren</h3>
+          <p>Paket herunterladen und auf einem Mac im Büro installieren, idealerweise einem, der dauerhaft läuft. Die Einrichtung führt durch die nötigen Freigaben.</p>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <h3>Ordner freigeben</h3>
+          <p>Festlegen, welche Projektordner und Postfächer durchsucht werden. Archivio liest nur, was ihr freigebt, und indexiert täglich neu.</p>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <h3>Suchen</h3>
+          <p>Alle im Büronetz öffnen Archivio im Browser und suchen über sämtliche Projekte, Pläne, Mails und Fotos. Treffer öffnen sich direkt als Originaldatei.</p>
+        </li>
+      </ol>
+    </section>
+
     <section class="cta-section">
       <h2>Starte jetzt und finde all deine Dateien:</h2>
 
@@ -347,7 +572,55 @@
         <button type="submit" class="btn-download" id="btn-dl">Herunterladen</button>
       </form>
 
-      <p class="hero-meta">macOS &nbsp;·&nbsp; Kostenlos</p>
+      <p class="hero-meta">macOS&nbsp;(Apple&nbsp;Silicon&nbsp;und&nbsp;Intel) &nbsp;·&nbsp; Kostenlos &nbsp;·&nbsp; Von&nbsp;Apple&nbsp;notarisiert</p>
+    </section>
+
+    <section class="faq-section" id="faq">
+      <h2 class="section-title">Häufige Fragen</h2>
+      <details>
+        <summary>Muss jeder im Büro Archivio installieren?</summary>
+        <p>Nein. Archivio wird nur auf einem einzigen Mac im Büro installiert. Dieser Mac ist der Archivio-Server: Er ist mit dem Datei-Server oder NAS verbunden, liest die freigegebenen Ordner und baut den Suchindex auf. Alle anderen im Büro öffnen Archivio einfach im Browser, wie eine Website, und suchen dort. Wer möchte, installiert zusätzlich den kleinen Helper, der Treffer direkt im passenden Programm öffnet.</p>
+      </details>
+      <details>
+        <summary>Was braucht der Server-Mac?</summary>
+        <p>Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft, per Kabel am Netz hängt und 32 GB RAM hat: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst.</p>
+      </details>
+      <details>
+        <summary>Verlassen unsere Daten das Büro?</summary>
+        <p>Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt.</p>
+      </details>
+      <details>
+        <summary>Kann ich Archivio von überall im Internet öffnen?</summary>
+        <p>Nein. Archivio sieht aus wie eine Website und wird im Browser geöffnet, ist aber keine Website im Internet. Die Suche läuft auf dem Archivio-Mac in eurem Büro und ist nur von Geräten erreichbar, die im selben Büronetzwerk sind: per Netzwerkkabel oder über das Büro-WLAN, nicht über ein Gäste-WLAN. Von zu Hause oder unterwegs geht es nur, wenn euer Büro einen VPN-Zugang ins Büronetz hat. Das ist gewollt: So kommt niemand von aussen an eure Daten.</p>
+      </details>
+      <details>
+        <summary>Kann Archivio Dateien verändern oder löschen?</summary>
+        <p>Nein. Archivio greift ausschliesslich lesend auf freigegebene Ordner und Postfächer zu. Es verändert, verschiebt, benennt oder löscht keine Dateien, sondern baut nur einen eigenen Suchindex auf.</p>
+      </details>
+      <details>
+        <summary>Wer im Büro sieht was?</summary>
+        <p>Die Oberfläche ist nur im internen Netzwerk erreichbar und hat keine eigene Benutzerverwaltung: Alle im Büronetz sehen, was indexiert ist. Deshalb legt ihr pro Ordner fest, was Archivio sehen darf, und schliesst Bereiche wie Personaldossiers oder Verträge vollständig aus.</p>
+      </details>
+      <details>
+        <summary>Wie werden Mail-Zugangsdaten gespeichert?</summary>
+        <p>Die Mail-Anbindung ist optional. Wenn ihr sie nutzt, werden Server, Benutzername und Passwort lokal in der Konfiguration auf dem Server-Mac gespeichert und nie übermittelt. Für einen ersten Test könnt ihr Archivio auch ganz ohne Mail betreiben und Postfächer später hinzufügen.</p>
+      </details>
+      <details>
+        <summary>Ist die Software vertrauenswürdig signiert?</summary>
+        <p>Ja. Archivio ist mit einer Apple Developer ID signiert und von Apple notarisiert. macOS prüft das Installationspaket deshalb bei der Installation und blockiert es nicht.</p>
+      </details>
+      <details>
+        <summary>Wie kommen Updates?</summary>
+        <p>Archivio prüft einmal täglich, ob eine neue Version verfügbar ist, und zeigt sie im Menü an. Installiert wird das Update erst, wenn ihr es bestätigt.</p>
+      </details>
+      <details>
+        <summary>Können wir Archivio zuerst im Kleinen testen?</summary>
+        <p>Ja. Am einfachsten startet ihr mit ein oder zwei Projektordnern und ohne Mail-Anbindung. Wenn die Suche im Alltag überzeugt, gebt ihr weitere Ordner frei.</p>
+      </details>
+      <details>
+        <summary>Was kostet Archivio?</summary>
+        <p>Archivio ist zurzeit kostenlos. Fragen beantworten wir gerne per E-Mail an info@architools.ch.</p>
+      </details>
     </section>
   </main>
 
@@ -355,7 +628,11 @@
     <a href="mailto:info@architools.ch">info@architools.ch</a>
     <div style="display:flex;gap:24px;align-items:center;">
       <a href="installation.html" style="font-size:12px;">Erstinstallation</a>
+      <a href="docs.html">Anleitung</a>
       <a href="merkblatt.html">Merkblatt</a>
+      <a href="about.html">Über Archivio</a>
+      <a href="contact.html">Kontakt</a>
+      <a href="privacy.html">Datenschutz</a>
       <a href="haftungsausschluss.html">Haftungsausschluss</a>
       <a href="mailto:info@architools.ch?subject=Archivio%20Feedback">Feedback senden</a>
       <span>© 2026 Archivio</span>

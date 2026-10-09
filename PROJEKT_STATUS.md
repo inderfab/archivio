@@ -432,12 +432,14 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 - GitHub Pages aus `main:/docs` (statisches HTML: `index.html`, `docs.html`, `img/`, `CNAME`).
 - **`docs/.nojekyll`** vorhanden (seit v3.0.x) → Pages liefert statisch aus, **kein Jekyll-Build** mehr → keine flaky „page build failed"-Mails bei jedem Push.
+- Seiten für KI-Agenten/Suchmaschinen (seit 2026-10): `about.html`, `contact.html`, `privacy.html` (je ≥ 500 Zeichen), `404.html` (absolute Links, da Pages sie für beliebige Pfade ausliefert), `llms.txt` nach llmstxt.org mit „when to use", Organization-Schema mit `contactPoint`/`address` auf der Startseite. Abgesichert durch `tests/test_website.py`. Markdown-Content-Negotiation (`Accept: text/markdown`) ist auf GitHub Pages **nicht** möglich (keine Header-Kontrolle) — bräuchte z. B. Cloudflare davor.
 - Custom Domain `architools.ch` (A/AAAA-Records bei Hostpoint → GitHub Pages). Bis 2026-09-28 lief die Seite unter `bauchat.ch` (Hostpoint-Weiterleitung dorthin eingerichtet, siehe DNS-Zone); `info@bauchat.ch` existiert nicht mehr, Kontaktadresse ist jetzt `info@architools.ch`.
 
 ---
 
 ## 14. Offene Punkte / Beobachten
 
+- **TODO: Mail-Passwörter in den macOS-Schlüsselbund** statt im Klartext in `config.yaml` (`mail.password` bzw. `password` pro Mailkonto, gelesen in `scanner/mail_scanner.py:connect_imap`, geschrieben in `web/dashboard.py`). Ziel: Passwort beim Anlegen des Kontos in den Schlüsselbund (z. B. `keyring` oder `security add-generic-password`), in der Config nur ein Verweis; bestehende Klartext-Passwörter beim Start migrieren; Backup/Import (`missing_password_accounts`) anpassen. Danach FAQ «Wie werden Mail-Zugangsdaten gespeichert?» auf der Website (`docs/index.html`, Text + FAQPage-Schema) nachführen.
 - **RAM-Wachstum des Servers über Laufzeit** (schleichend). Mit Watchdog+launchd unkritisch, aber Ursache nie final geprofiled. Könnte man mit tracemalloc auf dem iMac untersuchen.
 - **Adresse `archivio:8000`** statt `windows.local:8000`: geht über (a) Bonjour LocalHostname `archivio` → `archivio.local:8000`, oder (b) Router-DNS + feste IP → `archivio:8000`. Kein App-Change nötig; ggf. LaunchAgent, der `scutil --set LocalHostName archivio` setzt.
 - **Alte Müll-Dokumente** (Thumbs.db etc. aus früheren Scans) bleiben in der DB, bis manuell bereinigt.
