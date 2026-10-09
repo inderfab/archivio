@@ -142,6 +142,39 @@ def test_homepage_organization_schema_complete():
     assert address["addressLocality"]
 
 
+# ── FAQ ─────────────────────────────────────────────────────────────────────
+
+def test_homepage_faq_matches_faqpage_schema():
+    html = (DOCS / "index.html").read_text(encoding="utf-8")
+    visible = re.findall(r"<summary>(.*?)</summary>\s*<p>(.*?)</p>", html, re.S)
+    visible = [(_unescape(q), _unescape(a)) for q, a in visible]
+    assert len(visible) >= 5
+
+    blocks = [json.loads(b) for b in _parse("index.html").jsonld]
+    faq_pages = [b for b in blocks if b.get("@type") == "FAQPage"]
+    assert len(faq_pages) == 1
+    schema = [(q["name"], q["acceptedAnswer"]["text"]) for q in faq_pages[0]["mainEntity"]]
+    assert schema == visible, "FAQ-Text und FAQPage-Schema laufen auseinander"
+
+
+def test_homepage_has_faq_and_steps_anchors():
+    html = (DOCS / "index.html").read_text(encoding="utf-8")
+    assert 'id="faq"' in html and 'id="so-funktionierts"' in html
+
+
+def test_provider_named_consistently():
+    for page in ["about.html", "privacy.html", "haftungsausschluss.html"]:
+        html = (DOCS / page).read_text(encoding="utf-8")
+        assert "architools" in html and "Fabio Indergand" in html, page
+    for path in DOCS.glob("*.html"):
+        assert "Bauchat" not in path.read_text(encoding="utf-8"), f"alter Anbietername in {path.name}"
+
+
+def _unescape(text):
+    import html as _html
+    return _html.unescape(re.sub(r"\s+", " ", text).strip())
+
+
 # ── llms.txt (Format nach llmstxt.org) ──────────────────────────────────────
 
 def test_llms_txt_follows_spec_and_has_when_to_use():
