@@ -432,6 +432,7 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 - GitHub Pages aus `main:/docs` (statisches HTML: `index.html`, `docs.html`, `img/`, `CNAME`).
 - **`docs/.nojekyll`** vorhanden (seit v3.0.x) → Pages liefert statisch aus, **kein Jekyll-Build** mehr → keine flaky „page build failed"-Mails bei jedem Push.
+- Seiten für KI-Agenten/Suchmaschinen (seit 2026-10): `about.html`, `contact.html`, `privacy.html` (je ≥ 500 Zeichen), `404.html` (absolute Links, da Pages sie für beliebige Pfade ausliefert), `llms.txt` nach llmstxt.org mit „when to use", Organization-Schema mit `contactPoint`/`address` auf der Startseite. Abgesichert durch `tests/test_website.py`. Markdown-Content-Negotiation (`Accept: text/markdown`) ist auf GitHub Pages **nicht** möglich (keine Header-Kontrolle) — bräuchte z. B. Cloudflare davor.
 - Custom Domain `architools.ch` (A/AAAA-Records bei Hostpoint → GitHub Pages). Bis 2026-09-28 lief die Seite unter `bauchat.ch` (Hostpoint-Weiterleitung dorthin eingerichtet, siehe DNS-Zone); `info@bauchat.ch` existiert nicht mehr, Kontaktadresse ist jetzt `info@architools.ch`.
 
 ---
