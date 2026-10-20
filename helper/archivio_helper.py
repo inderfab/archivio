@@ -148,6 +148,16 @@ _REDISCOVER_AFTER_FAILS = 6
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
+def _version_tuple(v: str) -> tuple[int, ...]:
+    """'3.2.10' -> (3, 2, 10). Nicht parsebare Teile zaehlen als 0, damit ein
+    unerwartetes Format nie einen Fehlalarm ausloest."""
+    parts = []
+    for p in v.strip().lstrip("v").split("."):
+        m = re.match(r"\d+", p)
+        parts.append(int(m.group()) if m else 0)
+    return tuple(parts)
+
+
 def _check_update() -> tuple[str, str] | None:
     """Fragt den Archivio-Server nach der aktuellen Version."""
     try:
@@ -161,7 +171,7 @@ def _check_update() -> tuple[str, str] | None:
         # loest jedes Server-Update faelschlich einen Helper-Update-Hinweis aus.
         remote  = data.get("helper_version") or data.get("version", "")
         current = _local_version()
-        if remote and remote != current:
+        if remote and _version_tuple(remote) > _version_tuple(current):
             download_url = f"{server}/dashboard/download/helper"
             return remote, download_url
         return None
