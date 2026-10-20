@@ -1,3 +1,4 @@
+import re
 from datetime import datetime, timedelta, timezone
 
 from web.scan_status import (
@@ -23,7 +24,10 @@ def test_age_label_steps():
 
 def test_states():
     assert project_scan_state(None, 0, NOW)["state"] == "never"
-    assert project_scan_state(_iso(hours=5), 0, NOW)["state"] == "fresh"
+    fresh = project_scan_state(_iso(hours=5), 0, NOW)
+    assert fresh["state"] == "fresh"
+    assert re.fullmatch(r"gescannt \d\d\.\d\d\.\d{4} \d\d:\d\d", fresh["label"])
+    assert re.search(r"\d\d\.\d\d\.\d{4}", project_scan_state(_iso(days=12), 0, NOW)["label"])
     assert project_scan_state(_iso(days=12), 0, NOW)["state"] == "stale"
     # Archivierte werden bewusst selten gescannt -- nie "veraltet"
     arch = project_scan_state(_iso(days=40), 3, NOW)

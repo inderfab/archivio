@@ -39,13 +39,20 @@ def age_label(iso: str | None, now: datetime | None = None) -> str | None:
     return f"vor {days // 30} Mon."
 
 
+def date_label(iso: str | None) -> str | None:
+    """Lokales Datum + Uhrzeit des letzten Scans, z.B. "20.10.2026 02:14"."""
+    dt = _parse(iso)
+    return dt.astimezone().strftime("%d.%m.%Y %H:%M") if dt else None
+
+
 def project_scan_state(last_scanned_at: str | None, archive_tier: int = 0,
                        now: datetime | None = None) -> dict:
     """state: never | fresh | stale | archived. `label` ist kurz (Badge), `text` ein
     voller Satz (MCP/Tooltip)."""
     age = age_label(last_scanned_at, now)
+    when = date_label(last_scanned_at)
     if archive_tier:
-        label = f"archiviert · Stand {age}" if age else "archiviert"
+        label = f"archiviert · Stand {when}" if when else "archiviert"
         return {"state": "archived", "label": label, "age": age,
                 "text": (f"Projekt ist archiviert und wird nur selten neu gescannt "
                          f"(letzter Scan {age}). Neuere Dateien fehlen evtl. im Index."
@@ -57,9 +64,10 @@ def project_scan_state(last_scanned_at: str | None, archive_tier: int = 0,
                 "text": "Projekt wurde noch nie gescannt, der Index ist unvollständig."}
     days = ((now or datetime.now(timezone.utc)) - dt).total_seconds() / 86400
     if days < FRESH_DAYS:
-        return {"state": "fresh", "label": f"gescannt {age}", "age": age,
-                "text": f"Index aktuell (letzter Scan {age})."}
-    return {"state": "stale", "label": f"gescannt {age}", "age": age,
+        return {"state": "fresh", "label": f"gescannt {when}", "age": age,
+                "text": (f"Letzter Scan {when} ({age}). Es wird jede Nacht gescannt -- "
+                         f"was seither neu auf dem Server liegt, fehlt noch im Index.")}
+    return {"state": "stale", "label": f"gescannt {when} · {age}", "age": age,
             "text": (f"Letzter Scan {age} -- Dateien, die seither auf dem Server "
                      f"hinzugekommen oder verschoben wurden, fehlen evtl. im Index.")}
 
