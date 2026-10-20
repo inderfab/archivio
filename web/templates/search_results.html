@@ -73,7 +73,9 @@
       <span style="font-size:18px; line-height:1;">📁</span>
       <div style="flex:1; min-width:0;">
         <div class="result-title" style="font-size:14px;">{{ f.name }}</div>
-        <div style="font-size:12px; color:var(--text-3); margin-top:2px;">{{ f.project_name }}</div>
+        <div style="font-size:12px; color:var(--text-3); margin-top:2px;">{{ f.project_name }}
+          {% set st = scan_states.get(f.project_name) %}
+          {% if st and st.state != 'fresh' %}<span class="scan-badge {{ 'archived' if st.state == 'archived' else 'warn' }}" title="{{ st.text }}">{{ st.label }}</span>{% endif %}</div>
       </div>
       <div style="display:flex; gap:6px; flex-shrink:0;">
         <button class="btn-sm" data-path="{{ f.path }}"
@@ -105,6 +107,8 @@
 
     <div class="result-meta">
       <span>{{ r.project_name }}</span>
+      {% set st = scan_states.get(r.project_name) %}
+      {% if st and st.state != 'fresh' %}<span class="scan-badge {{ 'archived' if st.state == 'archived' else 'warn' }}" title="{{ st.text }}">{{ st.label }}</span>{% endif %}
       {% if is_mail %}
         {% if r.mail_sender %}<span>✉ {{ r.mail_sender }}</span>{% endif %}
         {% if r.mail_date %}<span>{{ r.mail_date[:10] }}</span>{% endif %}

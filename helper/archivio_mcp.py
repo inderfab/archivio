@@ -196,6 +196,11 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     scope: Komma-getrennt aus "docs" (Dokumentinhalt), "filenames" (Dateinamen),
     "folders" (Ordnernamen) — standardmässig alle drei aktiv.
 
+    Steht bei einem Treffer oder am Ende "Index-Stand" / "Hinweis", ist der Ordner
+    schon länger nicht mehr gescannt worden (oder archiviert): Dateien, die seither
+    neu auf dem Server liegen, fehlen dann im Index. Bei wenigen oder keinen Treffern
+    dem Nutzer sagen, dass es daran liegen kann, statt "gibt es nicht" zu behaupten.
+
     Jeder Treffer hat eine [ID nnn]: mit read_document(nnn) den Volltext laden,
     mit open_file(pfad) die Datei extern öffnen. Für den Nutzer zum Selbst-Anklicken
     steht ausserdem eine fertige Markdown-Link-Zeile "[📂 Im Finder öffnen](...)"
@@ -237,6 +242,8 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
         proj    = r.get("project_name") or "—"
         excerpt = r.get("excerpt") or ""
         entry   = f"- [ID {r.get('id')}] {r['filename']} [{proj}]"
+        if r.get("index_stand"):
+            entry += f" ⚠ Index-Stand: {r['index_stand']}"
         if r.get("filepath"):
             entry += f"\n  Pfad: {r['filepath']}"
             entry += _norm_meta_line(r)
@@ -521,6 +528,20 @@ def reveal_file(path: str) -> str:
     return err if err else f"Im Finder angezeigt: {path}"
 
 
+def _folder_index_status(path: str) -> str:
+    """Index-Stand des Projekts, zu dem der Ordner gehoert. Leer bei Fehler oder wenn der
+    Index aktuell ist -- ein Fehler hier darf list_folder nie verhindern."""
+    try:
+        resp = requests.get(f"{_server_url()}/api/mcp/folder-status",
+                            params={"path": path}, timeout=5)
+        st = resp.json() if resp.status_code == 200 else {}
+    except Exception:
+        return ""
+    if not st or st.get("state") == "fresh":
+        return ""
+    return f"⚠ Index-Stand «{st.get('name')}»: {st.get('text')}"
+
+
 @mcp.tool(annotations=_READ_ONLY)
 def list_folder(path: str) -> str:
     """Listet den Inhalt eines Ordners (Unterordner + Dateien) — nützlich wenn der
@@ -548,6 +569,9 @@ def list_folder(path: str) -> str:
         return f"Ordner ist leer: {path}"
 
     lines = [f"Inhalt von {path}:"]
+    stand = _folder_index_status(path)
+    if stand:
+        lines.append(stand)
     for entry in entries:
         try:
             if entry.is_dir():
