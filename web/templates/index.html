@@ -44,13 +44,13 @@
       {% for p in projects %}
         {% if p.children %}
           <optgroup label="{{ p.name }}">
-            <option value="{{ p.id }}">{{ p.name }} (alle){% if p.scan_hint %} · {{ p.scan_hint }}{% endif %}</option>
+            <option value="{{ p.id }}" data-hint="{{ p.scan_hint }}">{{ p.name }} (alle){% if p.scan_hint %} · {{ p.scan_hint }}{% endif %}</option>
             {% for c in p.children %}
-            <option value="{{ c.id }}">↳ {{ c.name }}{% if c.scan_hint %} · {{ c.scan_hint }}{% endif %}</option>
+            <option value="{{ c.id }}" data-hint="{{ c.scan_hint }}">↳ {{ c.name }}{% if c.scan_hint %} · {{ c.scan_hint }}{% endif %}</option>
             {% endfor %}
           </optgroup>
         {% else %}
-          <option value="{{ p.id }}"{% if p.parent_name %} style="padding-left:8px;"{% endif %}>
+          <option value="{{ p.id }}" data-hint="{{ p.scan_hint }}"{% if p.parent_name %} style="padding-left:8px;"{% endif %}>
             {%- if p.parent_name %}↳ {{ p.parent_name }} — {{ p.name }}{% else %}{{ p.name }}{% endif -%}
             {%- if p.scan_hint %} · {{ p.scan_hint }}{% endif -%}
           </option>
@@ -576,6 +576,21 @@ function refreshScanChip() {
 }
 
 document.addEventListener('DOMContentLoaded', refreshScanChip);
+
+// Nach einem Scan den Hinweis im Dropdown (archiviert / vor X Tg.) nachziehen,
+// sonst bleibt dort der Stand von vor dem Scan stehen.
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (!e.target || e.target.id !== 'scan-chip') return;
+  var el = e.target.querySelector('[data-pid]');
+  if (!el || el.dataset.running) return;
+  var opt = document.querySelector('#project_id_select option[value="' + el.dataset.pid + '"]');
+  if (!opt) return;
+  var old = opt.dataset.hint || '';
+  var base = old && opt.textContent.endsWith(' · ' + old)
+    ? opt.textContent.slice(0, -(' · ' + old).length) : opt.textContent;
+  opt.textContent = el.dataset.hint ? base + ' · ' + el.dataset.hint : base;
+  opt.dataset.hint = el.dataset.hint;
+});
 
 function updateChips() {
   updateMehrFilterCount();

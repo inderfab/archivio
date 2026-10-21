@@ -573,7 +573,7 @@ async def start_scan(request: Request, project_id: int):
 
 
 def _scan_chip_response(request: Request, project_id: int):
-    from web.scan_status import project_scan_state
+    from web.scan_status import dropdown_hint, project_scan_state
 
     conn = connection.get_connection()
     try:
@@ -587,10 +587,12 @@ def _scan_chip_response(request: Request, project_id: int):
         return HTMLResponse("")
     scan = _scans.get(project_id, {})
     running = scan.get("status") == "running"
+    st = project_scan_state(row["last_scanned_at"], row["archive_tier"] or 0)
     return templates.TemplateResponse("_scan_chip.html", {
         "request": request,
         "project_id": project_id,
-        "st": project_scan_state(row["last_scanned_at"], row["archive_tier"] or 0),
+        "st": st,
+        "hint": dropdown_hint(st),
         "running": running,
         "processed": scan.get("processed", 0),
         "total": scan.get("total", 0),

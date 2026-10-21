@@ -363,7 +363,7 @@ app.include_router(gallery_router)
 
 def _build_project_groups(conn) -> list[dict]:
     """Gibt Projekte zurück, annotiert mit Eltern-Info für den Suche-Dropdown."""
-    from web.scan_status import project_scan_state
+    from web.scan_status import dropdown_hint, project_scan_state
 
     rows = conn.execute(
         "SELECT id, name, path, last_scanned_at, archive_tier FROM projects "
@@ -372,11 +372,7 @@ def _build_project_groups(conn) -> list[dict]:
     projects = [dict(r) for r in rows]
     for p in projects:
         st = project_scan_state(p["last_scanned_at"], p["archive_tier"] or 0)
-        # Nur Auffaelliges im Dropdown (Text-only, kein Badge moeglich): aktuelle
-        # Projekte bleiben unmarkiert, sonst wirkt die ganze Liste unruhig.
-        p["scan_hint"] = {
-            "stale": f"⚠ {st['age']}", "never": "⚠ nie gescannt", "archived": "archiviert",
-        }.get(st["state"], "")
+        p["scan_hint"] = dropdown_hint(st)
     # Eltern-Projekt bestimmen: längstes path-Prefix das selbst ein Projekt ist
     for p in projects:
         parent = None

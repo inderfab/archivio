@@ -148,6 +148,24 @@ _REDISCOVER_AFTER_FAILS = 6
 
 # ── Update ────────────────────────────────────────────────────────────────────
 
+def _notify(title: str, subtitle: str, message: str) -> None:
+    """macOS-Benachrichtigung ueber osascript. rumps.notification() wirft hier eine
+    RuntimeError (der eingebettete python3 laeuft ohne Info.plist/CFBundleIdentifier) --
+    und weil das aus dem Status-Thread kam, beendete es dessen Schleife: danach gab es
+    weder Statusanzeige noch Update-Pruefung mehr. Ein Fehler hier darf nie durchschlagen."""
+    def esc(t: str) -> str:
+        return str(t).replace("\\", "\\\\").replace('"', '\\"')
+    try:
+        subprocess.run(
+            ["osascript", "-e",
+             f'display notification "{esc(message)}" with title "{esc(title)}" '
+             f'subtitle "{esc(subtitle)}"'],
+            timeout=5, capture_output=True,
+        )
+    except Exception as e:
+        log.warning("Benachrichtigung fehlgeschlagen: %s", e)
+
+
 def _version_tuple(v: str) -> tuple[int, ...]:
     """'3.2.10' -> (3, 2, 10). Nicht parsebare Teile zaehlen als 0, damit ein
     unerwartetes Format nie einen Fehlalarm ausloest."""
@@ -259,12 +277,12 @@ class ArchivioHelper(rumps.App):
         decision, url = bridge.resolve_discovery(found)
         if decision == "one":
             self._apply_server_url(url)
-            rumps.notification("Archivio Helper", "Automatisch verbunden",
+            _notify("Archivio Helper", "Automatisch verbunden",
                                 f"Server gefunden: {url}")
             log.info("Automatisch verbunden: %s", url)
         elif decision == "multiple":
             log.info("Mehrere Server gefunden, keine automatische Auswahl: %s", found)
-            rumps.notification(
+            _notify(
                 "Archivio Helper", "Mehrere Archivio-Server gefunden",
                 "Bitte im Menü unter «Server suchen» manuell auswählen.",
             )
@@ -322,7 +340,7 @@ class ArchivioHelper(rumps.App):
             self._update_item.title = f"🟡  Update: v{version} verfügbar"
             # Benachrichtigung höchstens 1x/Woche (Menüpunkt bleibt sichtbar gelb)
             if _should_notify_update(version):
-                rumps.notification(
+                _notify(
                     "Archivio Helper",
                     f"Update verfügbar: Version {version}",
                     "Im Menü auf «Update verfügbar» klicken.",
@@ -370,18 +388,21 @@ class ArchivioHelper(rumps.App):
             subprocess.run(["open", str(dest)])
         except Exception as e:
             log.error("Update-Download fehlgeschlagen: %s", e)
-            rumps.notification("Archivio Helper", "Update fehlgeschlagen",
+            _notify("Archivio Helper", "Update fehlgeschlagen",
                                 f"Download nicht möglich: {e}")
 
     def _status_loop(self):
         import time
         tick = 0
         while True:
-            self._refresh_status()
-            tick += 1
-            # Update-Check alle 30 Minuten
-            if tick % 60 == 0:
-                self._silent_update_check()
+            try:
+                self._refresh_status()
+                tick += 1
+                # Update-Check alle 30 Minuten
+                if tick % 60 == 0:
+                    self._silent_update_check()
+            except Exception:
+                log.exception("Status-Schleife: Durchlauf fehlgeschlagen, laeuft weiter")
             time.sleep(30)
 
     def _refresh_status(self):
@@ -435,7 +456,7 @@ class ArchivioHelper(rumps.App):
             self._apply_server_url(url)
             self._fail_count = 0
             log.info("Server-Adresse automatisch gewechselt: %s -> %s", alt, url)
-            rumps.notification("Archivio Helper", "Server hat gewechselt",
+            _notify("Archivio Helper", "Server hat gewechselt",
                                f"Jetzt verbunden mit {url}")
         except Exception as exc:
             log.warning("Neusuche fehlgeschlagen: %s", exc)

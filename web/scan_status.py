@@ -114,3 +114,11 @@ def state_for_path(conn, path: str) -> dict | None:
     st = project_scan_state(best["last_scanned_at"], best["archive_tier"] or 0)
     st["name"] = best["name"]
     return st
+
+
+def dropdown_hint(st: dict) -> str:
+    """Kurzer Zusatz fuer den Projekt-Dropdown (nur Text moeglich); aktuelle Projekte
+    bleiben unmarkiert."""
+    return {
+        "stale": f"⚠ {st['age']}", "never": "⚠ nie gescannt", "archived": "archiviert",
+    }.get(st["state"], "")
