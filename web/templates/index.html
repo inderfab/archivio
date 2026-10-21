@@ -39,19 +39,20 @@
     <select name="project_id" id="project_id_select" style="max-width:220px; flex-shrink:0; font-weight:600;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
-      onchange="updateChips(); refreshSearchTagFilterList(); if (currentMode === 'gallery') { refreshOrdnerTags(); refreshTagFilterList(); reloadGallery(); }">
+      onchange="refreshScanChip(); updateChips(); refreshSearchTagFilterList(); if (currentMode === 'gallery') { refreshOrdnerTags(); refreshTagFilterList(); reloadGallery(); }">
       <option value="">Alle Projekte</option>
       {% for p in projects %}
         {% if p.children %}
           <optgroup label="{{ p.name }}">
-            <option value="{{ p.id }}">{{ p.name }} (alle)</option>
+            <option value="{{ p.id }}" data-hint="{{ p.scan_hint }}">{{ p.name }} (alle){% if p.scan_hint %} · {{ p.scan_hint }}{% endif %}</option>
             {% for c in p.children %}
-            <option value="{{ c.id }}">↳ {{ c.name }}</option>
+            <option value="{{ c.id }}" data-hint="{{ c.scan_hint }}">↳ {{ c.name }}{% if c.scan_hint %} · {{ c.scan_hint }}{% endif %}</option>
             {% endfor %}
           </optgroup>
         {% else %}
-          <option value="{{ p.id }}"{% if p.parent_name %} style="padding-left:8px;"{% endif %}>
+          <option value="{{ p.id }}" data-hint="{{ p.scan_hint }}"{% if p.parent_name %} style="padding-left:8px;"{% endif %}>
             {%- if p.parent_name %}↳ {{ p.parent_name }} — {{ p.name }}{% else %}{{ p.name }}{% endif -%}
+            {%- if p.scan_hint %} · {{ p.scan_hint }}{% endif -%}
           </option>
         {% endif %}
       {% endfor %}
@@ -63,7 +64,8 @@
       </optgroup>
       {% endif %}
     </select>
-    <select name="type" class="type-select"
+    <span id="scan-chip"></span>
+    <select name="type" class="type-select" style="margin-left:auto;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
       onchange="updateChips()">
@@ -143,7 +145,7 @@
       </optgroup>
     </select>
 
-    <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
+    <button class="btn-mehr-filter" id="mehr-filter-btn" type="button" style="margin-left:0;"
       aria-expanded="false" aria-controls="mehr-filter-panel"
       onclick="toggleMehrFilter()">Weitere Filter</button>
     <span style="position:relative;">
@@ -266,7 +268,7 @@
    </div>
 
    <div class="search-scope-row">
-     <select id="gallery-format-select" class="type-select" onchange="reloadGallery(); updateGalleryChips();">
+     <select id="gallery-format-select" class="type-select" style="margin-left:auto;" onchange="reloadGallery(); updateGalleryChips();">
        <option value="">Alle Dateiformate</option>
        <option value="jpg">JPG</option>
        <option value="png">PNG</option>
@@ -276,9 +278,9 @@
        <option value="webp">WEBP</option>
        <option value="tiff">TIFF</option>
      </select>
-     <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn"
+     <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn" style="margin-left:0;"
        onclick="selectAllVisible()" title="Alle sichtbaren auswählen">☑ Sichtbare wählen</button>
-     <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
+     <button type="button" class="btn-mehr-filter" id="gallery-filter-btn" style="margin-left:0;"
        aria-expanded="false" aria-controls="gallery-filter-panel"
        onclick="toggleGalleryFilterPanel()">Weitere Filter</button>
      <span style="position:relative;">
@@ -462,6 +464,8 @@
   <button type="button" class="loupe-nav loupe-next" onclick="loupeStep(1)">›</button>
   <div class="loupe-footer">
     <div class="loupe-stars" id="loupe-stars"></div>
+    <button type="button" class="loupe-action" onclick="loupeAction('open')">Öffnen</button>
+    <button type="button" class="loupe-action" onclick="loupeAction('reveal')">Im Finder zeigen</button>
     <label class="loupe-auto">
       <input type="checkbox" id="loupe-autoadvance" onchange="loupeAutoAdvance=this.checked">
       Auto-Weiter nach Bewertung
@@ -563,6 +567,32 @@ function scheduleChipUpdate() {
   clearTimeout(_chipTimer);
   _chipTimer = setTimeout(updateChips, 420);
 }
+
+function refreshScanChip() {
+  var chip = document.getElementById('scan-chip');
+  var sel = document.getElementById('project_id_select');
+  if (!chip || !sel) return;
+  var v = sel.value;
+  if (!/^\d+$/.test(v)) { chip.innerHTML = ''; return; }
+  htmx.ajax('GET', '/dashboard/projects/' + v + '/scan-chip', { target: '#scan-chip', swap: 'innerHTML' });
+}
+
+document.addEventListener('DOMContentLoaded', refreshScanChip);
+
+// Nach einem Scan den Hinweis im Dropdown (archiviert / vor X Tg.) nachziehen,
+// sonst bleibt dort der Stand von vor dem Scan stehen.
+document.body.addEventListener('htmx:afterSwap', function(e) {
+  if (!e.target || e.target.id !== 'scan-chip') return;
+  var el = e.target.querySelector('[data-pid]');
+  if (!el || el.dataset.running) return;
+  var opt = document.querySelector('#project_id_select option[value="' + el.dataset.pid + '"]');
+  if (!opt) return;
+  var old = opt.dataset.hint || '';
+  var base = old && opt.textContent.endsWith(' · ' + old)
+    ? opt.textContent.slice(0, -(' · ' + old).length) : opt.textContent;
+  opt.textContent = el.dataset.hint ? base + ' · ' + el.dataset.hint : base;
+  opt.dataset.hint = el.dataset.hint;
+});
 
 function updateChips() {
   updateMehrFilterCount();
@@ -680,6 +710,8 @@ function switchMode(mode) {
   } else {
     document.querySelector('#search-mode-block select[name="type"]').before(projSel);
   }
+  // Scan-Stand-Badge wandert mit der Projektauswahl mit.
+  projSel.after(document.getElementById('scan-chip'));
   document.getElementById('results').style.display = mode === 'search' ? '' : 'none';
   document.getElementById('gallery-results').style.display = mode === 'gallery' ? '' : 'none';
   if (mode === 'gallery' && !galleryLoaded) {
@@ -930,7 +962,9 @@ var contextMenuPath = null;
 
 document.addEventListener('contextmenu', function(e) {
   var target = null;
-  if (currentMode === 'gallery') {
+  if (loupeOpen) {
+    target = loupeTile();
+  } else if (currentMode === 'gallery') {
     target = e.target.closest('.photo-tile');
   } else if (currentMode === 'search') {
     var row = e.target.closest('.result[data-path]');
@@ -951,6 +985,17 @@ document.addEventListener('click', function(e) {
   var menu = document.getElementById('gallery-context-menu');
   if (menu.style.display === 'block' && !menu.contains(e.target)) menu.style.display = 'none';
 });
+
+function loupeTile() {
+  return document.querySelector('.photo-tile[data-id="' + loupeCurrentId + '"]');
+}
+
+function loupeAction(action) {
+  var tile = loupeTile();
+  if (!tile || !tile.dataset.path) return;
+  if (action === 'open') helperOpen(tile.dataset.path);
+  else helperReveal(tile.dataset.path);
+}
 
 function contextMenuAction(action) {
   var menu = document.getElementById('gallery-context-menu');

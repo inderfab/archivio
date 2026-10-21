@@ -1,0 +1,12 @@
+{% set cls = {'fresh': 'done', 'stale': 'warn', 'never': 'warn', 'archived': 'archived'}[st.state] %}
+<span style="display:inline-flex; align-items:center; gap:8px;" data-pid="{{ project_id }}" data-hint="{{ hint }}" data-running="{{ '1' if running else '' }}"
+  {% if running %}hx-get="/dashboard/projects/{{ project_id }}/scan-chip" hx-trigger="every 2s" hx-target="#scan-chip" hx-swap="innerHTML"{% endif %}>
+  {% if running %}
+    <span class="scan-badge running">scannt…{% if total %} {{ processed }}/{{ total }}{% endif %}</span>
+  {% else %}
+    <span class="scan-badge {{ cls }}" title="{{ st.text }}">{% if st.state == 'fresh' %}✓ {% elif st.state in ('stale', 'never') %}⚠ {% endif %}{{ st.label }}</span>
+    <button type="button" class="scan-now-btn"
+      hx-post="/dashboard/projects/{{ project_id }}/scan-chip/start" hx-target="#scan-chip" hx-swap="innerHTML"
+      title="Dieses Projekt jetzt neu einlesen, damit neue und verschobene Dateien gefunden werden">Jetzt scannen</button>
+  {% endif %}
+</span>

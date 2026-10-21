@@ -363,10 +363,16 @@ app.include_router(gallery_router)
 
 def _build_project_groups(conn) -> list[dict]:
     """Gibt Projekte zurück, annotiert mit Eltern-Info für den Suche-Dropdown."""
+    from web.scan_status import dropdown_hint, project_scan_state
+
     rows = conn.execute(
-        "SELECT id, name, path FROM projects WHERE active=1 ORDER BY path"
+        "SELECT id, name, path, last_scanned_at, archive_tier FROM projects "
+        "WHERE active=1 ORDER BY path"
     ).fetchall()
     projects = [dict(r) for r in rows]
+    for p in projects:
+        st = project_scan_state(p["last_scanned_at"], p["archive_tier"] or 0)
+        p["scan_hint"] = dropdown_hint(st)
     # Eltern-Projekt bestimmen: längstes path-Prefix das selbst ein Projekt ist
     for p in projects:
         parent = None
@@ -520,8 +526,16 @@ async def search(
             )
         finally:
             log_conn.close()
+    from web.scan_status import scan_state_by_name
+
+    _sc = connection.get_connection()
+    try:
+        scan_states = scan_state_by_name(_sc)
+    finally:
+        _sc.close()
     return templates.TemplateResponse("search_results.html", {
         "request":        request,
+        "scan_states":    scan_states,
         "results":        results,
         "query":          q,
         "total":          total,

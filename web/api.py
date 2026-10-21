@@ -351,6 +351,43 @@ async def mcp_search(
             notice = _norm_notice_text(_norms_conn, norm_hit)
             blocked = blocked + [{"path": None, "filename": None, "reason": notice}]
 
+        # Index-Stand: damit die KI bei einem leeren/auffaellig duennen Ergebnis weiss,
+        # ob der Ordner evtl. nur lange nicht gescannt wurde (statt "gibt es nicht").
+        from web.scan_status import scan_state_by_id, scan_state_by_name
+        by_name = scan_state_by_name(_norms_conn)
+        for f in cleaned:
+            st = by_name.get(f.get("project_name"))
+            if st and st["state"] != "fresh":
+                f["index_stand"] = st["label"]
+        stand_note = None
+        by_id = scan_state_by_id(_norms_conn)
+        if _pid_scoped is not None and _pid_scoped in by_id:
+            st = by_id[_pid_scoped]
+            if st["state"] != "fresh" or not (cleaned or folders):
+                stand_note = f"Index-Stand von «{st['name']}»: {st['text']}"
+        elif not cleaned and not folders:
+            _enabled = _mcp_enabled_project_ids(_norms_conn)
+            stale = [
+                f"{st['name']} ({st['label'].replace('gescannt ', '')})"
+                for pid, st in by_id.items()
+                if pid in _enabled and st["state"] in ("stale", "never")
+            ]
+            n_arch = sum(1 for pid, st in by_id.items()
+                         if pid in _enabled and st["state"] == "archived")
+            parts = []
+            if stale:
+                parts.append(
+                    "Diese Projekte wurden schon laenger nicht gescannt, neuere oder "
+                    "verschobene Dateien fehlen dort evtl.: " + ", ".join(sorted(stale)[:10])
+                    + (" …" if len(stale) > 10 else "")
+                )
+            if n_arch:
+                parts.append(f"{n_arch} archivierte Projekte werden nur selten neu gescannt.")
+            if parts:
+                stand_note = "Hinweis: " + " ".join(parts)
+        if stand_note:
+            notice = f"{notice}\n\n{stand_note}" if notice else stand_note
+
         log_access(_norms_conn, "search", q, project_id, sent, blocked, chars_sent, session_id=session_id)
     finally:
         _norms_conn.close()
@@ -661,6 +698,19 @@ async def mcp_copy_files(document_ids: str, session_id: str = ""):
         return JSONResponse({"ok": True, "files": files, "skipped": skipped})
     finally:
         conn.close()
+
+
+@router.get("/mcp/folder-status")
+async def mcp_folder_status(path: str = ""):
+    """Index-Stand des Projekts, in dem `path` liegt -- fuer list_folder (MCP)."""
+    from web.scan_status import state_for_path
+
+    conn = connection.get_connection()
+    try:
+        st = state_for_path(conn, path.rstrip("/"))
+    finally:
+        conn.close()
+    return JSONResponse(st or {})
 
 
 @router.get("/mcp/base-folders")

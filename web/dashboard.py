@@ -535,15 +535,10 @@ async def delete_project_status(request: Request, project_id: int):
 
 # ── Scan starten / Status abfragen ────────────────────────────────────────────
 
-@router.post("/projects/{project_id}/scan", response_class=HTMLResponse)
-async def start_scan(request: Request, project_id: int):
-    conn = connection.get_connection()
-    row  = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
-    conn.close()
-    if not row:
-        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+def _begin_scan(project_id: int, row) -> bool:
+    """Startet den Einzel-Scan eines Projekts im Hintergrund. False, wenn schon einer laeuft."""
     if _scans.get(project_id, {}).get("status") == "running":
-        return HTMLResponse(_scan_badge(project_id, "running"))
+        return False
     _scans[project_id] = {
         "status":       "running",
         "phase":        "collecting",
@@ -563,7 +558,61 @@ async def start_scan(request: Request, project_id: int):
     threading.Thread(
         target=_run_scan, args=(project_id, row["path"]), daemon=True
     ).start()
+    return True
+
+
+@router.post("/projects/{project_id}/scan", response_class=HTMLResponse)
+async def start_scan(request: Request, project_id: int):
+    conn = connection.get_connection()
+    row  = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    conn.close()
+    if not row:
+        return HTMLResponse("Projekt nicht gefunden", status_code=404)
+    _begin_scan(project_id, row)
     return HTMLResponse(_scan_badge(project_id, "running"))
+
+
+def _scan_chip_response(request: Request, project_id: int):
+    from web.scan_status import dropdown_hint, project_scan_state
+
+    conn = connection.get_connection()
+    try:
+        row = conn.execute(
+            "SELECT id, name, path, last_scanned_at, archive_tier FROM projects WHERE id=?",
+            (project_id,),
+        ).fetchone()
+    finally:
+        conn.close()
+    if not row or row["path"].startswith("mailbox:"):
+        return HTMLResponse("")
+    scan = _scans.get(project_id, {})
+    running = scan.get("status") == "running"
+    st = project_scan_state(row["last_scanned_at"], row["archive_tier"] or 0)
+    return templates.TemplateResponse("_scan_chip.html", {
+        "request": request,
+        "project_id": project_id,
+        "st": st,
+        "hint": dropdown_hint(st),
+        "running": running,
+        "processed": scan.get("processed", 0),
+        "total": scan.get("total", 0),
+    })
+
+
+@router.get("/projects/{project_id}/scan-chip", response_class=HTMLResponse)
+async def scan_chip(request: Request, project_id: int):
+    """Kleiner Scan-Stand-Badge samt «Jetzt scannen» fuer die Startseite (Suche)."""
+    return _scan_chip_response(request, project_id)
+
+
+@router.post("/projects/{project_id}/scan-chip/start", response_class=HTMLResponse)
+async def scan_chip_start(request: Request, project_id: int):
+    conn = connection.get_connection()
+    row  = conn.execute("SELECT * FROM projects WHERE id=?", (project_id,)).fetchone()
+    conn.close()
+    if row and not row["path"].startswith("mailbox:"):
+        _begin_scan(project_id, row)
+    return _scan_chip_response(request, project_id)
 
 
 @router.get("/projects/{project_id}/scan-status", response_class=HTMLResponse)
