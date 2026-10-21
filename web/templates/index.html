@@ -65,7 +65,7 @@
       {% endif %}
     </select>
     <span id="scan-chip"></span>
-    <select name="type" class="type-select"
+    <select name="type" class="type-select" style="margin-left:auto;"
       hx-get="/search" hx-trigger="change"
       hx-target="#results" hx-include="#search-form"
       onchange="updateChips()">
@@ -145,7 +145,7 @@
       </optgroup>
     </select>
 
-    <button class="btn-mehr-filter" id="mehr-filter-btn" type="button"
+    <button class="btn-mehr-filter" id="mehr-filter-btn" type="button" style="margin-left:0;"
       aria-expanded="false" aria-controls="mehr-filter-panel"
       onclick="toggleMehrFilter()">Weitere Filter</button>
     <span style="position:relative;">
