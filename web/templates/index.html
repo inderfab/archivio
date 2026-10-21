@@ -464,6 +464,8 @@
   <button type="button" class="loupe-nav loupe-next" onclick="loupeStep(1)">›</button>
   <div class="loupe-footer">
     <div class="loupe-stars" id="loupe-stars"></div>
+    <button type="button" class="loupe-action" onclick="loupeAction('open')">Öffnen</button>
+    <button type="button" class="loupe-action" onclick="loupeAction('reveal')">Im Finder zeigen</button>
     <label class="loupe-auto">
       <input type="checkbox" id="loupe-autoadvance" onchange="loupeAutoAdvance=this.checked">
       Auto-Weiter nach Bewertung
@@ -958,7 +960,9 @@ var contextMenuPath = null;
 
 document.addEventListener('contextmenu', function(e) {
   var target = null;
-  if (currentMode === 'gallery') {
+  if (loupeOpen) {
+    target = loupeTile();
+  } else if (currentMode === 'gallery') {
     target = e.target.closest('.photo-tile');
   } else if (currentMode === 'search') {
     var row = e.target.closest('.result[data-path]');
@@ -979,6 +983,17 @@ document.addEventListener('click', function(e) {
   var menu = document.getElementById('gallery-context-menu');
   if (menu.style.display === 'block' && !menu.contains(e.target)) menu.style.display = 'none';
 });
+
+function loupeTile() {
+  return document.querySelector('.photo-tile[data-id="' + loupeCurrentId + '"]');
+}
+
+function loupeAction(action) {
+  var tile = loupeTile();
+  if (!tile || !tile.dataset.path) return;
+  if (action === 'open') helperOpen(tile.dataset.path);
+  else helperReveal(tile.dataset.path);
+}
 
 function contextMenuAction(action) {
   var menu = document.getElementById('gallery-context-menu');
