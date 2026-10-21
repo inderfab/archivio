@@ -268,7 +268,7 @@
    </div>
 
    <div class="search-scope-row">
-     <select id="gallery-format-select" class="type-select" onchange="reloadGallery(); updateGalleryChips();">
+     <select id="gallery-format-select" class="type-select" style="margin-left:auto;" onchange="reloadGallery(); updateGalleryChips();">
        <option value="">Alle Dateiformate</option>
        <option value="jpg">JPG</option>
        <option value="png">PNG</option>
@@ -278,9 +278,9 @@
        <option value="webp">WEBP</option>
        <option value="tiff">TIFF</option>
      </select>
-     <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn"
+     <button type="button" class="btn-mehr-filter" id="gallery-select-all-btn" style="margin-left:0;"
        onclick="selectAllVisible()" title="Alle sichtbaren auswählen">☑ Sichtbare wählen</button>
-     <button type="button" class="btn-mehr-filter" id="gallery-filter-btn"
+     <button type="button" class="btn-mehr-filter" id="gallery-filter-btn" style="margin-left:0;"
        aria-expanded="false" aria-controls="gallery-filter-panel"
        onclick="toggleGalleryFilterPanel()">Weitere Filter</button>
      <span style="position:relative;">
@@ -710,6 +710,8 @@ function switchMode(mode) {
   } else {
     document.querySelector('#search-mode-block select[name="type"]').before(projSel);
   }
+  // Scan-Stand-Badge wandert mit der Projektauswahl mit.
+  projSel.after(document.getElementById('scan-chip'));
   document.getElementById('results').style.display = mode === 'search' ? '' : 'none';
   document.getElementById('gallery-results').style.display = mode === 'gallery' ? '' : 'none';
   if (mode === 'gallery' && !galleryLoaded) {
