@@ -1123,6 +1123,15 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
         g["total_duration_s"] = sum(e.get("duration_s") or 0 for e in es)
         g["ts_start"]       = min(e["started_at"] for e in es)
         g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)
+        # Tatsaechliche Dauer von Start bis Ende -- die Summe der Einzeldauern zaehlt
+        # parallel laufende Projekt-Scans mehrfach.
+        try:
+            g["wall_duration_s"] = (
+                datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00"))
+                - datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00"))
+            ).total_seconds() if g["ts_end"] else g["total_duration_s"]
+        except (ValueError, AttributeError):
+            g["wall_duration_s"] = g["total_duration_s"]
         g["peak_memory_mb"] = max((e["peak_memory_mb"] or 0) for e in es)
         g["peak_cpu_pct"]   = max((e["peak_cpu_pct"] or 0) for e in es)
         statuses = {e["status"] for e in es}
@@ -1288,10 +1297,13 @@ def _scan_und_suche_context(conn) -> dict:
     rows = conn.execute(
         "SELECT * FROM scan_log ORDER BY started_at DESC LIMIT 200"
     ).fetchall()
+    from scanner.scan_log import fehler_text
+
     scans = []
     for r in rows:
         d = dict(r)
         d["errors"] = _json.loads(d["errors_json"] or "[]")
+        d["reason"] = fehler_text(d["status"], d.get("error_message"))
         scans.append(d)
     groups = _group_scan_log_entries(scans)
 
@@ -1322,13 +1334,18 @@ def _scan_und_suche_context(conn) -> dict:
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
-    from web.scan_status import age_label
-
     scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
     peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
+    # psutil zaehlt pro Kern bis 100 % -- "102 %" versteht niemand. Umgerechnet auf die
+    # gesamte Rechenleistung des Macs.
+    peak_cpu = max((s["peak_cpu_pct"] or 0 for s in scan_recent), default=0)
+    cores = psutil.cpu_count() or 1
+    scan_peak_cpu_label = f"{min(100, peak_cpu / cores):.0f} %" if peak_cpu else "—"
     scan_peak_mem_label = f"{peak_mb / 1024:.1f} GB" if peak_mb else "—"
-    scan_peak_mem_sub = (f"Speicher-Spitze · {peak_mb / total_ram_mb * 100:.0f} % RAM"
-                         if peak_mb and total_ram_mb else "Speicher-Spitze (30 T.)")
+    scan_peak_mem_sub = "Speicher, höchster Wert"
+    scan_peak_mem_title = (f"Höchster Speicherbedarf eines Scans in 30 Tagen: "
+                           f"{peak_mb / total_ram_mb * 100:.0f} % des Arbeitsspeichers dieses Macs"
+                           if peak_mb and total_ram_mb else "Höchster Speicherbedarf eines Scans in 30 Tagen")
 
     # Letzter Gesamtscan: neueste Gruppe mit mehreren Projekten (Sammel-Scan), sonst der letzte Scan.
     multi = [g for g in groups if g["count"] > 1] or groups[:1]
@@ -1337,25 +1354,20 @@ def _scan_und_suche_context(conn) -> dict:
         t0 = datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00")).astimezone()
         t1 = datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00")).astimezone()
         mins = max(1, round((t1 - t0).total_seconds() / 60))
-        last_batch_label = f"{t0:%H:%M}–{t1:%H:%M}"
-        last_batch_sub = f"Gesamtscan {t0:%d.%m.} · {mins} Min."
+        last_batch_label = f"{mins} Min." if mins < 120 else f"{mins // 60} Std. {mins % 60} Min."
+        last_batch_sub = f"Letzter Scan, {t0:%d.%m.} {t0:%H:%M}–{t1:%H:%M}"
     else:
-        last_batch_label, last_batch_sub = "—", "Letzter Gesamtscan"
+        last_batch_label, last_batch_sub = "—", "Letzter Scan"
 
-    new_row = conn.execute(
-        "SELECT COALESCE(finished_at, started_at) AS t FROM scan_log "
-        "WHERE new_count > 0 ORDER BY started_at DESC LIMIT 1").fetchone()
-    last_new_files_label = (age_label(new_row["t"]) if new_row else None) or "—"
 
     return {
         "last_batch_label":     last_batch_label,
         "last_batch_sub":       last_batch_sub,
         "scan_peak_mem_label":  scan_peak_mem_label,
         "scan_peak_mem_sub":    scan_peak_mem_sub,
-        "last_new_files_label": last_new_files_label,
-        "search_p90_ms": (sorted(r["duration_ms"] or 0 for r in search_recent)
-                          [min(search_total_30d - 1, int(search_total_30d * 0.9))]
-                          if search_total_30d else 0),
+        "scan_peak_mem_title":  scan_peak_mem_title,
+        "scan_peak_cpu_label":  scan_peak_cpu_label,
+        "cpu_cores":            cores,
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

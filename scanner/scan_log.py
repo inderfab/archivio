@@ -155,6 +155,24 @@ class ResourceSampler:
         self._thread.join(timeout=self.interval + 1)
 
 
+def fehler_text(status: str | None, message: str | None) -> str:
+    """Verstaendlicher Grund fuer einen nicht erfolgreichen Scan (ohne Pfade)."""
+    if status == "done":
+        return ""
+    if status == "cancelled":
+        return "Von Hand abgebrochen"
+    m = message or ""
+    if m.startswith("Pfad existiert nicht") or "nicht zugänglich" in m:
+        return "Ordner nicht gefunden – NAS nicht verbunden oder Ordner verschoben"
+    if m.startswith("Kein Lesezugriff"):
+        return "Keine Berechtigung, den Ordner zu lesen"
+    if "in Folge fehlgeschlagen" in m:
+        return "Abgebrochen: viele Dateien nacheinander nicht lesbar – NAS-Verbindung prüfen"
+    if m:
+        return "Unerwarteter Fehler"
+    return "Grund nicht gespeichert (älterer Scan)"
+
+
 def log_scan(
     conn: sqlite3.Connection,
     project_id: int | None,
@@ -198,14 +216,15 @@ def log_scan(
             """INSERT INTO scan_log
                (project_id, project_name, started_at, finished_at, duration_s, status,
                 total, processed, new_count, skipped, error_count, errors_json,
-                peak_memory_mb, peak_cpu_pct, batch_id)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                peak_memory_mb, peak_cpu_pct, batch_id, error_message)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 project_id, project_name, started_at, finished_at, duration_s, status,
                 progress.get("total", 0), progress.get("processed", 0),
                 progress.get("new", 0), progress.get("skipped", 0),
                 len(errors) or progress.get("errors", 0), json.dumps(errors, ensure_ascii=False),
                 round(peak_memory_mb, 1), round(peak_cpu_pct, 1), batch_id,
+                (progress.get("error") or None) if status != "done" else None,
             ),
         )
     _update_archive_state(conn, project_id, status, progress.get("new", 0))

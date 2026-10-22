@@ -43,6 +43,14 @@ def _fmt_datetime(iso: str | None) -> str:
         return _fmt_date(iso)
 
 
+def _fmt_n(n) -> str:
+    """Ganzzahl mit Tausendertrennung nach Schweizer Art: 90056 -> 90’056."""
+    try:
+        return f"{int(n):,}".replace(",", "’")
+    except (TypeError, ValueError):
+        return str(n)
+
+
 def _fmt_size(n: int) -> str:
     n = n or 0
     if n < 1024:      return f"{n} B"
@@ -106,6 +114,7 @@ def _fmt_ts(iso: str | None) -> str:
 templates.env.filters["fmt_date"]     = _fmt_date
 templates.env.filters["fmt_datetime"] = _fmt_datetime
 templates.env.filters["fmt_size"]     = _fmt_size
+templates.env.filters["fmt_n"]        = _fmt_n
 templates.env.filters["fmt_duration"] = _fmt_duration
 templates.env.filters["fmt_ms"]       = _fmt_ms
 templates.env.filters["fmt_ts"]       = _fmt_ts

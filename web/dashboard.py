@@ -2109,10 +2109,10 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     return results
 
 
-_TEXT_EXTRACTABLE = (
-    ".pdf", ".docx", ".doc", ".dotx", ".xlsx", ".xls", ".xlsm",
-    ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
-)
+# Formate, deren Text Archivio lesen kann -- eine Quelle, die Leser-Tabelle selbst.
+# Vorher eine eigene Liste mit .xls/.msg/.ppt, fuer die es gar keinen Leser gibt.
+from scanner.extractors import _REGISTRY as _EXTRACTOR_REGISTRY
+_TEXT_EXTRACTABLE = tuple(sorted(_EXTRACTOR_REGISTRY))
 
 def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".xlsx":
@@ -2120,6 +2120,111 @@ def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".pdf":
         return "PDF fehlerhaft, passwortgeschützt oder unlesbar"
     return "Datei fehlerhaft oder Format nicht unterstützt"
+
+
+# Gruppen fuer "Nur ueber den Dateinamen auffindbar": die Rohliste nach Endung (Hunderte
+# Zeilen, dominiert von Bildern) sagt nichts darueber, wo Handlungsbedarf besteht.
+_OFFICE_TEXT_FORMATE = {
+    ".doc", ".dot", ".xls", ".xlt", ".ppt", ".pps", ".rtf", ".odt", ".ods", ".odp",
+    ".pages", ".numbers", ".key", ".wpd", ".htm", ".html", ".mht", ".xml", ".msg",
+}
+_CAD_GEO_FORMATE = {
+    ".dwg", ".dxf", ".dwt", ".dws", ".vwx", ".vwxp", ".ifc", ".skp", ".rvt", ".rfa", ".pln",
+    ".mcd", ".3dm", ".stl", ".obj", ".fbx", ".shp", ".shx", ".dbf", ".cpg", ".prj", ".sbn",
+    ".sbx", ".pat", ".lin", ".ctb", ".stb", ".plt", ".dgn",
+}
+# (Schluessel, Titel, Hinweis, braucht Aufmerksamkeit)
+_FORMAT_GRUPPEN = (
+    ("office", "Office- und Textformate", "Inhalt nicht durchsuchbar, nur über den Dateinamen auffindbar", True),
+    ("bilder", "Bilder", "auch unter «Fotos» auffindbar", False),
+    ("cad", "CAD und Geodaten", "nur über den Dateinamen auffindbar", False),
+    ("sonstiges", "Sonstiges", "nur über den Dateinamen auffindbar", False),
+)
+
+
+def _format_gruppe(ext: str) -> str:
+    from web.thumbnails import ALL_GALLERY_EXTENSIONS
+    if ext in ALL_GALLERY_EXTENSIONS:
+        return "bilder"
+    if ext in _OFFICE_TEXT_FORMATE:
+        return "office"
+    if ext in _CAD_GEO_FORMATE:
+        return "cad"
+    return "sonstiges"
+
+
+def _format_groups(by_ext: dict[str, int]) -> list[dict]:
+    """Gruppen fuer "Nur ueber den Dateinamen auffindbar". Office-/Textformate sind hier
+    bewusst NICHT dabei: deren Inhalt waere lesbar, sie gehoeren zu den Lesefehlern
+    (siehe _read_issues)."""
+    groups = []
+    for key, title, hint, attention in _FORMAT_GRUPPEN:
+        if key == "office":
+            continue
+        exts = [(e, n) for e, n in by_ext.items() if _format_gruppe(e) == key]
+        if not exts:
+            continue
+        groups.append({
+            "key": key, "title": title, "hint": hint, "attention": attention,
+            "total": sum(n for _, n in exts),
+            "exts": sorted(exts, key=lambda x: -x[1]),
+        })
+    return groups
+
+
+def _read_issues(error_by_ext: dict[str, int], unsupported_by_ext: dict[str, int]) -> list[dict]:
+    """Eine Liste je Format fuer "Fehler bei der Extraktion": echte Lesefehler (status error)
+    UND Office-/Textformate, deren Inhalt nicht gelesen wird (nicht aktiviert oder ohne
+    Leser). Beides ist fuer den Nutzer dasselbe: Text waere zu erwarten, ist aber nicht
+    durchsuchbar."""
+    from scanner import extractors as _extractors
+
+    readable = set(_extractors._REGISTRY.keys())
+    rows = []
+    for ext, n in error_by_ext.items():
+        rows.append({"ext": ext, "art": "error", "count": n, "can_read": ext in readable,
+                     "reason": _error_reason(ext, None)})
+    for ext, n in unsupported_by_ext.items():
+        if _format_gruppe(ext) != "office":
+            continue
+        rows.append({
+            "ext": ext, "art": "unsupported", "count": n, "can_read": ext in readable,
+            "reason": "Archivio kann dieses Format nicht lesen",
+        })
+    return sorted(rows, key=lambda r: -r["count"])
+
+
+def problem_doc_files(conn, art: str, ext: str, limit: int = 50) -> tuple[list[dict], int]:
+    """Die ersten `limit` Dateien eines Formats aus "Fehler bei der Extraktion" samt
+    Gesamtzahl. art: 'error' (Lesefehler) oder 'unsupported' (Format nicht gelesen)."""
+    statuses = ("error",) if art == "error" else ("listed", "unsupported")
+    ph = ",".join("?" * len(statuses))
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM documents WHERE extension = ? AND extraction_status IN ({ph})",
+        (ext, *statuses)).fetchone()[0]
+    rows = conn.execute(f"""
+        SELECT d.id, d.filename, d.filesize, dp.path
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.extension = ? AND d.extraction_status IN ({ph})
+        ORDER BY d.filename LIMIT ?
+    """, (ext, *statuses, limit)).fetchall()
+    return [dict(r) for r in rows], total
+
+
+@router.get("/problem-docs/files", response_class=HTMLResponse)
+async def problem_docs_files(request: Request, art: str = "error", ext: str = "", reason: str = ""):
+    from scanner import extractors as _extractors
+
+    conn = connection.get_connection()
+    try:
+        files, total = problem_doc_files(conn, art, ext)
+    finally:
+        conn.close()
+    return templates.TemplateResponse("_problem_doc_files.html", {
+        "request": request, "files": files, "total": total, "art": art, "ext": ext, "reason": reason,
+        "can_read": ext in _extractors._REGISTRY,
+    })
 
 
 def _extraction_overview(conn) -> dict:
@@ -2235,7 +2340,31 @@ def _extraction_overview(conn) -> dict:
         "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
     ).fetchone()[0]
 
+    error_by_ext = {
+        row["extension"]: row["cnt"] for row in conn.execute(
+            f"SELECT extension, COUNT(*) AS cnt FROM documents WHERE extraction_status='error' "
+            f"AND extension IN ({err_placeholders}) GROUP BY extension ORDER BY cnt DESC",
+            _TEXT_EXTRACTABLE,
+        ).fetchall()
+    }
+    oversized_by_ext = dict(sorted(((e, listed_by_ext[e]) for e in oversized_exts), key=lambda kv: -kv[1]))
+    total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    ok_total = conn.execute("SELECT COUNT(*) FROM documents WHERE extraction_status='ok'").fetchone()[0]
+    format_groups = _format_groups(unsupported_by_ext)
+    read_issues = _read_issues(error_by_ext, unsupported_by_ext)
+
+    filename_only_total = sum(g["total"] for g in format_groups)
+
     return {
+        "filename_only_total": filename_only_total,
+        "attention_total":     sum(r["count"] for r in read_issues) + no_text_total + oversized_total,
+        "read_issues":         read_issues,
+        "read_issue_total":    sum(r["count"] for r in read_issues),
+        "total_docs":          total_docs,
+        "searchable_total":    max(0, ok_total - no_text_total),
+        "format_groups":       format_groups,
+        "error_by_ext":        error_by_ext,
+        "oversized_by_ext":    oversized_by_ext,
         "unsupported_total":   sum(unsupported_by_ext.values()),
         "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
         "gallery_extensions":  ALL_GALLERY_EXTENSIONS,

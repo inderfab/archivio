@@ -189,6 +189,38 @@ def extract_txt(path: Path) -> tuple[str, str]:
     raise ExtractionError(f"Cannot decode {path}")
 
 
+def extract_html(path: Path) -> tuple[str, str]:
+    """HTML/XML: nur der Text zwischen den Tags (Skripte und Stile weggelassen)."""
+    from html.parser import HTMLParser
+
+    raw, _ = extract_txt(path)
+
+    class _Text(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts: list[str] = []
+            self._skip = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"):
+                self._skip += 1
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style") and self._skip:
+                self._skip -= 1
+
+        def handle_data(self, data):
+            if not self._skip and data.strip():
+                self.parts.append(data.strip())
+
+    p = _Text()
+    try:
+        p.feed(raw)
+    except Exception as exc:
+        raise ExtractionError(f"HTML/XML nicht lesbar: {exc}")
+    return "\n".join(p.parts), ""
+
+
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
 def _has_mojibake(pages: list[dict]) -> bool:
@@ -659,6 +691,92 @@ def extract_xlsx(path: Path) -> tuple[str, str]:
     return result_box[0] if result_box else ("", "")
 
 
+def extract_xls(path: Path) -> tuple[str, str]:
+    """Altes Excel-Format (.xls, vor 2007) -- gleiche Ausgabe und Grenzen wie .xlsx."""
+    try:
+        import xlrd
+    except ImportError:
+        raise UnsupportedFormat("xlrd not installed")
+
+    size_mb = path.stat().st_size / 1_048_576
+    if size_mb > _XLSX_MAX_MB:
+        raise ExtractionError(f"XLS zu gross ({size_mb:.1f} MB > {_XLSX_MAX_MB} MB) — übersprungen")
+
+    import threading
+    result_box: list = []
+    error_box:  list = []
+
+    def _extract():
+        try:
+            # READ-ONLY: xlrd liest die Datei nur ein, on_demand laedt Blaetter einzeln
+            wb = xlrd.open_workbook(str(path), on_demand=True)
+            parts = []
+            for i in range(min(wb.nsheets, _XLSX_MAX_SHEETS)):
+                sheet = wb.sheet_by_index(i)
+                for r in range(min(sheet.nrows, _XLSX_MAX_ROWS)):
+                    line = "  ".join(
+                        str(c)[:200] for c in sheet.row_values(r) if c not in (None, "") and str(c).strip()
+                    )
+                    if line:
+                        parts.append(line)
+                if sheet.nrows > _XLSX_MAX_ROWS:
+                    parts.append(f"[… gekürzt nach {_XLSX_MAX_ROWS} Zeilen]")
+                wb.unload_sheet(i)
+            wb.release_resources()
+            result_box.append(("\n".join(parts), ""))
+        except Exception as exc:
+            error_box.append(exc)
+
+    t = threading.Thread(target=_extract, daemon=True)
+    t.start()
+    t.join(timeout=_XLSX_TIMEOUT_SEC)
+    if t.is_alive():
+        raise ExtractionError(f"XLS Timeout nach {_XLSX_TIMEOUT_SEC}s — Datei zu komplex: {path.name}")
+    if error_box:
+        raise ExtractionError(str(error_box[0]))
+    return result_box[0] if result_box else ("", "")
+
+
+# Outlook-Mail (.msg) ist eine OLE-Containerdatei. Die Felder liegen als eigene Streams
+# "__substg1.0_<Eigenschaft><Typ>", Typ 001F = Unicode, 001E = 8-Bit-Text, 0102 = Binaer.
+_MSG_FELDER = (
+    ("Betreff", "0037"), ("Von", "0C1A"), ("Von (Adresse)", "0C1F"),
+    ("An", "0E04"), ("Cc", "0E03"),
+)
+
+
+def extract_msg(path: Path) -> tuple[str, str]:
+    """Outlook-E-Mail (.msg): Betreff, Absender, Empfaenger und Text. Mit olefile (BSD)
+    statt extract-msg (GPL, fuer den kommerziellen Vertrieb nicht nutzbar)."""
+    try:
+        import olefile
+    except ImportError:
+        raise UnsupportedFormat("olefile not installed")
+    if not olefile.isOleFile(str(path)):
+        raise ExtractionError("Keine gueltige Outlook-Datei (.msg)")
+
+    def _text(ole, prop: str) -> str:
+        for typ, enc in (("001F", "utf-16-le"), ("001E", "cp1252")):
+            name = f"__substg1.0_{prop}{typ}"
+            if ole.exists(name):
+                return ole.openstream(name).read().decode(enc, errors="replace").rstrip("\x00").strip()
+        return ""
+
+    try:
+        with olefile.OleFileIO(str(path)) as ole:
+            kopf = [f"{label}: {v}" for label, prop in _MSG_FELDER if (v := _text(ole, prop))]
+            body = _text(ole, "1000")
+            if not body and ole.exists("__substg1.0_10130102"):
+                # Nur HTML-Fassung vorhanden -> Tags entfernen
+                import html as _html
+                raw = ole.openstream("__substg1.0_10130102").read().decode("utf-8", errors="replace")
+                body = _html.unescape(re.sub(r"(?s)<(script|style).*?</\1>|<[^>]+>", " ", raw))
+                body = re.sub(r"[ \t]+", " ", body)
+    except Exception as exc:
+        raise ExtractionError(f"Outlook-Datei nicht lesbar: {exc}")
+    return "\n".join(kopf + ["", body]).strip(), ""
+
+
 # ── EML ───────────────────────────────────────────────────────────────────────
 
 _MAX_EML_BYTES = 524288  # 512 KB — Header + Text, keine Anhang-Binärdaten in RAM
@@ -749,8 +867,14 @@ _REGISTRY: dict[str, callable] = {
     ".dotx": extract_docx,  # Word-Vorlage -- strukturell dasselbe OOXML-Format wie .docx
     ".doc":  extract_doc,
     ".xlsx": extract_xlsx,
+    ".xls":  extract_xls,
+    ".msg":  extract_msg,
     ".eml":  extract_eml,
     ".rtf":  extract_rtf,
+    ".csv":  extract_txt,
+    ".htm":  extract_html,
+    ".html": extract_html,
+    ".xml":  extract_html,
 }
 
 

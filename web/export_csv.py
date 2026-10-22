@@ -134,13 +134,18 @@ def scan_csv(conn, mode: str) -> str:
         else:
             err = "; ".join(sorted({_ext(e.get("filename") or e.get("path")) for e in errors} - {""}))
             proj = _proj(mode, r["project_id"], {})
+        from scanner.scan_log import fehler_text
+        msg = r["error_message"] if "error_message" in r.keys() else None
+        grund = fehler_text(r["status"], msg)
+        if mode == KLARTEXT and msg and grund:
+            grund = f"{grund} ({msg})"
         out.append([
             r["started_at"], r["finished_at"] or "", r["duration_s"] if r["duration_s"] is not None else "",
-            r["status"], proj, r["total"], r["processed"], r["new_count"], r["skipped"],
+            r["status"], grund, proj, r["total"], r["processed"], r["new_count"], r["skipped"],
             r["error_count"], r["peak_memory_mb"], r["peak_cpu_pct"], r["batch_id"] or "", err,
         ])
     return _csv(
-        ["Start", "Ende", "Dauer (s)", "Status", "Projekt", "Dateien gesamt", "Verarbeitet", "Neu",
+        ["Start", "Ende", "Dauer (s)", "Status", "Grund", "Projekt", "Dateien gesamt", "Verarbeitet", "Neu",
          "Übersprungen", "Fehler (Anzahl)", "Spitze Speicher (MB)", "Spitze CPU (%)", "Sammel-Scan",
          "Fehlerdateien" if mode == KLARTEXT else "Fehlerdateien (Endungen)"], out)
 
@@ -149,21 +154,27 @@ def docs_csv(conn, mode: str) -> str:
     from web.dashboard import _error_reason, _extraction_overview
 
     ov = _extraction_overview(conn)
-    out = []
-    for ext, n in ov["unsupported_by_ext"].items():
-        out.append(["Nicht unterstütztes Format", ext, n, "", "", "", ""])
+    out = [["Übersicht", "", "", ov["total_docs"], "", "", "", "Dokumente gesamt"],
+           ["Übersicht", "", "", ov["searchable_total"], "", "", "", "mit durchsuchbarem Inhalt"]]
+    for g in ov["format_groups"]:
+        for ext, n in g["exts"]:
+            out.append(["Nur über Dateiname", g["title"], ext, n, "", "", "", ""])
+    for r in ov["read_issues"]:
+        out.append(["Fehler bei der Extraktion", "Lesefehler" if r["art"] == "error" else "Nicht gelesen",
+                    r["ext"], r["count"], "", "", "", r["reason"]])
     for ext, n in ov["no_text_by_ext"].items():
-        out.append(["Ohne Textinhalt", ext, n, "", "", "", ""])
-    out.append(["Zu gross (Zusammenfassung)", "", ov["oversized_total"], "", "", "", ""])
-    out.append(["Extraktionsfehler (Zusammenfassung)", "", ov["error_total"], "", "", "", ""])
+        out.append(["Ohne Textinhalt", "", ext, n, "", "", "", ""])
+    for ext, n in ov["oversized_by_ext"].items():
+        out.append(["Zu gross", "", ext, n, "", "", "", ""])
+    out.append(["Wartet auf Scan", "", "", ov["pending_total"], "", "", "", ""])
     for cat, files in (("Zu gross", ov["oversized_files"]), ("Ohne Textinhalt", ov["no_text_sample"]),
                        ("Extraktionsfehler", ov["error_files"])):
         for f in files:
             ext = _ext(f.get("filename") or f.get("path"))
             reason = f.get("reason") or (_error_reason(ext, f.get("path")) if cat == "Extraktionsfehler" else "")
-            out.append([cat, ext, 1, f.get("filename", "") if mode == KLARTEXT else "",
-                        f.get("path") or "" if mode == KLARTEXT else "", f.get("filesize", ""), reason])
-    return _csv(["Kategorie", "Endung", "Anzahl", "Dateiname", "Pfad", "Grösse (Bytes)", "Grund"], out)
+            out.append([cat + " (Einzeldatei)", "", ext, 1, f.get("filename", "") if mode == KLARTEXT else "",
+                        (f.get("path") or "") if mode == KLARTEXT else "", f.get("filesize", ""), reason])
+    return _csv(["Kategorie", "Gruppe", "Endung", "Anzahl", "Dateiname", "Pfad", "Grösse (Bytes)", "Grund"], out)
 
 
 _LIESMICH = """Archivio – Export der Verläufe
