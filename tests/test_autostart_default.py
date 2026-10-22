@@ -8,10 +8,41 @@ import logging
 import sys
 from pathlib import Path
 
+import pytest
+
 sys.path.insert(0, str(Path(__file__).parent.parent / "shared"))
 import menubar_bridge as bridge  # noqa: E402
 
 log = logging.getLogger("test")
+
+
+@pytest.fixture(autouse=True)
+def _installed(monkeypatch):
+    """Die Tests laufen aus dem Repo, nicht aus /Applications -- fuer den Normalfall
+    so tun, als waere die App installiert (Entwickler-Build: eigener Test unten)."""
+    monkeypatch.setattr(bridge, "_installed_app_location", lambda: True)
+
+
+def test_dev_build_outside_applications_never_registers_login_item(tmp_path, monkeypatch):
+    """dist/Archivio Server.app im Repo: kein automatischer Login-Item, auch nicht beim
+    Erststart ohne gespeicherte Praeferenz."""
+    calls = []
+    monkeypatch.setattr(bridge, "_installed_app_location", lambda: False)
+    monkeypatch.setattr(bridge, "autostart_enabled", lambda: False)
+    monkeypatch.setattr(bridge, "set_autostart", lambda enabled, log: calls.append(enabled))
+
+    result = bridge.ensure_autostart_default(log, tmp_path / "state.json")
+
+    assert result is False
+    assert calls == []
+
+
+def test_installed_location_detection(monkeypatch):
+    monkeypatch.undo()
+    monkeypatch.setattr(bridge, "app_path", lambda: Path("/Applications/Archivio Server.app"))
+    assert bridge._installed_app_location() is True
+    monkeypatch.setattr(bridge, "app_path", lambda: Path("/Users/x/archivio/dist/Archivio Server.app"))
+    assert bridge._installed_app_location() is False
 
 
 def test_fresh_install_no_state_file_defaults_to_enabled(tmp_path, monkeypatch):
