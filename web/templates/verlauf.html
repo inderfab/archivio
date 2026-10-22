@@ -21,7 +21,8 @@
   .vf-stat-value { font-size: 15px; font-weight: 700; }
   .vf-stat-label { font-size: 10px; color: var(--text-2); }
   .vf-empty { color: var(--text-3); font-size: 12px; font-style: italic; }
-  #search-chart-btn.active, #search-chart-range-30.active, #search-chart-range-all.active {
+  #search-chart-btn.active, #search-chart-range-30.active, #search-chart-range-all.active,
+  #scan-chart-btn.active, #scan-chart-range-30.active, #scan-chart-range-all.active {
     background: var(--accent); color: #fff; border-color: var(--accent);
   }
 
@@ -55,11 +56,30 @@
   <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
     <h1 style="margin-bottom:0;">Verlauf</h1>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
+    <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
+            onclick="openExportDialog('/verlauf/export.zip', 'Alle Daten exportieren', 'Such-, Scan- und MCP-Verlauf sowie Dokumentenverarbeitung als CSV in einer ZIP-Datei.')">{{ icon_download() }} Alle Daten exportieren</button>
     <div class="section-help-panel">
       <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
       <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
     </div>
   </div>
+
+  <dialog id="export-dialog" style="margin:auto; border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; width:min(480px, 92vw); background:var(--bg); color:var(--text); box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 id="export-title" style="margin:0 0 4px; font-size:15px;">Exportieren</h3>
+    <p id="export-sub" style="margin:0 0 14px; font-size:12px; color:var(--text-2);"></p>
+    <div class="segmented-control" role="group" aria-label="Exportart" style="margin-bottom:12px;">
+      <button type="button" class="segmented-btn" data-modus="klartext" onclick="setExportMode('klartext')" style="min-width:120px;">Klartext</button>
+      <button type="button" class="segmented-btn" data-modus="anonym" onclick="setExportMode('anonym')" style="min-width:120px;">Anonymisiert</button>
+    </div>
+    <div style="font-size:12px; line-height:1.55; margin-bottom:18px;">
+      <p data-hint="klartext" style="margin:0 0 6px;"><strong>Klartext:</strong> Projektname, Dateipfad und Suchanfragen werden in Klartext exportiert.</p>
+      <p data-hint="anonym" style="margin:0;"><strong>Anonymisiert:</strong> Projektname wird durch Nummer ersetzt, der Dateipfad wird nicht exportiert, nur die Endung (Dateiformat), und bei der Suche werden nur Kennwerte (Wortanzahl, Länge, Trefferanzahl, Dauer und Klicks) exportiert.</p>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('export-dialog').close()">Abbrechen</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="runExport()">Jetzt herunterladen</button>
+    </div>
+  </dialog>
 
   {% macro render_scan(s) %}
   <details class="vf-row">
@@ -122,12 +142,12 @@
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
           <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 T.)</div></div>
-          <div><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Ø Dauer</div></div>
+          <div><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Median Dauer</div></div>
           <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">0 Treffer</div></div>
         </div>
         <div style="display:flex; gap:6px;">
           <button type="button" class="btn btn-sm" id="search-chart-btn" onclick="toggleSearchChart()">Grafik</button>
-          {% if search_entries %}<a class="btn btn-sm" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
+          {% if search_entries %}<a class="btn btn-sm js-csv" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
         </div>
       </div>
       <div id="search-chart-panel" style="display:none; flex:1; min-height:0; flex-direction:column;">
@@ -175,7 +195,7 @@
         </div>
         <div style="display:flex; gap:6px;">
           <button type="submit" form="mcp-filter-form" class="btn btn-sm">Filtern</button>
-          <a class="btn btn-sm" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
+          <a class="btn btn-sm js-csv" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
         </div>
       </div>
       <form id="mcp-filter-form" class="vf-filters" method="get" action="/verlauf">
@@ -221,12 +241,31 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
+          <p>Die Grafik zeigt pro Tag die gesamte Scandauer, die Spitzenwerte bei Speicher und CPU und die neu gefundenen Dateien. Der CSV-Export eignet sich für Supportanfragen.</p>
         </div>
       </h2>
+      <div class="vf-stats" style="justify-content:space-between;">
+        <div style="display:flex; gap:16px;">
+          <div><div class="vf-stat-value">{{ scan_total_30d }}</div><div class="vf-stat-label">Scans (30 T.)</div></div>
+          <div><div class="vf-stat-value">{{ scan_median_s|fmt_duration }}</div><div class="vf-stat-label">Median Dauer</div></div>
+          <div><div class="vf-stat-value">{{ scan_errors_30d }}</div><div class="vf-stat-label">Fehler</div></div>
+        </div>
+        <div style="display:flex; gap:6px;">
+          <button type="button" class="btn btn-sm" id="scan-chart-btn" onclick="toggleScanChart()">Grafik</button>
+          {% if groups %}<a class="btn btn-sm js-csv" href="/scan-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
+        </div>
+      </div>
+      <div id="scan-chart-panel" style="display:none; flex:1; min-height:0; flex-direction:column;">
+        <div style="display:flex; gap:6px; margin-bottom:8px;">
+          <button type="button" class="btn btn-sm" id="scan-chart-range-30" onclick="loadScanChart('30')">Letzter Monat</button>
+          <button type="button" class="btn btn-sm" id="scan-chart-range-all" onclick="loadScanChart('all')">Gesamt</button>
+        </div>
+        <div id="scan-chart-svg-wrap" style="flex:1; min-height:0; overflow-y:auto;"></div>
+      </div>
       {% if not groups %}
       <p class="vf-empty">Noch keine protokollierten Scans.</p>
       {% else %}
-      <div class="vf-scroll">
+      <div class="vf-scroll" id="scan-list-wrap">
         {% for g in groups %}
           {% if g.count == 1 %}
             {{ render_scan(g.entries[0]) }}
@@ -287,10 +326,80 @@ function loadSearchChart(range) {
       if (!rows.length) { wrap.innerHTML = '<p class="vf-empty">Keine Daten im gewählten Zeitraum.</p>'; return; }
       wrap.innerHTML =
         buildBarChart(rows, 'count', 'Suchen pro Tag', '#16a34a') +
-        buildBarChart(rows, 'avg_ms', 'Ø Dauer pro Tag (ms)', '#2563eb');
+        buildBarChart(rows, 'median_ms', 'Typische Dauer pro Tag, Median (ms)', '#2563eb') +
+        buildBarChart(rows, 'p90_ms', 'Langsamste 10 % pro Tag (ms)', '#d97706');
     })
     .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
 }
+
+var _scanChartOpen = false;
+var _scanChartLastRange = null;
+
+function toggleScanChart() {
+  _scanChartOpen = !_scanChartOpen;
+  document.getElementById('scan-chart-panel').style.display = _scanChartOpen ? 'flex' : 'none';
+  var list = document.getElementById('scan-list-wrap');
+  if (list) list.style.display = _scanChartOpen ? 'none' : '';
+  document.getElementById('scan-chart-btn').classList.toggle('active', _scanChartOpen);
+  if (_scanChartOpen && !_scanChartLastRange) loadScanChart('30');
+}
+
+function loadScanChart(range) {
+  _scanChartLastRange = range;
+  document.getElementById('scan-chart-range-30').classList.toggle('active', range === '30');
+  document.getElementById('scan-chart-range-all').classList.toggle('active', range === 'all');
+  var wrap = document.getElementById('scan-chart-svg-wrap');
+  wrap.innerHTML = '<p class="vf-empty">Lädt…</p>';
+  fetch('/scan-log/chart-data?range=' + range)
+    .then(function(r) { return r.json(); })
+    .then(function(rows) {
+      if (!rows.length) { wrap.innerHTML = '<p class="vf-empty">Keine Scans im gewählten Zeitraum.</p>'; return; }
+      wrap.innerHTML =
+        buildBarChart(rows, 'dauer_min', 'Scandauer pro Tag, gesamt (Minuten)', '#16a34a') +
+        buildBarChart(rows, 'speicher_mb', 'Spitzenwert Speicher pro Tag (MB)', '#2563eb') +
+        buildBarChart(rows, 'cpu_pct', 'Spitzenwert CPU pro Tag (%)', '#d97706') +
+        buildBarChart(rows, 'neu', 'Neu gefundene Dateien pro Tag', '#7c3aed');
+    })
+    .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
+}
+
+// ── Export: Klartext / Anonymisiert (Dialog, gilt für den jeweils angeklickten Export) ──
+var exportMode = 'klartext';
+var exportUrl = '';
+
+function setExportMode(m) {
+  exportMode = m;
+  var dlg = document.getElementById('export-dialog');
+  dlg.querySelectorAll('.segmented-btn').forEach(function(b) {
+    b.classList.toggle('active', b.dataset.modus === m);
+  });
+  dlg.querySelectorAll('[data-hint]').forEach(function(p) {
+    p.style.opacity = p.dataset.hint === m ? '1' : '0.55';
+  });
+}
+
+function openExportDialog(url, title, sub) {
+  exportUrl = url;
+  document.getElementById('export-title').textContent = title;
+  document.getElementById('export-sub').textContent = sub || '';
+  setExportMode('klartext');
+  document.getElementById('export-dialog').showModal();
+}
+
+function runExport() {
+  document.getElementById('export-dialog').close();
+  window.location.href = exportUrl + (exportUrl.indexOf('?') >= 0 ? '&' : '?') + 'modus=' + exportMode;
+}
+
+// Die CSV-Knöpfe der einzelnen Verläufe öffnen denselben Dialog.
+document.addEventListener('click', function(e) {
+  var a = e.target.closest('a.js-csv');
+  if (!a) return;
+  e.preventDefault();
+  var box = a.closest('.vf-box, #problem-docs-container');
+  var heading = box ? (box.querySelector('h2 span, .section-title span') || {}).textContent : '';
+  openExportDialog(a.getAttribute('href'), (heading || 'Verlauf').trim() + ' exportieren', 'Eine CSV-Datei.');
+});
 
 function buildBarChart(rows, key, title, color) {
   var w = 600, barGap = 2, padLeft = 4, padBottom = 16, chartH = 70;
