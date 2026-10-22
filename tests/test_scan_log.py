@@ -110,7 +110,7 @@ def test_system_status_page_renders(tmp_db):
     assert r.status_code == 200
     assert "Testprojekt" in r.text
     assert "200" in r.text
-    assert "% RAM" in r.text
+    assert "des Arbeitsspeichers" in r.text
     assert "2 neu" in r.text
 
 

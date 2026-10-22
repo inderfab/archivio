@@ -3,6 +3,8 @@
 {% block title %}Archivio – Verlauf{% endblock %}
 
 {% block content %}
+{% set TOOL_LABELS = {'search': 'Suche', 'semantic_search': 'Suche', 'document': 'Dokument gelesen',
+                      'merge_pdf': 'PDF zusammengestellt', 'copy_files': 'Dateien kopiert'} %}
 <style>
   .verlauf-page { padding: 32px 0 64px; max-width: 1100px; }
   .verlauf-page h1 { font-size: 22px; font-weight: 700; margin-bottom: 8px; letter-spacing: -.02em; }
@@ -85,13 +87,12 @@
       <span class="vf-dt">{{ s.started_at|fmt_ts }}</span>
       <span class="vf-obj">{{ s.project_name or '—' }}</span>
       <span class="vf-metric">{{ s.duration_s|fmt_duration }}</span>
-      <span class="vf-metric">{{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}%){% endif %} · {{ s.peak_cpu_pct|round|int }}% CPU</span>
       <span class="vf-dot {{ 'g' if s.status == 'done' else ('y' if s.status == 'cancelled' else 'r') }}"></span>
     </summary>
     <div class="vf-detail">
       <div style="color:var(--text);">
         Start {{ s.started_at|fmt_ts }} · Dauer {{ s.duration_s|fmt_duration }} · {{ s.processed }}/{{ s.total }} Dateien · {{ s.new_count }} neu
-        · {{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% RAM){% endif %} · {{ s.peak_cpu_pct|round|int }}% CPU
+        · {{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% des Arbeitsspeichers){% endif %} · Rechenleistung {{ [100, (s.peak_cpu_pct or 0) / (cpu_cores or 1)]|min|round|int }} %
       </div>
       {% if s.errors %}
       <div style="margin-top:6px;">{{ s.error_count }} Fehler:</div>
@@ -113,7 +114,7 @@
   <details class="vf-row">
     <summary>
       <span class="vf-dt">{{ e.ts[5:10] if e.ts else '—' }}</span>
-      <span class="vf-obj">{{ e.tool }} · {{ e.query or e.project_name or '—' }}</span>
+      <span class="vf-obj">{{ TOOL_LABELS.get(e.tool, e.tool) }} · {{ e.query or e.project_name or '—' }}</span>
       <span class="vf-dot {{ 'g' if e.status == 'ok' else ('y' if e.status == 'blocked' else 'r') }}"></span>
     </summary>
     <div class="vf-detail">
@@ -139,10 +140,10 @@
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 T.)</div></div>
-          <div><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Median Dauer</div></div>
-          <div><div class="vf-stat-value">{{ search_p90_ms|fmt_ms }}</div><div class="vf-stat-label">Langsamste 10 %</div></div>
-          <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">0 Treffer</div></div>
+          <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 Tage)</div></div>
+          <div title="Die Hälfte der Suchen ist schneller, die Hälfte langsamer"><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Typische Dauer</div></div>
+          <div title="Jede zehnte Suche dauert länger als dieser Wert"><div class="vf-stat-value">{{ search_p90_ms|fmt_ms }}</div><div class="vf-stat-label">Langsame Suchen</div></div>
+          <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">Ohne Treffer</div></div>
         </div>
         <div style="display:flex; gap:6px;">
           {% if search_entries %}<a class="btn btn-sm js-csv" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
@@ -173,7 +174,7 @@
     {# ── MCP-Verlauf (oben rechts) ── #}
     <div class="vf-box">
       <h2>
-        <span>MCP-Verlauf</span>
+        <span>Claude-Zugriffe (MCP)</span>
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Jede Suche und jedes vollständig geladene Dokument über die Claude/MCP-Schnittstelle, inklusive der Fälle, in denen etwas blockiert wurde (Norm oder <a href="/sperrliste">Sperrliste</a>). Dieses Protokoll ist selbst nicht über MCP abfragbar.</p>
@@ -181,8 +182,8 @@
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 T., alle)</div></div>
-          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Dateien (30 T., alle)</div></div>
+          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 Tage)</div></div>
+          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Gelesene Dateien (30 Tage)</div></div>
         </div>
         <div style="display:flex; gap:6px;">
           <a class="btn btn-sm js-csv" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
@@ -196,7 +197,7 @@
           {% endfor %}
         </select>
         <select name="status" onchange="this.form.submit()">
-          <option value="">Alle Status</option>
+          <option value="">Alle Ergebnisse</option>
           <option value="ok" {% if filter_status == 'ok' %}selected{% endif %}>Übermittelt</option>
           <option value="blocked" {% if filter_status == 'blocked' %}selected{% endif %}>Blockiert</option>
           <option value="error" {% if filter_status == 'error' %}selected{% endif %}>Fehler</option>
@@ -224,8 +225,8 @@
       {% endif %}
     </div>
 
-    {# ── Scan-Verlauf (unten links) ── #}
-    <div class="vf-box">
+    {# ── Scan-Verlauf (unten links): so hoch wie die Dokumentenverarbeitung daneben ── #}
+    <div class="vf-box" style="height:auto; min-height:460px;">
       <h2>
         <span>Scan-Verlauf</span>
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
@@ -236,9 +237,9 @@
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
-          <div title="Letzter Scan über alle Projekte (Sammel-Scan), tatsächlich von Start bis Ende gemessen"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
-          <div title="Höchster Speicherbedarf eines Scans in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">{{ scan_peak_mem_sub }}</div></div>
-          <div title="Höchste CPU-Auslastung eines Scans in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">CPU-Spitze (30 T.)</div></div>
+          <div title="Letzter Scan über alle Projekte, von Start bis Ende"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
+          <div title="{{ scan_peak_mem_title }}"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">{{ scan_peak_mem_sub }}</div></div>
+          <div title="Höchste Auslastung der Rechenleistung dieses Macs durch einen Scan in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">Prozessor, höchster Wert</div></div>
           <div title="Wann ein Scan zuletzt neue Dateien gefunden hat"><div class="vf-stat-value">{{ last_new_files_label }}</div><div class="vf-stat-label">Zuletzt neue Dateien</div></div>
         </div>
         <div style="display:flex; gap:6px;">
@@ -248,7 +249,8 @@
       {% if not groups %}
       <p class="vf-empty">Noch keine protokollierten Scans.</p>
       {% else %}
-      <div class="vf-scroll" id="scan-list-wrap">
+      <div style="position:relative; flex:1; min-height:240px;">
+      <div class="vf-scroll" id="scan-list-wrap" style="position:absolute; inset:0;">
         {% for g in groups %}
           {% if g.count == 1 %}
             {{ render_scan(g.entries[0]) }}
@@ -256,15 +258,15 @@
           <details class="vf-row vf-group">
             <summary>
               <span class="vf-dt">{{ g.ts_start|fmt_ts }}</span>
-              <span class="vf-obj">Sammel-Scan · {{ g.count }} Projekte</span>
-              <span class="vf-metric">{{ g.total_duration_s|fmt_duration }}</span>
-              <span class="vf-metric">{{ g.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (g.peak_memory_mb / total_ram_mb * 100)|round(1) }}%){% endif %} · {{ g.peak_cpu_pct|round|int }}% CPU</span>
+              <span class="vf-obj">Gesamtscan · {{ g.count }} Projekte</span>
+              <span class="vf-metric" title="Von Start bis Ende">{{ g.wall_duration_s|fmt_duration }}</span>
               <span class="vf-dot {{ 'g' if g.status == 'done' else ('y' if g.status == 'cancelled' else 'r') }}"></span>
             </summary>
             {% for s in g.entries %}{{ render_scan(s) }}{% endfor %}
           </details>
           {% endif %}
         {% endfor %}
+      </div>
       </div>
       {% endif %}
     </div>

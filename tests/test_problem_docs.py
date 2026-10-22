@@ -207,7 +207,7 @@ def test_problem_docs_route_offers_finder_and_rescan_per_file(tmp_db):
     r = c.get("/dashboard/problem-docs")
     assert r.status_code == 200
     # Fehler stehen als Formatzeile; die Einzeldateien kommen erst beim Aufklappen
-    assert "Fehler bei der Extraktion" in r.text
+    assert "Inhalt nicht lesbar" in r.text
     assert "problem-docs/files?art=error&amp;ext=.pdf" in r.text or "problem-docs/files?art=error&ext=.pdf" in r.text
     files = c.get("/dashboard/problem-docs/files", params={"art": "error", "ext": ".pdf"})
     assert files.status_code == 200
@@ -237,9 +237,9 @@ def test_problem_docs_route_renders_all_categories(tmp_db):
     assert r.status_code == 200
     assert "Nur über den Dateinamen auffindbar" in r.text
     assert "Bilder" in r.text
-    assert "Zu gross für automatische Extraktion" in r.text
-    assert "Fehler bei der Extraktion" in r.text
-    assert "Kein Textinhalt gefunden" in r.text
+    assert "Zu gross zum automatischen Lesen" in r.text
+    assert "Inhalt nicht lesbar" in r.text
+    assert "Kein Text enthalten" in r.text
     assert "riesig.pdf" in r.text
     assert "scan.pdf" in r.text
     assert "Trotzdem lesen" in r.text
@@ -367,10 +367,10 @@ def test_format_groups_split_by_kind():
 def test_read_issues_merge_errors_and_office_formats():
     from web.dashboard import _read_issues
 
-    rows = _read_issues({".pdf": 100, ".doc": 2}, {".doc": 40, ".xls": 10, ".jpg": 999, ".rtf": 5})
+    rows = _read_issues({".pdf": 100, ".doc": 2}, {".doc": 40, ".ppt": 10, ".jpg": 999, ".rtf": 5})
     by = {(r["ext"], r["art"]): r for r in rows}
     assert by[(".pdf", "error")]["count"] == 100
     assert by[(".doc", "unsupported")]["can_read"] is True       # Leser vorhanden, nicht aktiviert
-    assert by[(".xls", "unsupported")]["can_read"] is False      # kein Leser
+    assert by[(".ppt", "unsupported")]["can_read"] is False      # kein Leser
     assert (".jpg", "unsupported") not in by                     # Bilder sind kein Lesefehler
     assert [r["count"] for r in rows] == sorted((r["count"] for r in rows), reverse=True)

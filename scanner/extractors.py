@@ -691,6 +691,52 @@ def extract_xlsx(path: Path) -> tuple[str, str]:
     return result_box[0] if result_box else ("", "")
 
 
+def extract_xls(path: Path) -> tuple[str, str]:
+    """Altes Excel-Format (.xls, vor 2007) -- gleiche Ausgabe und Grenzen wie .xlsx."""
+    try:
+        import xlrd
+    except ImportError:
+        raise UnsupportedFormat("xlrd not installed")
+
+    size_mb = path.stat().st_size / 1_048_576
+    if size_mb > _XLSX_MAX_MB:
+        raise ExtractionError(f"XLS zu gross ({size_mb:.1f} MB > {_XLSX_MAX_MB} MB) — übersprungen")
+
+    import threading
+    result_box: list = []
+    error_box:  list = []
+
+    def _extract():
+        try:
+            # READ-ONLY: xlrd liest die Datei nur ein, on_demand laedt Blaetter einzeln
+            wb = xlrd.open_workbook(str(path), on_demand=True)
+            parts = []
+            for i in range(min(wb.nsheets, _XLSX_MAX_SHEETS)):
+                sheet = wb.sheet_by_index(i)
+                for r in range(min(sheet.nrows, _XLSX_MAX_ROWS)):
+                    line = "  ".join(
+                        str(c)[:200] for c in sheet.row_values(r) if c not in (None, "") and str(c).strip()
+                    )
+                    if line:
+                        parts.append(line)
+                if sheet.nrows > _XLSX_MAX_ROWS:
+                    parts.append(f"[… gekürzt nach {_XLSX_MAX_ROWS} Zeilen]")
+                wb.unload_sheet(i)
+            wb.release_resources()
+            result_box.append(("\n".join(parts), ""))
+        except Exception as exc:
+            error_box.append(exc)
+
+    t = threading.Thread(target=_extract, daemon=True)
+    t.start()
+    t.join(timeout=_XLSX_TIMEOUT_SEC)
+    if t.is_alive():
+        raise ExtractionError(f"XLS Timeout nach {_XLSX_TIMEOUT_SEC}s — Datei zu komplex: {path.name}")
+    if error_box:
+        raise ExtractionError(str(error_box[0]))
+    return result_box[0] if result_box else ("", "")
+
+
 # ── EML ───────────────────────────────────────────────────────────────────────
 
 _MAX_EML_BYTES = 524288  # 512 KB — Header + Text, keine Anhang-Binärdaten in RAM
@@ -781,6 +827,7 @@ _REGISTRY: dict[str, callable] = {
     ".dotx": extract_docx,  # Word-Vorlage -- strukturell dasselbe OOXML-Format wie .docx
     ".doc":  extract_doc,
     ".xlsx": extract_xlsx,
+    ".xls":  extract_xls,
     ".eml":  extract_eml,
     ".rtf":  extract_rtf,
     ".csv":  extract_txt,

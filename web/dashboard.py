@@ -2189,7 +2189,7 @@ def _read_issues(error_by_ext: dict[str, int], unsupported_by_ext: dict[str, int
             continue
         rows.append({
             "ext": ext, "art": "unsupported", "count": n, "can_read": ext in readable,
-            "reason": "Archivio hat für dieses Format keinen Leser",
+            "reason": "Archivio kann dieses Format nicht lesen",
         })
     return sorted(rows, key=lambda r: -r["count"])
 
@@ -2213,7 +2213,7 @@ def problem_doc_files(conn, art: str, ext: str, limit: int = 50) -> tuple[list[d
 
 
 @router.get("/problem-docs/files", response_class=HTMLResponse)
-async def problem_docs_files(request: Request, art: str = "error", ext: str = ""):
+async def problem_docs_files(request: Request, art: str = "error", ext: str = "", reason: str = ""):
     from scanner import extractors as _extractors
 
     conn = connection.get_connection()
@@ -2222,7 +2222,7 @@ async def problem_docs_files(request: Request, art: str = "error", ext: str = ""
     finally:
         conn.close()
     return templates.TemplateResponse("_problem_doc_files.html", {
-        "request": request, "files": files, "total": total, "art": art, "ext": ext,
+        "request": request, "files": files, "total": total, "art": art, "ext": ext, "reason": reason,
         "can_read": ext in _extractors._REGISTRY,
     })
 

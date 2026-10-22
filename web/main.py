@@ -1123,6 +1123,15 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
         g["total_duration_s"] = sum(e.get("duration_s") or 0 for e in es)
         g["ts_start"]       = min(e["started_at"] for e in es)
         g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)
+        # Tatsaechliche Dauer von Start bis Ende -- die Summe der Einzeldauern zaehlt
+        # parallel laufende Projekt-Scans mehrfach.
+        try:
+            g["wall_duration_s"] = (
+                datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00"))
+                - datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00"))
+            ).total_seconds() if g["ts_end"] else g["total_duration_s"]
+        except (ValueError, AttributeError):
+            g["wall_duration_s"] = g["total_duration_s"]
         g["peak_memory_mb"] = max((e["peak_memory_mb"] or 0) for e in es)
         g["peak_cpu_pct"]   = max((e["peak_cpu_pct"] or 0) for e in es)
         statuses = {e["status"] for e in es}
@@ -1326,11 +1335,16 @@ def _scan_und_suche_context(conn) -> dict:
 
     scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
     peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
+    # psutil zaehlt pro Kern bis 100 % -- "102 %" versteht niemand. Umgerechnet auf die
+    # gesamte Rechenleistung des Macs.
     peak_cpu = max((s["peak_cpu_pct"] or 0 for s in scan_recent), default=0)
-    scan_peak_cpu_label = f"{peak_cpu:.0f} %" if peak_cpu else "—"
+    cores = psutil.cpu_count() or 1
+    scan_peak_cpu_label = f"{min(100, peak_cpu / cores):.0f} %" if peak_cpu else "—"
     scan_peak_mem_label = f"{peak_mb / 1024:.1f} GB" if peak_mb else "—"
-    scan_peak_mem_sub = (f"Speicher-Spitze · {peak_mb / total_ram_mb * 100:.0f} % RAM"
-                         if peak_mb and total_ram_mb else "Speicher-Spitze (30 T.)")
+    scan_peak_mem_sub = "Speicher, höchster Wert"
+    scan_peak_mem_title = (f"Höchster Speicherbedarf eines Scans in 30 Tagen: "
+                           f"{peak_mb / total_ram_mb * 100:.0f} % des Arbeitsspeichers dieses Macs"
+                           if peak_mb and total_ram_mb else "Höchster Speicherbedarf eines Scans in 30 Tagen")
 
     # Letzter Gesamtscan: neueste Gruppe mit mehreren Projekten (Sammel-Scan), sonst der letzte Scan.
     multi = [g for g in groups if g["count"] > 1] or groups[:1]
@@ -1354,7 +1368,9 @@ def _scan_und_suche_context(conn) -> dict:
         "last_batch_sub":       last_batch_sub,
         "scan_peak_mem_label":  scan_peak_mem_label,
         "scan_peak_mem_sub":    scan_peak_mem_sub,
+        "scan_peak_mem_title":  scan_peak_mem_title,
         "scan_peak_cpu_label":  scan_peak_cpu_label,
+        "cpu_cores":            cores,
         "last_new_files_label": last_new_files_label,
         "search_p90_ms": (sorted(r["duration_ms"] or 0 for r in search_recent)
                           [min(search_total_30d - 1, int(search_total_30d * 0.9))]

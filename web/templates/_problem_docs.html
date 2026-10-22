@@ -19,12 +19,11 @@
     <a class="btn btn-sm js-csv" href="/docs-log/export.csv" style="margin-left:auto; margin-right:8px; display:inline-flex; align-items:center; gap:5px; text-transform:none; letter-spacing:normal; font-weight:normal;">{{ icon_download() }} CSV</a>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel" style="max-height:70vh; overflow-y:auto;">
-      <p><strong>Durchsuchbar</strong> sind Dokumente, deren Text gelesen werden konnte. Alles andere ist trotzdem über den Dateinamen auffindbar.</p>
-      <p><strong>Fehler bei der Extraktion (rot):</strong> Der Inhalt sollte lesbar sein, ist es aber nicht. Mögliche Gründe: die Datei ist passwortgeschützt oder gesperrt, beschädigt, war beim Scan von einem anderen Programm geöffnet, oder Archivio hat für das Format keinen Leser (z. B. .xls, .ppt, .msg). «Nochmals versuchen» hilft, wenn der Grund vorübergehend war (Datei war gesperrt), nicht bei Passwortschutz oder nicht gelesenen Formaten.</p>
-      <p><strong>Kein Textinhalt gefunden (grau):</strong> Die Datei wurde gelesen, enthält aber keinen Text, z. B. ein gescanntes PDF oder ein Plan ohne Textebene. Bei Plänen oft normal.</p>
-      <p><strong>Zu gross (grau):</strong> Die Datei überschreitet die Grössengrenze für die automatische Extraktion. Ein Klick auf «Trotzdem lesen» liest sie, das kann dauern.</p>
-      <p><strong>Warten auf den nächsten Scan:</strong> Neu gefunden, noch nicht verarbeitet. Kein Handlungsbedarf.</p>
-      <p><strong>Nur über den Dateinamen auffindbar (grün):</strong> Bilder (zusätzlich unter «Fotos»), CAD- und Geodaten sowie Sonstiges wie Archive, Videos, Programmdateien oder Dateien ohne Endung. Bei diesen Formaten gibt es keinen Text zu lesen. Erwartet, kein Handlungsbedarf.</p>
+      <p>Archivio liest den Text aller Dokumente, damit die Suche auch im Inhalt findet. Diese Übersicht zeigt, wo das geklappt hat und wo nicht.</p>
+      <p><strong>Inhalt nicht lesbar (rot):</strong> Der Text konnte nicht gelesen werden. Häufige Gründe: Die Datei ist mit einem Passwort geschützt, beschädigt, war beim Scan in einem anderen Programm geöffnet, oder Archivio kann dieses Format nicht lesen (z. B. alte PowerPoint-Dateien). Ein Klick auf ein Format zeigt die betroffenen Dateien. «Nochmals versuchen» hilft, wenn die Datei nur kurz gesperrt war.</p>
+      <p><strong>Kein Text enthalten (grau):</strong> Die Datei wurde gelesen, enthält aber keinen Text, etwa ein Plan oder ein eingescanntes Dokument. Bei Plänen ist das normal.</p>
+      <p><strong>Zu gross zum automatischen Lesen (grau):</strong> Sehr grosse Dateien liest Archivio nicht automatisch, damit der Scan nicht stockt. «Trotzdem lesen» holt das für eine einzelne Datei nach.</p>
+      <p><strong>Nur über den Dateinamen auffindbar (grün):</strong> Bilder, Pläne im CAD-Format und andere Dateien ohne lesbaren Text. Sie werden über den Namen gefunden, Bilder zusätzlich unter «Fotos». Das ist normal.</p>
     </div>
   </div>
 
@@ -42,9 +41,9 @@
 
   <div style="display:flex; gap:20px; margin-bottom:14px;">
     <div><div class="pd-big">{{ total_docs|fmt_n }}</div><div class="pd-cap">Dokumente</div></div>
-    <div><div class="pd-big">{{ searchable_total|fmt_n }}</div><div class="pd-cap">mit durchsuchbarem Inhalt</div></div>
+    <div><div class="pd-big">{{ searchable_total|fmt_n }}</div><div class="pd-cap">Inhalt durchsuchbar</div></div>
     <div><div class="pd-big">{{ attention_total|fmt_n }}</div><div class="pd-cap">brauchen Aufmerksamkeit</div></div>
-    <div><div class="pd-big">{{ filename_only_total|fmt_n }}</div><div class="pd-cap">nur über den Dateinamen</div></div>
+    <div><div class="pd-big">{{ filename_only_total|fmt_n }}</div><div class="pd-cap">nur über Dateinamen</div></div>
   </div>
 
   <div>
@@ -62,8 +61,7 @@
     <summary class="problem-docs-summary pd-summary">
       <span class="status-dot bad pd-dot"></span>
       <span class="pd-main">
-        <span class="pd-title">Fehler bei der Extraktion <span class="problem-docs-badge">{{ read_issue_total|fmt_n }}</span></span>
-        <span class="pd-formats">{{ read_issues|length }} Format{{ 'e' if read_issues|length != 1 else '' }}: {% for r in read_issues[:6] %}{{ r.ext or '(ohne Endung)' }} {{ r.count|fmt_n }}{% if not loop.last %} · {% endif %}{% endfor %}{% if read_issues|length > 6 %} · … +{{ read_issues|length - 6 }} weitere{% endif %}</span>
+        <span class="pd-title">Inhalt nicht lesbar <span class="problem-docs-badge">{{ read_issue_total|fmt_n }}</span></span>
       </span>
       {% if error_total > 0 %}
       <button type="button" class="btn btn-sm"
@@ -78,13 +76,12 @@
     <div class="problem-docs-list" style="max-height:none; padding:6px 8px;">
       {% for r in read_issues %}
       <details class="problem-docs" style="margin-bottom:6px;"
-               hx-get="/dashboard/problem-docs/files?art={{ r.art }}&ext={{ r.ext|urlencode }}"
+               hx-get="/dashboard/problem-docs/files?art={{ r.art }}&ext={{ r.ext|urlencode }}&reason={{ r.reason|urlencode }}"
                hx-trigger="toggle once" hx-target="find .pd-files" hx-swap="innerHTML">
-        <summary class="problem-docs-summary pd-summary">
+        <summary class="problem-docs-summary pd-summary" title="{{ r.reason }}">
           <span class="status-dot {{ 'bad' if r.art == 'error' else 'warn' }} pd-dot"></span>
           <span class="pd-main">
             <span class="pd-title">{{ r.ext or '(ohne Endung)' }} <span class="problem-docs-badge">{{ r.count|fmt_n }}</span></span>
-            <span class="pd-formats">{{ 'Lesefehler' if r.art == 'error' else 'Nicht gelesen' }} · {{ r.reason }}</span>
           </span>
         </summary>
         <div class="problem-docs-list pd-files"><div class="problem-doc-row" style="color:var(--text-3);">Lädt…</div></div>
@@ -99,8 +96,7 @@
     <summary class="problem-docs-summary pd-summary">
       <span class="status-dot neutral pd-dot"></span>
       <span class="pd-main">
-        <span class="pd-title">Kein Textinhalt gefunden <span class="problem-docs-badge">{{ no_text_total|fmt_n }}</span></span>
-        <span class="pd-formats">{{ ext_summary(no_text_by_ext.items()|list) }}</span>
+        <span class="pd-title">Kein Text enthalten <span class="problem-docs-badge">{{ no_text_total|fmt_n }}</span></span>
       </span>
       <button type="button" class="btn btn-sm"
               hx-post="/dashboard/retry-no-text" hx-target="#problem-docs-container" hx-swap="outerHTML"
@@ -110,7 +106,7 @@
       </button>
     </summary>
     <div class="problem-docs-list">
-      <div class="problem-doc-row" style="color:var(--text-3);">Meist gescannte oder bildbasierte PDFs und Pläne ohne Textebene. Die grössten {{ no_text_sample|length }} sind aufgelistet.</div>
+      <div class="problem-doc-row" style="color:var(--text-3);">Meist Pläne oder gescannte PDFs, die nur aus Bildern bestehen. Die grössten {{ no_text_sample|length }} sind aufgelistet.</div>
       {% for doc in no_text_sample %}
       <div class="problem-doc-row problem-doc-no_text">
         <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene"></span>
@@ -141,8 +137,7 @@
     <summary class="problem-docs-summary pd-summary">
       <span class="status-dot neutral pd-dot"></span>
       <span class="pd-main">
-        <span class="pd-title">Zu gross für automatische Extraktion <span class="problem-docs-badge">{{ oversized_total|fmt_n }}</span></span>
-        <span class="pd-formats">{{ ext_summary(oversized_by_ext.items()|list) }}</span>
+        <span class="pd-title">Zu gross zum automatischen Lesen <span class="problem-docs-badge">{{ oversized_total|fmt_n }}</span></span>
       </span>
     </summary>
     <div class="problem-docs-list">
@@ -165,21 +160,15 @@
   </details>
   {% endif %}
 
-  {% if pending_total > 0 %}
-  <div style="font-size:12px; color:var(--text-3); padding:2px 2px 6px;">
-    {{ pending_total|fmt_n }} Dokument{{ "e" if pending_total != 1 else "" }} warten auf den nächsten Scan.
-  </div>
-  {% endif %}
 
   {% if plain_groups %}
-  <div class="pd-section" style="margin-top:14px;">Nur über den Dateinamen auffindbar <span style="font-weight:normal; text-transform:none; letter-spacing:normal;">· erwartet</span></div>
+  <div class="pd-section" style="margin-top:14px;">Nur über den Dateinamen auffindbar <span style="font-weight:normal; text-transform:none; letter-spacing:normal;">· normal</span></div>
   {% for g in plain_groups %}
   <details class="problem-docs" style="margin-bottom:8px;">
     <summary class="problem-docs-summary pd-summary">
       <span class="status-dot ok pd-dot"></span>
       <span class="pd-main">
         <span class="pd-title">{{ g.title }} <span class="problem-docs-badge">{{ g.total|fmt_n }}</span></span>
-        <span class="pd-formats">{{ ext_summary(g.exts) }}</span>
       </span>
       {% if g.key == 'bilder' %}<a href="/" class="problem-doc-reason" style="margin-left:auto; flex:0 0 auto; text-transform:none; letter-spacing:normal; font-weight:normal;" onclick="event.stopPropagation()">→ {{ g.hint }}</a>{% endif %}
     </summary>

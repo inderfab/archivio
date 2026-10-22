@@ -8,7 +8,7 @@ def test_supported_includes_every_reader(tmp_db):
 
     sup = _supported_extensions()
     assert set(_REGISTRY) <= sup
-    assert ".doc" in sup and ".htm" in sup and ".xml" in sup
+    assert ".doc" in sup and ".htm" in sup and ".xml" in sup and ".xls" in sup
 
 
 def test_extract_html_keeps_text_drops_markup(tmp_path):
@@ -22,8 +22,8 @@ def test_extract_html_keeps_text_drops_markup(tmp_path):
     assert "var a" not in text and "x{}" not in text
 
 
-def test_migration_038_requeues_only_small_readable_listed_files(tmp_db):
-    from db.migrations import _m038
+def test_requeue_only_small_readable_listed_files(tmp_db):
+    from db.migrations import requeue_newly_readable
 
     p = queries.insert_project(tmp_db, "P", "/scan")
     rows = [("a.doc", ".doc", 1000, "listed"), ("b.rtf", ".rtf", 1000, "unsupported"),
@@ -34,7 +34,7 @@ def test_migration_038_requeues_only_small_readable_listed_files(tmp_db):
             "INSERT INTO documents (project_id, hash, filename, extension, filesize, extraction_status) "
             "VALUES (?,?,?,?,?,?)", (p, f"h{i}", name, ext, size, st))
     tmp_db.commit()
-    _m038(tmp_db)
+    requeue_newly_readable(tmp_db)
     st = {r["filename"]: r["extraction_status"] for r in tmp_db.execute("SELECT filename, extraction_status FROM documents")}
     assert st["a.doc"] == "pending" and st["b.rtf"] == "pending"
     assert st["gross.doc"] == "listed" and st["c.jpg"] == "listed" and st["d.pdf"] == "listed"

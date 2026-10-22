@@ -1,5 +1,6 @@
+{% if reason %}<div class="problem-doc-row" style="color:var(--text-2);">Grund: {{ reason }}</div>{% endif %}
 {% if not can_read and art == 'unsupported' %}
-<div class="problem-doc-row" style="color:var(--text-3);">Für dieses Format hat Archivio keinen Leser. Die Dateien sind über den Dateinamen auffindbar.</div>
+<div class="problem-doc-row" style="color:var(--text-3);">Die Dateien sind trotzdem über den Dateinamen auffindbar.</div>
 {% endif %}
 {% for doc in files %}
 <div class="problem-doc-row problem-doc-error">

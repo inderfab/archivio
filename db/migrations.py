@@ -45,7 +45,9 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "029_chunks_ohne_embedding", _m029)
     _apply(conn, "030_photo_tags_project", _m030)
     _apply(conn, "031_photo_tags_mailbox", _m031)
-    _apply(conn, "038_lesbare_formate_neu_lesen", _m038)
+    # Kein einmaliger Schritt: kommt spaeter ein Leser dazu (z.B. .xls), muessen dessen
+    # bisher nur gelistete Dateien ebenfalls neu eingelesen werden.
+    requeue_newly_readable(conn)
 
 
 def _m030(conn: sqlite3.Connection):
@@ -834,7 +836,7 @@ def _m029(conn: sqlite3.Connection):
         log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
 
 
-def _m038(conn: sqlite3.Connection):
+def requeue_newly_readable(conn: sqlite3.Connection):
     """Seit _supported_extensions() jede Endung mit Leser einschliesst, waeren bisher nur
     gelistete Dateien dieser Formate (v.a. .doc/.rtf in aelteren Installationen) trotzdem
     nie gelesen worden: der Schnellpfad im Scanner ueberspringt 'listed' bei unveraenderter
@@ -851,4 +853,5 @@ def _m038(conn: sqlite3.Connection):
         (*exts, 30 * 1024 * 1024),
     ).rowcount
     conn.commit()
-    log.info("Migration 038: %d bisher nur gelistete Dateien werden neu eingelesen", n)
+    if n:
+        log.info("%d bisher nur gelistete Dateien lesbarer Formate werden neu eingelesen", n)
