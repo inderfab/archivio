@@ -242,7 +242,7 @@ def test_problem_docs_route_renders_all_categories(tmp_db):
     assert "Kein Textinhalt gefunden" in r.text
     assert "riesig.pdf" in r.text
     assert "scan.pdf" in r.text
-    assert "Jetzt scannen" in r.text
+    assert "Trotzdem lesen" in r.text
     files = c.get("/dashboard/problem-docs/files", params={"art": "error", "ext": ".pdf"})
     assert "kaputt.pdf" in files.text
 

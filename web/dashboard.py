@@ -2109,10 +2109,10 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     return results
 
 
-_TEXT_EXTRACTABLE = (
-    ".pdf", ".docx", ".doc", ".dotx", ".xlsx", ".xls", ".xlsm",
-    ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
-)
+# Formate, deren Text Archivio lesen kann -- eine Quelle, die Leser-Tabelle selbst.
+# Vorher eine eigene Liste mit .xls/.msg/.ppt, fuer die es gar keinen Leser gibt.
+from scanner.extractors import _REGISTRY as _EXTRACTOR_REGISTRY
+_TEXT_EXTRACTABLE = tuple(sorted(_EXTRACTOR_REGISTRY))
 
 def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".xlsx":
@@ -2187,11 +2187,9 @@ def _read_issues(error_by_ext: dict[str, int], unsupported_by_ext: dict[str, int
     for ext, n in unsupported_by_ext.items():
         if _format_gruppe(ext) != "office":
             continue
-        can = ext in readable
         rows.append({
-            "ext": ext, "art": "unsupported", "count": n, "can_read": can,
-            "reason": ("In den Einstellungen nicht aktiviert — Archivio kann dieses Format lesen"
-                       if can else "Format wird von Archivio nicht gelesen"),
+            "ext": ext, "art": "unsupported", "count": n, "can_read": ext in readable,
+            "reason": "Archivio hat für dieses Format keinen Leser",
         })
     return sorted(rows, key=lambda r: -r["count"])
 
@@ -2355,7 +2353,11 @@ def _extraction_overview(conn) -> dict:
     format_groups = _format_groups(unsupported_by_ext)
     read_issues = _read_issues(error_by_ext, unsupported_by_ext)
 
+    filename_only_total = sum(g["total"] for g in format_groups)
+
     return {
+        "filename_only_total": filename_only_total,
+        "attention_total":     sum(r["count"] for r in read_issues) + no_text_total + oversized_total,
         "read_issues":         read_issues,
         "read_issue_total":    sum(r["count"] for r in read_issues),
         "total_docs":          total_docs,

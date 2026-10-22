@@ -45,6 +45,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "029_chunks_ohne_embedding", _m029)
     _apply(conn, "030_photo_tags_project", _m030)
     _apply(conn, "031_photo_tags_mailbox", _m031)
+    _apply(conn, "038_lesbare_formate_neu_lesen", _m038)
 
 
 def _m030(conn: sqlite3.Connection):
@@ -831,3 +832,23 @@ def _m029(conn: sqlite3.Connection):
         log.info("document_chunks.embedding entfernt -- VACUUM beim naechsten Start")
     except Exception as exc:
         log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
+
+
+def _m038(conn: sqlite3.Connection):
+    """Seit _supported_extensions() jede Endung mit Leser einschliesst, waeren bisher nur
+    gelistete Dateien dieser Formate (v.a. .doc/.rtf in aelteren Installationen) trotzdem
+    nie gelesen worden: der Schnellpfad im Scanner ueberspringt 'listed' bei unveraenderter
+    Datei. Auf 'pending' setzen, damit der naechste Scan sie einliest. PDFs und zu grosse
+    Dateien bleiben aussen vor (die waren aus anderen Gruenden nur gelistet)."""
+    from scanner.extractors import _REGISTRY
+
+    exts = sorted(e for e in _REGISTRY if e != ".pdf")
+    ph = ",".join("?" * len(exts))
+    n = conn.execute(
+        f"UPDATE documents SET extraction_status = 'pending' "
+        f"WHERE extraction_status IN ('listed', 'unsupported') AND extension IN ({ph}) "
+        f"AND filesize <= ? AND source_type = 'filesystem'",
+        (*exts, 30 * 1024 * 1024),
+    ).rowcount
+    conn.commit()
+    log.info("Migration 038: %d bisher nur gelistete Dateien werden neu eingelesen", n)

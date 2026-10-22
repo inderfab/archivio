@@ -181,11 +181,10 @@
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 T.)</div></div>
-          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Dateien</div></div>
+          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 T., alle)</div></div>
+          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Dateien (30 T., alle)</div></div>
         </div>
         <div style="display:flex; gap:6px;">
-          <button type="submit" form="mcp-filter-form" class="btn btn-sm">Filtern</button>
           <a class="btn btn-sm js-csv" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
         </div>
       </div>
@@ -271,7 +270,7 @@
     </div>
 
     {# ── Dokumentenverarbeitung (unten rechts, bringt ihre eigene Überschrift+Hilfe mit, siehe _problem_docs.html) ── #}
-    <div class="vf-box">
+    <div class="vf-box" style="height:auto; overflow:visible;">
       <div id="problem-docs-container" class="vf-scroll" style="border-top:none;"
            hx-get="/dashboard/problem-docs"
            hx-trigger="load, archivio:scanComplete from:body"

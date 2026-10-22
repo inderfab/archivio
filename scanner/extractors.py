@@ -189,6 +189,38 @@ def extract_txt(path: Path) -> tuple[str, str]:
     raise ExtractionError(f"Cannot decode {path}")
 
 
+def extract_html(path: Path) -> tuple[str, str]:
+    """HTML/XML: nur der Text zwischen den Tags (Skripte und Stile weggelassen)."""
+    from html.parser import HTMLParser
+
+    raw, _ = extract_txt(path)
+
+    class _Text(HTMLParser):
+        def __init__(self):
+            super().__init__(convert_charrefs=True)
+            self.parts: list[str] = []
+            self._skip = 0
+
+        def handle_starttag(self, tag, attrs):
+            if tag in ("script", "style"):
+                self._skip += 1
+
+        def handle_endtag(self, tag):
+            if tag in ("script", "style") and self._skip:
+                self._skip -= 1
+
+        def handle_data(self, data):
+            if not self._skip and data.strip():
+                self.parts.append(data.strip())
+
+    p = _Text()
+    try:
+        p.feed(raw)
+    except Exception as exc:
+        raise ExtractionError(f"HTML/XML nicht lesbar: {exc}")
+    return "\n".join(p.parts), ""
+
+
 # ── PDF ───────────────────────────────────────────────────────────────────────
 
 def _has_mojibake(pages: list[dict]) -> bool:
@@ -751,6 +783,10 @@ _REGISTRY: dict[str, callable] = {
     ".xlsx": extract_xlsx,
     ".eml":  extract_eml,
     ".rtf":  extract_rtf,
+    ".csv":  extract_txt,
+    ".htm":  extract_html,
+    ".html": extract_html,
+    ".xml":  extract_html,
 }
 
 

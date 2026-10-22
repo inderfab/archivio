@@ -13,16 +13,16 @@
   </div>
   {% endfor %}
 {% endmacro %}
-<div id="problem-docs-container" style="flex:1; min-height:0; display:flex; flex-direction:column;">
+<div id="problem-docs-container">
   <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; position:relative; margin-bottom:12px;">
     <span>Dokumentenverarbeitung</span>
     <a class="btn btn-sm js-csv" href="/docs-log/export.csv" style="margin-left:auto; margin-right:8px; display:inline-flex; align-items:center; gap:5px; text-transform:none; letter-spacing:normal; font-weight:normal;">{{ icon_download() }} CSV</a>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel" style="max-height:70vh; overflow-y:auto;">
       <p><strong>Durchsuchbar</strong> sind Dokumente, deren Text gelesen werden konnte. Alles andere ist trotzdem über den Dateinamen auffindbar.</p>
-      <p><strong>Fehler bei der Extraktion (rot):</strong> Der Inhalt sollte lesbar sein, ist es aber nicht. Mögliche Gründe: die Datei ist passwortgeschützt oder gesperrt, beschädigt, war beim Scan von einem anderen Programm geöffnet, oder das Format wird nicht gelesen (z. B. .xls, .ppt, .msg). Bei .doc und .rtf kann Archivio den Inhalt lesen, wenn das Format in den Einstellungen aktiviert ist. «Nochmals versuchen» hilft, wenn der Grund vorübergehend war (Datei war gesperrt), nicht bei Passwortschutz oder nicht gelesenen Formaten.</p>
+      <p><strong>Fehler bei der Extraktion (rot):</strong> Der Inhalt sollte lesbar sein, ist es aber nicht. Mögliche Gründe: die Datei ist passwortgeschützt oder gesperrt, beschädigt, war beim Scan von einem anderen Programm geöffnet, oder Archivio hat für das Format keinen Leser (z. B. .xls, .ppt, .msg). «Nochmals versuchen» hilft, wenn der Grund vorübergehend war (Datei war gesperrt), nicht bei Passwortschutz oder nicht gelesenen Formaten.</p>
       <p><strong>Kein Textinhalt gefunden (grau):</strong> Die Datei wurde gelesen, enthält aber keinen Text, z. B. ein gescanntes PDF oder ein Plan ohne Textebene. Bei Plänen oft normal.</p>
-      <p><strong>Zu gross (grau):</strong> Die Datei überschreitet die Grössengrenze für die automatische Extraktion. Ein Klick auf «Jetzt scannen» liest sie trotzdem, das kann dauern.</p>
+      <p><strong>Zu gross (grau):</strong> Die Datei überschreitet die Grössengrenze für die automatische Extraktion. Ein Klick auf «Trotzdem lesen» liest sie, das kann dauern.</p>
       <p><strong>Warten auf den nächsten Scan:</strong> Neu gefunden, noch nicht verarbeitet. Kein Handlungsbedarf.</p>
       <p><strong>Nur über den Dateinamen auffindbar (grün):</strong> Bilder (zusätzlich unter «Fotos»), CAD- und Geodaten sowie Sonstiges wie Archive, Videos, Programmdateien oder Dateien ohne Endung. Bei diesen Formaten gibt es keinen Text zu lesen. Erwartet, kein Handlungsbedarf.</p>
     </div>
@@ -43,10 +43,11 @@
   <div style="display:flex; gap:20px; margin-bottom:14px;">
     <div><div class="pd-big">{{ total_docs|fmt_n }}</div><div class="pd-cap">Dokumente</div></div>
     <div><div class="pd-big">{{ searchable_total|fmt_n }}</div><div class="pd-cap">mit durchsuchbarem Inhalt</div></div>
-    <div><div class="pd-big">{{ (unsupported_total + oversized_total)|fmt_n }}</div><div class="pd-cap">nur über den Dateinamen</div></div>
+    <div><div class="pd-big">{{ attention_total|fmt_n }}</div><div class="pd-cap">brauchen Aufmerksamkeit</div></div>
+    <div><div class="pd-big">{{ filename_only_total|fmt_n }}</div><div class="pd-cap">nur über den Dateinamen</div></div>
   </div>
 
-  <div style="flex:1; min-height:0; overflow-y:auto; padding-right:2px;">
+  <div>
   {% set plain_groups = format_groups %}
   {% set has_attention = read_issue_total > 0 or no_text_total > 0 or oversized_total > 0 %}
 
@@ -118,13 +119,13 @@
         <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
                 onclick="helperReveal(this.dataset.path)"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Im Finder
+          Im Finder zeigen
         </button>
         {% endif %}
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Jetzt neu scannen
+          Nochmals versuchen
         </button>
       </div>
       {% endfor %}
@@ -153,7 +154,7 @@
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Jetzt scannen
+          Trotzdem lesen
         </button>
       </div>
       {% endfor %}

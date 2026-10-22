@@ -1,5 +1,5 @@
 {% if not can_read and art == 'unsupported' %}
-<div class="problem-doc-row" style="color:var(--text-3);">Dieses Format kann Archivio nicht lesen — «Nochmals versuchen» wäre wirkungslos.</div>
+<div class="problem-doc-row" style="color:var(--text-3);">Für dieses Format hat Archivio keinen Leser. Die Dateien sind über den Dateinamen auffindbar.</div>
 {% endif %}
 {% for doc in files %}
 <div class="problem-doc-row problem-doc-error">
@@ -9,7 +9,7 @@
   <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
           onclick="helperReveal(this.dataset.path)"
           style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-    Im Finder
+    Im Finder zeigen
   </button>
   {% endif %}
   {% if can_read %}
