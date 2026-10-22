@@ -21,10 +21,6 @@
   .vf-stat-value { font-size: 15px; font-weight: 700; }
   .vf-stat-label { font-size: 10px; color: var(--text-2); }
   .vf-empty { color: var(--text-3); font-size: 12px; font-style: italic; }
-  #search-chart-btn.active, #search-chart-range-30.active, #search-chart-range-all.active,
-  #scan-chart-btn.active, #scan-chart-range-30.active, #scan-chart-range-all.active {
-    background: var(--accent); color: #fff; border-color: var(--accent);
-  }
 
   .vf-filters { display: flex; gap: 6px; flex-wrap: wrap; align-items: center; margin-bottom: 8px; }
   .vf-filters select, .vf-filters input {
@@ -143,19 +139,12 @@
         <div style="display:flex; gap:16px;">
           <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 T.)</div></div>
           <div><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Median Dauer</div></div>
+          <div><div class="vf-stat-value">{{ search_p90_ms|fmt_ms }}</div><div class="vf-stat-label">Langsamste 10 %</div></div>
           <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">0 Treffer</div></div>
         </div>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-sm" id="search-chart-btn" onclick="toggleSearchChart()">Grafik</button>
           {% if search_entries %}<a class="btn btn-sm js-csv" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
         </div>
-      </div>
-      <div id="search-chart-panel" style="display:none; flex:1; min-height:0; flex-direction:column;">
-        <div style="display:flex; gap:6px; margin-bottom:8px;">
-          <button type="button" class="btn btn-sm" id="search-chart-range-30" onclick="loadSearchChart('30')">Letzter Monat</button>
-          <button type="button" class="btn btn-sm" id="search-chart-range-all" onclick="loadSearchChart('all')">Gesamt</button>
-        </div>
-        <div id="search-chart-svg-wrap" style="flex:1; min-height:0; overflow-y:auto;"></div>
       </div>
       {% if not search_entries %}
       <p class="vf-empty">Noch keine protokollierten Suchen.</p>
@@ -241,26 +230,18 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
-          <p>Die Grafik zeigt pro Tag die gesamte Scandauer, die Spitzenwerte bei Speicher und CPU und die neu gefundenen Dateien. Der CSV-Export eignet sich für Supportanfragen.</p>
+          <p><strong>Letzter Gesamtscan:</strong> Zeitraum des letzten Scans über alle Projekte, von Start bis Ende. <strong>Speicher-Spitze:</strong> höchster Speicherbedarf eines Scans in 30 Tagen, im Vergleich zum Arbeitsspeicher des Macs. <strong>Zuletzt neue Dateien:</strong> wann ein Scan zuletzt etwas Neues gefunden hat. Der CSV-Export eignet sich für Supportanfragen.</p>
         </div>
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ scan_total_30d }}</div><div class="vf-stat-label">Scans (30 T.)</div></div>
-          <div><div class="vf-stat-value">{{ scan_median_s|fmt_duration }}</div><div class="vf-stat-label">Median Dauer</div></div>
-          <div><div class="vf-stat-value">{{ scan_errors_30d }}</div><div class="vf-stat-label">Fehler</div></div>
+          <div title="Letzter Scan über alle Projekte (Sammel-Scan), tatsächlich von Start bis Ende gemessen"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
+          <div title="Höchster Speicherbedarf eines Scans in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">{{ scan_peak_mem_sub }}</div></div>
+          <div title="Wann ein Scan zuletzt neue Dateien gefunden hat"><div class="vf-stat-value">{{ last_new_files_label }}</div><div class="vf-stat-label">Zuletzt neue Dateien</div></div>
         </div>
         <div style="display:flex; gap:6px;">
-          <button type="button" class="btn btn-sm" id="scan-chart-btn" onclick="toggleScanChart()">Grafik</button>
           {% if groups %}<a class="btn btn-sm js-csv" href="/scan-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
         </div>
-      </div>
-      <div id="scan-chart-panel" style="display:none; flex:1; min-height:0; flex-direction:column;">
-        <div style="display:flex; gap:6px; margin-bottom:8px;">
-          <button type="button" class="btn btn-sm" id="scan-chart-range-30" onclick="loadScanChart('30')">Letzter Monat</button>
-          <button type="button" class="btn btn-sm" id="scan-chart-range-all" onclick="loadScanChart('all')">Gesamt</button>
-        </div>
-        <div id="scan-chart-svg-wrap" style="flex:1; min-height:0; overflow-y:auto;"></div>
       </div>
       {% if not groups %}
       <p class="vf-empty">Noch keine protokollierten Scans.</p>
@@ -299,70 +280,6 @@
 </div>
 
 <script>
-var _searchChartOpen = false;
-var _searchChartLastRange = null;
-
-function toggleSearchChart() {
-  _searchChartOpen = !_searchChartOpen;
-  var panel = document.getElementById('search-chart-panel');
-  var list  = document.getElementById('search-list-wrap');
-  var empty = document.querySelector('.vf-box .vf-empty');
-  panel.style.display = _searchChartOpen ? 'flex' : 'none';
-  if (list) list.style.display = _searchChartOpen ? 'none' : '';
-  if (empty) empty.style.display = _searchChartOpen ? 'none' : '';
-  document.getElementById('search-chart-btn').classList.toggle('active', _searchChartOpen);
-  if (_searchChartOpen && !_searchChartLastRange) loadSearchChart('30');
-}
-
-function loadSearchChart(range) {
-  _searchChartLastRange = range;
-  document.getElementById('search-chart-range-30').classList.toggle('active', range === '30');
-  document.getElementById('search-chart-range-all').classList.toggle('active', range === 'all');
-  var wrap = document.getElementById('search-chart-svg-wrap');
-  wrap.innerHTML = '<p class="vf-empty">Lädt…</p>';
-  fetch('/search-log/chart-data?range=' + range)
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      if (!rows.length) { wrap.innerHTML = '<p class="vf-empty">Keine Daten im gewählten Zeitraum.</p>'; return; }
-      wrap.innerHTML =
-        buildBarChart(rows, 'count', 'Suchen pro Tag', '#16a34a') +
-        buildBarChart(rows, 'median_ms', 'Typische Dauer pro Tag, Median (ms)', '#2563eb') +
-        buildBarChart(rows, 'p90_ms', 'Langsamste 10 % pro Tag (ms)', '#d97706');
-    })
-    .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
-}
-
-var _scanChartOpen = false;
-var _scanChartLastRange = null;
-
-function toggleScanChart() {
-  _scanChartOpen = !_scanChartOpen;
-  document.getElementById('scan-chart-panel').style.display = _scanChartOpen ? 'flex' : 'none';
-  var list = document.getElementById('scan-list-wrap');
-  if (list) list.style.display = _scanChartOpen ? 'none' : '';
-  document.getElementById('scan-chart-btn').classList.toggle('active', _scanChartOpen);
-  if (_scanChartOpen && !_scanChartLastRange) loadScanChart('30');
-}
-
-function loadScanChart(range) {
-  _scanChartLastRange = range;
-  document.getElementById('scan-chart-range-30').classList.toggle('active', range === '30');
-  document.getElementById('scan-chart-range-all').classList.toggle('active', range === 'all');
-  var wrap = document.getElementById('scan-chart-svg-wrap');
-  wrap.innerHTML = '<p class="vf-empty">Lädt…</p>';
-  fetch('/scan-log/chart-data?range=' + range)
-    .then(function(r) { return r.json(); })
-    .then(function(rows) {
-      if (!rows.length) { wrap.innerHTML = '<p class="vf-empty">Keine Scans im gewählten Zeitraum.</p>'; return; }
-      wrap.innerHTML =
-        buildBarChart(rows, 'dauer_min', 'Scandauer pro Tag, gesamt (Minuten)', '#16a34a') +
-        buildBarChart(rows, 'speicher_mb', 'Spitzenwert Speicher pro Tag (MB)', '#2563eb') +
-        buildBarChart(rows, 'cpu_pct', 'Spitzenwert CPU pro Tag (%)', '#d97706') +
-        buildBarChart(rows, 'neu', 'Neu gefundene Dateien pro Tag', '#7c3aed');
-    })
-    .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
-}
-
 // ── Export: Klartext / Anonymisiert (Dialog, gilt für den jeweils angeklickten Export) ──
 var exportMode = 'klartext';
 var exportUrl = '';
@@ -401,26 +318,5 @@ document.addEventListener('click', function(e) {
   openExportDialog(a.getAttribute('href'), (heading || 'Verlauf').trim() + ' exportieren', 'Eine CSV-Datei.');
 });
 
-function buildBarChart(rows, key, title, color) {
-  var w = 600, barGap = 2, padLeft = 4, padBottom = 16, chartH = 70;
-  var barW = Math.max(2, (w - padLeft * 2) / rows.length - barGap);
-  var max = Math.max.apply(null, rows.map(function(r) { return r[key]; })) || 1;
-  var bars = rows.map(function(r, i) {
-    var h = Math.max(1, (r[key] / max) * chartH);
-    var x = padLeft + i * (barW + barGap);
-    var y = chartH - h;
-    var label = r.day.slice(5) + ': ' + r[key];
-    return '<rect x="' + x + '" y="' + y + '" width="' + barW + '" height="' + h + '" fill="' + color + '"><title>' + label + '</title></rect>';
-  }).join('');
-  var firstDay = rows[0].day, lastDay = rows[rows.length - 1].day;
-  return '<div style="margin-bottom:16px;">' +
-    '<div style="font-size:11px; color:var(--text-2); margin-bottom:4px;">' + title + '</div>' +
-    '<svg viewBox="0 0 ' + w + ' ' + (chartH + padBottom) + '" style="width:100%; height:' + (chartH + padBottom) + 'px;">' +
-      bars +
-      '<text x="' + padLeft + '" y="' + (chartH + 12) + '" font-size="9" fill="currentColor" opacity="0.6">' + firstDay + '</text>' +
-      '<text x="' + (w - padLeft) + '" y="' + (chartH + 12) + '" font-size="9" fill="currentColor" opacity="0.6" text-anchor="end">' + lastDay + '</text>' +
-    '</svg>' +
-  '</div>';
-}
 </script>
 {% endblock %}
