@@ -1334,8 +1334,6 @@ def _scan_und_suche_context(conn) -> dict:
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
-    from web.scan_status import age_label
-
     scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
     peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
     # psutil zaehlt pro Kern bis 100 % -- "102 %" versteht niemand. Umgerechnet auf die
@@ -1356,15 +1354,11 @@ def _scan_und_suche_context(conn) -> dict:
         t0 = datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00")).astimezone()
         t1 = datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00")).astimezone()
         mins = max(1, round((t1 - t0).total_seconds() / 60))
-        last_batch_label = f"{t0:%H:%M}–{t1:%H:%M}"
-        last_batch_sub = f"Gesamtscan {t0:%d.%m.} · {mins} Min."
+        last_batch_label = f"{mins} Min." if mins < 120 else f"{mins // 60} Std. {mins % 60} Min."
+        last_batch_sub = f"Letzter Scan, {t0:%d.%m.} {t0:%H:%M}–{t1:%H:%M}"
     else:
-        last_batch_label, last_batch_sub = "—", "Letzter Gesamtscan"
+        last_batch_label, last_batch_sub = "—", "Letzter Scan"
 
-    new_row = conn.execute(
-        "SELECT COALESCE(finished_at, started_at) AS t FROM scan_log "
-        "WHERE new_count > 0 ORDER BY started_at DESC LIMIT 1").fetchone()
-    last_new_files_label = (age_label(new_row["t"]) if new_row else None) or "—"
 
     return {
         "last_batch_label":     last_batch_label,
@@ -1374,7 +1368,6 @@ def _scan_und_suche_context(conn) -> dict:
         "scan_peak_mem_title":  scan_peak_mem_title,
         "scan_peak_cpu_label":  scan_peak_cpu_label,
         "cpu_cores":            cores,
-        "last_new_files_label": last_new_files_label,
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

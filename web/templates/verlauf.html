@@ -19,7 +19,10 @@
     margin: 0 0 8px; display: flex; align-items: center; justify-content: space-between; position: relative;
   }
 
-  .vf-stats { display: flex; gap: 16px; margin-bottom: 8px; }
+  .vf-stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; margin-bottom: 10px; }
+  .vf-stats > div { min-width: 0; }
+  .vf-h2-csv { margin-left: auto; margin-right: 8px; display: inline-flex; align-items: center; gap: 5px;
+               text-transform: none; letter-spacing: normal; font-weight: normal; }
   .vf-stat-value { font-size: 15px; font-weight: 700; }
   .vf-stat-label { font-size: 10px; color: var(--text-2); }
   .vf-empty { color: var(--text-3); font-size: 12px; font-style: italic; }
@@ -134,21 +137,17 @@
     <div class="vf-box">
       <h2>
         <span>Such-Verlauf</span>
+        {% if search_entries %}<a class="btn btn-sm js-csv vf-h2-csv" href="/search-log/export.csv">{{ icon_download() }} CSV</a>{% endif %}
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Listet jede Suche auf: Anfrage, Trefferzahl, Dauer, und ob danach tatsächlich ein Treffer geöffnet wurde. Ohne Bezug zu Person oder Gerät.</p>
           <p>Damit kann nachvollzogen werden, ob es Suchen ohne Treffer gibt oder ob es sehr lange geht, bis etwas angezeigt wird. Bei Problemen gerne Feedback senden.</p>
         </div>
       </h2>
-      <div class="vf-stats" style="justify-content:space-between;">
-        <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 Tage)</div></div>
-          <div title="Die Hälfte der Suchen ist schneller, die Hälfte langsamer"><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Typische Dauer</div></div>
-          <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">Ohne Treffer</div></div>
-        </div>
-        <div style="display:flex; gap:6px;">
-          {% if search_entries %}<a class="btn btn-sm js-csv" href="/search-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
-        </div>
+      <div class="vf-stats">
+        <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 Tage)</div></div>
+        <div title="Die Hälfte der Suchen ist schneller, die Hälfte langsamer"><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Typische Dauer</div></div>
+        <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">Ohne Treffer</div></div>
       </div>
       {% if not search_entries %}
       <p class="vf-empty">Noch keine protokollierten Suchen.</p>
@@ -176,19 +175,15 @@
     <div class="vf-box">
       <h2>
         <span>KI-Schnittstelle (MCP)</span>
+        <a class="btn btn-sm js-csv vf-h2-csv" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}">{{ icon_download() }} CSV</a>
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Jede Suche und jedes vollständig geladene Dokument über die Claude/MCP-Schnittstelle, inklusive der Fälle, in denen etwas blockiert wurde (Norm oder <a href="/sperrliste">Sperrliste</a>). Dieses Protokoll ist selbst nicht über MCP abfragbar.</p>
         </div>
       </h2>
-      <div class="vf-stats" style="justify-content:space-between;">
-        <div style="display:flex; gap:16px;">
-          <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 Tage)</div></div>
-          <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Gelesene Dateien (30 Tage)</div></div>
-        </div>
-        <div style="display:flex; gap:6px;">
-          <a class="btn btn-sm js-csv" href="/mcp-log/export.csv?project_id={{ filter_project_id }}&status={{ filter_status }}&date_from={{ filter_from }}&date_to={{ filter_to }}" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>
-        </div>
+      <div class="vf-stats">
+        <div><div class="vf-stat-value">{{ mcp_total_30d }}</div><div class="vf-stat-label">Zugriffe (30 Tage)</div></div>
+        <div><div class="vf-stat-value">{{ mcp_files_30d }}</div><div class="vf-stat-label">Dateien (30 Tage)</div></div>
       </div>
       <form id="mcp-filter-form" class="vf-filters" method="get" action="/verlauf">
         <select name="project_id" onchange="this.form.submit()">
@@ -230,22 +225,17 @@
     <div class="vf-box" style="height:auto; min-height:460px;">
       <h2>
         <span>Scan-Verlauf</span>
+        {% if groups %}<a class="btn btn-sm js-csv vf-h2-csv" href="/scan-log/export.csv">{{ icon_download() }} CSV</a>{% endif %}
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
-          <p><strong>Letzter Gesamtscan:</strong> Zeitraum des letzten Scans über alle Projekte, von Start bis Ende. <strong>Speicher-Spitze:</strong> höchster Speicherbedarf eines Scans in 30 Tagen, im Vergleich zum Arbeitsspeicher des Macs. <strong>CPU-Spitze:</strong> höchste Prozessorauslastung eines Scans in 30 Tagen (100 % entsprechen einem vollen Kern). <strong>Zuletzt neue Dateien:</strong> wann ein Scan zuletzt etwas Neues gefunden hat. Der CSV-Export eignet sich für Supportanfragen.</p>
+          <p><strong>Dauer des letzten Scans</strong> über alle Projekte, von Start bis Ende. <strong>max. RAM:</strong> höchster Speicherbedarf eines Scans in den letzten 30 Tagen. <strong>max. CPU:</strong> höchste Auslastung der Rechenleistung dieses Macs in den letzten 30 Tagen. Ein roter Punkt bedeutet, dass der Scan nicht durchlief, der Grund steht in der Zeile. Der CSV-Export eignet sich für Supportanfragen.</p>
         </div>
       </h2>
-      <div class="vf-stats" style="justify-content:space-between;">
-        <div style="display:flex; gap:16px;">
-          <div title="Letzter Scan über alle Projekte, von Start bis Ende"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
-          <div title="{{ scan_peak_mem_title }}"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">{{ scan_peak_mem_sub }}</div></div>
-          <div title="Höchste Auslastung der Rechenleistung dieses Macs durch einen Scan in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">Prozessor, höchster Wert</div></div>
-          <div title="Wann ein Scan zuletzt neue Dateien gefunden hat"><div class="vf-stat-value">{{ last_new_files_label }}</div><div class="vf-stat-label">Zuletzt neue Dateien</div></div>
-        </div>
-        <div style="display:flex; gap:6px;">
-          {% if groups %}<a class="btn btn-sm js-csv" href="/scan-log/export.csv" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} CSV</a>{% endif %}
-        </div>
+      <div class="vf-stats">
+        <div title="Letzter Scan über alle Projekte, von Start bis Ende"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
+        <div title="{{ scan_peak_mem_title }}"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">max. RAM</div></div>
+        <div title="Höchste Auslastung der Rechenleistung dieses Macs durch einen Scan in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">max. CPU</div></div>
       </div>
       {% if not groups %}
       <p class="vf-empty">Noch keine protokollierten Scans.</p>

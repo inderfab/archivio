@@ -39,11 +39,11 @@
   </div>
   {% endif %}
 
-  <div style="display:flex; gap:20px; margin-bottom:14px;">
-    <div><div class="pd-big">{{ total_docs|fmt_n }}</div><div class="pd-cap">Dokumente</div></div>
-    <div><div class="pd-big">{{ searchable_total|fmt_n }}</div><div class="pd-cap">Inhalt durchsuchbar</div></div>
-    <div><div class="pd-big">{{ attention_total|fmt_n }}</div><div class="pd-cap">brauchen Aufmerksamkeit</div></div>
-    <div><div class="pd-big">{{ filename_only_total|fmt_n }}</div><div class="pd-cap">nur über Dateinamen</div></div>
+  <div class="vf-stats">
+    <div><div class="vf-stat-value">{{ total_docs|fmt_n }}</div><div class="vf-stat-label">Dokumente</div></div>
+    <div><div class="vf-stat-value">{{ searchable_total|fmt_n }}</div><div class="vf-stat-label">Durchsuchbar</div></div>
+    <div><div class="vf-stat-value">{{ attention_total|fmt_n }}</div><div class="vf-stat-label">Probleme</div></div>
+    <div><div class="vf-stat-value">{{ filename_only_total|fmt_n }}</div><div class="vf-stat-label">Nur Dateinamen</div></div>
   </div>
 
   <div>
@@ -146,6 +146,13 @@
         <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }}"></span>
         <span class="problem-doc-name" title="{{ doc.path or doc.filename }}">{{ doc.filename }}</span>
         <span style="flex-shrink:0; color:var(--text-3);">{{ doc.filesize|fmt_size }}</span>
+        {% if doc.path %}
+        <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
+                onclick="helperReveal(this.dataset.path)"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Im Finder zeigen
+        </button>
+        {% endif %}
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
