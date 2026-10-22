@@ -5,6 +5,7 @@ import logging.handlers
 import os
 import re
 import signal
+import statistics
 import subprocess
 import sys
 import threading
@@ -38,7 +39,7 @@ def _setup_logging() -> None:
 _setup_logging()
 
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from db import connection
@@ -1184,81 +1185,89 @@ def _mcp_log_context(conn, project_id: str, status: str, date_from: str, date_to
     }
 
 
+def _csv_response(text: str, name: str, mode: str):
+    return HTMLResponse(
+        text, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={name}-{mode}.csv"},
+    )
+
+
 @app.get("/mcp-log/export.csv")
 async def mcp_log_export(
     project_id: str = Query(default=""),
     status:     str = Query(default=""),
     date_from:  str = Query(default=""),
     date_to:    str = Query(default=""),
+    modus:      str = Query(default=""),
 ):
-    import csv
-    import io
-    import json as _json
+    from web import export_csv
 
+    mode = export_csv.norm_mode(modus)
     conn = connection.get_connection()
-    clause, params = _mcp_log_query(project_id, status, date_from, date_to)
-    rows = conn.execute(
-        f"SELECT * FROM mcp_log {clause} ORDER BY ts DESC LIMIT 5000", params
-    ).fetchall()
-    projects   = conn.execute("SELECT id, name FROM projects").fetchall()
-    proj_names = {p["id"]: p["name"] for p in projects}
-    conn.close()
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Zeitstempel", "Tool", "Anfrage", "Projekt", "Status",
-                      "Übermittelte Dateien", "Zeichen", "Blockiert (Grund)"])
-    for r in rows:
-        files   = _json.loads(r["files_json"] or "[]")
-        blocked = _json.loads(r["blocked_json"] or "[]")
-        writer.writerow([
-            r["ts"], r["tool"], r["query"] or "",
-            proj_names.get(r["project_id"], ""), r["status"],
-            "; ".join(f.get("filename") or f.get("path") or "" for f in files),
-            r["chars_sent"],
-            "; ".join(
-                f"{b.get('filename') or b.get('path')} ({b.get('reason')})"
-                if (b.get("filename") or b.get("path")) else (b.get("reason") or "")
-                for b in blocked
-            ),
-        ])
-    return HTMLResponse(
-        buf.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=claude-zugriffe.csv"},
-    )
+    try:
+        clause, params = _mcp_log_query(project_id, status, date_from, date_to)
+        text = export_csv.mcp_csv(conn, mode, clause, params)
+    finally:
+        conn.close()
+    return _csv_response(text, "claude-zugriffe", mode)
 
 
 @app.get("/search-log/export.csv")
-async def search_log_export():
-    """CSV-Export des kompletten Suche-Protokolls (siehe scanner/search_log.py) --
-    dient als Rohdaten-Grundlage, um die Suche später anhand echter Anfragen zu
-    verbessern (z.B. häufige Anfragen ohne Treffer oder ohne Klick), ausserhalb
-    von Archivio selbst auszuwerten (Excel/Numbers). Ohne Filter-Parameter --
-    anders als /mcp-log hat die Systemstatus-Seite keine Filterleiste dafür,
-    ein kompletter Export reicht für diesen Zweck."""
-    import csv
-    import io
+async def search_log_export(modus: str = Query(default="")):
+    """CSV-Export des Suche-Protokolls (siehe scanner/search_log.py) als Rohdaten, um die
+    Suche anhand echter Anfragen zu verbessern, ausserhalb von Archivio auszuwerten.
+    modus=klartext|anonym (Standard anonym), siehe web/export_csv.py."""
+    from web import export_csv
 
+    mode = export_csv.norm_mode(modus)
     conn = connection.get_connection()
-    rows = conn.execute("SELECT * FROM search_log ORDER BY ts DESC LIMIT 20000").fetchall()
-    proj_names = {p["id"]: p["name"] for p in conn.execute("SELECT id, name FROM projects")}
-    conn.close()
+    try:
+        text = export_csv.search_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "suche-protokoll", mode)
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Zeitstempel", "Art", "Anfrage", "Projekt", "Filter",
-                      "Treffer", "Dauer (ms)", "Klicks"])
-    for r in rows:
-        writer.writerow([
-            r["ts"], "Suche",
-            r["query"] or "", proj_names.get(r["project_id"], ""),
-            r["filters"] or "", r["result_count"], r["duration_ms"], r["clicks"],
-        ])
-    return HTMLResponse(
-        buf.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=suche-protokoll.csv"},
+
+@app.get("/scan-log/export.csv")
+async def scan_log_export(modus: str = Query(default="")):
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        text = export_csv.scan_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "scan-verlauf", mode)
+
+
+@app.get("/docs-log/export.csv")
+async def docs_log_export(modus: str = Query(default="")):
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        text = export_csv.docs_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "dokumentenverarbeitung", mode)
+
+
+@app.get("/verlauf/export.zip")
+async def verlauf_export_zip(modus: str = Query(default="")):
+    """Alle vier Verlaeufe als CSV in einer ZIP-Datei (fuer Supportanfragen)."""
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        data = export_csv.build_zip(conn, mode)
+    finally:
+        conn.close()
+    return Response(
+        data, media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=archivio-verlauf-{mode}.zip"},
     )
 
 
@@ -1276,14 +1285,47 @@ async def search_log_chart_data(range: str = Query(default="30")):
         where = "WHERE ts >= ?"
         params = (since,)
     rows = conn.execute(f"""
-        SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n, AVG(duration_ms) AS avg_ms,
-               SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) AS empty_n
-        FROM search_log {where}
-        GROUP BY day ORDER BY day
+        SELECT substr(ts, 1, 10) AS day, duration_ms, result_count
+        FROM search_log {where} ORDER BY day
+    """, params).fetchall()
+    conn.close()
+    by_day: dict[str, list] = {}
+    for r in rows:
+        by_day.setdefault(r["day"], []).append(r)
+    out = []
+    for day, rs in by_day.items():
+        durs = sorted(r["duration_ms"] or 0 for r in rs)
+        out.append({
+            "day": day, "count": len(rs),
+            "median_ms": round(statistics.median(durs)),
+            "p90_ms": durs[min(len(durs) - 1, int(len(durs) * 0.9))],
+            "empty": sum(1 for r in rs if r["result_count"] == 0),
+        })
+    return JSONResponse(out)
+
+
+@app.get("/scan-log/chart-data")
+async def scan_log_chart_data(range: str = Query(default="30")):
+    """Tageswerte fuers Grafik-Panel im Scan-Verlauf: Gesamtdauer, Spitzen bei Speicher
+    und CPU, neue Dateien. Nur abgeschlossene Scans (status done)."""
+    conn = connection.get_connection()
+    where, params = "WHERE status = 'done'", ()
+    if range != "all":
+        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
+        where += " AND started_at >= ?"
+        params = (since,)
+    rows = conn.execute(f"""
+        SELECT substr(started_at, 1, 10) AS day, COUNT(*) AS n,
+               COALESCE(SUM(duration_s), 0) AS dur_s,
+               COALESCE(MAX(peak_memory_mb), 0) AS mem_mb,
+               COALESCE(MAX(peak_cpu_pct), 0) AS cpu,
+               COALESCE(SUM(new_count), 0) AS new_files
+        FROM scan_log {where} GROUP BY day ORDER BY day
     """, params).fetchall()
     conn.close()
     return JSONResponse([
-        {"day": r["day"], "count": r["n"], "avg_ms": round(r["avg_ms"] or 0), "empty": r["empty_n"]}
+        {"day": r["day"], "scans": r["n"], "dauer_min": round(r["dur_s"] / 60, 1),
+         "speicher_mb": round(r["mem_mb"]), "cpu_pct": round(r["cpu"]), "neu": r["new_files"]}
         for r in rows
     ])
 
@@ -1328,8 +1370,10 @@ def _scan_und_suche_context(conn) -> dict:
     ).fetchall()
 
     search_total_30d = len(search_recent)
+    # Median statt Durchschnitt: einzelne Ausreisser (Satz-Anfragen mit 30-50 s) verzerren
+    # den Durchschnitt so stark, dass er nichts ueber die typische Suche aussagt.
     search_avg_ms = (
-        sum(r["duration_ms"] or 0 for r in search_recent) / search_total_30d if search_total_30d else 0
+        statistics.median(r["duration_ms"] or 0 for r in search_recent) if search_total_30d else 0
     )
     search_empty_30d = sum(1 for r in search_recent if r["result_count"] == 0)
     # Nur ein einzelner, guenstiger Aufruf pro Seitenaufruf -- kein Sampling waehrend
@@ -1337,7 +1381,13 @@ def _scan_und_suche_context(conn) -> dict:
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
+    scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
+    scan_dur = [s["duration_s"] for s in scan_recent if s["duration_s"] is not None and s["status"] == "done"]
+
     return {
+        "scan_total_30d":   len(scan_recent),
+        "scan_median_s":    statistics.median(scan_dur) if scan_dur else 0,
+        "scan_errors_30d":  sum(s["error_count"] or 0 for s in scan_recent),
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

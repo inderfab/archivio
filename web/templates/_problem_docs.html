@@ -1,6 +1,8 @@
+{% from "_icons.html" import icon_download %}
 <div id="problem-docs-container">
   <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; position:relative; margin-bottom:12px;">
     <span>Dokumentenverarbeitung</span>
+    <a class="btn btn-sm js-csv" href="/docs-log/export.csv" style="margin-left:auto; margin-right:8px; display:inline-flex; align-items:center; gap:5px; text-transform:none; letter-spacing:normal; font-weight:normal;">{{ icon_download() }} CSV</a>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel">
       <p>Übersicht aller Dokumente, deren Inhalt (noch) nicht durchsuchbar ist — aufgeteilt nach Grund. „Nicht unterstützte Dateiformate" ist normal (Bilder, CAD-Dateien, Videos, …), die anderen Kategorien lassen sich zumindest teilweise nachholen.</p>
