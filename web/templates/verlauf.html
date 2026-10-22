@@ -56,22 +56,30 @@
   <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
     <h1 style="margin-bottom:0;">Verlauf</h1>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
-    <div id="export-all" style="margin-left:auto; display:flex; align-items:center; gap:8px;">
-      <div style="display:flex; align-items:center; gap:8px;">
-        <div class="segmented-control" role="group" aria-label="Exportart">
-          <button type="button" class="segmented-btn" data-modus="klartext" onclick="setExportMode('klartext')" style="min-width:0;">Klartext</button>
-          <button type="button" class="segmented-btn" data-modus="anonym" onclick="setExportMode('anonym')" style="min-width:0;">Anonymisiert</button>
-        </div>
-        <a class="btn btn-sm js-csv" href="/verlauf/export.zip" style="display:inline-flex; align-items:center; gap:5px;">{{ icon_download() }} Alle Daten exportieren</a>
-      </div>
-    </div>
+    <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
+            onclick="openExportDialog('/verlauf/export.zip', 'Alle Daten exportieren', 'Such-, Scan- und MCP-Verlauf sowie Dokumentenverarbeitung als CSV in einer ZIP-Datei.')">{{ icon_download() }} Alle Daten exportieren</button>
     <div class="section-help-panel">
       <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
       <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
     </div>
   </div>
 
-  <div id="export-mode-hint" style="font-size:10.5px; color:var(--text-2); max-width:640px; margin:-8px 0 14px auto; text-align:right;"></div>
+  <dialog id="export-dialog" style="margin:auto; border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; width:min(480px, 92vw); background:var(--bg); color:var(--text); box-shadow:0 12px 40px rgba(0,0,0,.25);">
+    <h3 id="export-title" style="margin:0 0 4px; font-size:15px;">Exportieren</h3>
+    <p id="export-sub" style="margin:0 0 14px; font-size:12px; color:var(--text-2);"></p>
+    <div class="segmented-control" role="group" aria-label="Exportart" style="margin-bottom:12px;">
+      <button type="button" class="segmented-btn" data-modus="klartext" onclick="setExportMode('klartext')" style="min-width:120px;">Klartext</button>
+      <button type="button" class="segmented-btn" data-modus="anonym" onclick="setExportMode('anonym')" style="min-width:120px;">Anonymisiert</button>
+    </div>
+    <div style="font-size:12px; line-height:1.55; margin-bottom:18px;">
+      <p data-hint="klartext" style="margin:0 0 6px;"><strong>Klartext:</strong> Projektname, Dateipfad und Suchanfragen werden in Klartext exportiert.</p>
+      <p data-hint="anonym" style="margin:0;"><strong>Anonymisiert:</strong> Projektname wird durch Nummer ersetzt, der Dateipfad wird nicht exportiert, nur die Endung (Dateiformat), und bei der Suche werden nur Kennwerte (Wortanzahl, Länge, Trefferanzahl, Dauer und Klicks) exportiert.</p>
+    </div>
+    <div style="display:flex; justify-content:flex-end; gap:8px;">
+      <button type="button" class="btn btn-sm" onclick="document.getElementById('export-dialog').close()">Abbrechen</button>
+      <button type="button" class="btn btn-sm btn-primary" onclick="runExport()">Jetzt herunterladen</button>
+    </div>
+  </dialog>
 
   {% macro render_scan(s) %}
   <details class="vf-row">
@@ -355,30 +363,42 @@ function loadScanChart(range) {
     .catch(function() { wrap.innerHTML = '<p class="vf-empty">Grafik konnte nicht geladen werden.</p>'; });
 }
 
-// ── Export: Klartext / Anonymisiert (gilt für alle CSV-Knöpfe auf dieser Seite) ──
-var EXPORT_HINTS = {
-  klartext: 'Projektname, Dateipfad und Suchanfragen werden in Klartext exportiert.',
-  anonym: 'Projektname wird durch Nummer ersetzt, der Dateipfad wird nicht exportiert, nur die Endung (Dateiformat), und bei der Suche werden nur Kennwerte (Wortanzahl, Länge, Trefferanzahl, Dauer und Klicks) exportiert.'
-};
-var exportMode = 'anonym';
-try { if (localStorage.getItem('archivio_export_modus') === 'klartext') exportMode = 'klartext'; } catch (e) {}
+// ── Export: Klartext / Anonymisiert (Dialog, gilt für den jeweils angeklickten Export) ──
+var exportMode = 'klartext';
+var exportUrl = '';
 
 function setExportMode(m) {
   exportMode = m;
-  try { localStorage.setItem('archivio_export_modus', m); } catch (e) {}
-  document.querySelectorAll('#export-all .segmented-btn').forEach(function(b) {
+  var dlg = document.getElementById('export-dialog');
+  dlg.querySelectorAll('.segmented-btn').forEach(function(b) {
     b.classList.toggle('active', b.dataset.modus === m);
   });
-  document.getElementById('export-mode-hint').textContent = EXPORT_HINTS[m];
+  dlg.querySelectorAll('[data-hint]').forEach(function(p) {
+    p.style.opacity = p.dataset.hint === m ? '1' : '0.55';
+  });
 }
-setExportMode(exportMode);
 
+function openExportDialog(url, title, sub) {
+  exportUrl = url;
+  document.getElementById('export-title').textContent = title;
+  document.getElementById('export-sub').textContent = sub || '';
+  setExportMode('klartext');
+  document.getElementById('export-dialog').showModal();
+}
+
+function runExport() {
+  document.getElementById('export-dialog').close();
+  window.location.href = exportUrl + (exportUrl.indexOf('?') >= 0 ? '&' : '?') + 'modus=' + exportMode;
+}
+
+// Die CSV-Knöpfe der einzelnen Verläufe öffnen denselben Dialog.
 document.addEventListener('click', function(e) {
   var a = e.target.closest('a.js-csv');
   if (!a) return;
   e.preventDefault();
-  var url = a.getAttribute('href');
-  window.location.href = url + (url.indexOf('?') >= 0 ? '&' : '?') + 'modus=' + exportMode;
+  var box = a.closest('.vf-box, #problem-docs-container');
+  var heading = box ? (box.querySelector('h2 span, .section-title span') || {}).textContent : '';
+  openExportDialog(a.getAttribute('href'), (heading || 'Verlauf').trim() + ' exportieren', 'Eine CSV-Datei.');
 });
 
 function buildBarChart(rows, key, title, color) {
