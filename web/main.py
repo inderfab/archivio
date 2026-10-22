@@ -1271,65 +1271,6 @@ async def verlauf_export_zip(modus: str = Query(default="")):
     )
 
 
-@app.get("/search-log/chart-data")
-async def search_log_chart_data(range: str = Query(default="30")):
-    """Tageswerte fürs Grafik-Panel im Such-Verlauf -- bewusst nur zwei einfache
-    Kennzahlen (Anzahl Suchen, Ø Dauer) statt einer grossen Auswertung, damit das
-    Diagramm ohne externe Bibliothek (kein Internet nötig) mit ein paar SVG-Balken
-    auskommt."""
-    conn = connection.get_connection()
-    where = ""
-    params: tuple = ()
-    if range != "all":
-        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        where = "WHERE ts >= ?"
-        params = (since,)
-    rows = conn.execute(f"""
-        SELECT substr(ts, 1, 10) AS day, duration_ms, result_count
-        FROM search_log {where} ORDER BY day
-    """, params).fetchall()
-    conn.close()
-    by_day: dict[str, list] = {}
-    for r in rows:
-        by_day.setdefault(r["day"], []).append(r)
-    out = []
-    for day, rs in by_day.items():
-        durs = sorted(r["duration_ms"] or 0 for r in rs)
-        out.append({
-            "day": day, "count": len(rs),
-            "median_ms": round(statistics.median(durs)),
-            "p90_ms": durs[min(len(durs) - 1, int(len(durs) * 0.9))],
-            "empty": sum(1 for r in rs if r["result_count"] == 0),
-        })
-    return JSONResponse(out)
-
-
-@app.get("/scan-log/chart-data")
-async def scan_log_chart_data(range: str = Query(default="30")):
-    """Tageswerte fuers Grafik-Panel im Scan-Verlauf: Gesamtdauer, Spitzen bei Speicher
-    und CPU, neue Dateien. Nur abgeschlossene Scans (status done)."""
-    conn = connection.get_connection()
-    where, params = "WHERE status = 'done'", ()
-    if range != "all":
-        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        where += " AND started_at >= ?"
-        params = (since,)
-    rows = conn.execute(f"""
-        SELECT substr(started_at, 1, 10) AS day, COUNT(*) AS n,
-               COALESCE(SUM(duration_s), 0) AS dur_s,
-               COALESCE(MAX(peak_memory_mb), 0) AS mem_mb,
-               COALESCE(MAX(peak_cpu_pct), 0) AS cpu,
-               COALESCE(SUM(new_count), 0) AS new_files
-        FROM scan_log {where} GROUP BY day ORDER BY day
-    """, params).fetchall()
-    conn.close()
-    return JSONResponse([
-        {"day": r["day"], "scans": r["n"], "dauer_min": round(r["dur_s"] / 60, 1),
-         "speicher_mb": round(r["mem_mb"]), "cpu_pct": round(r["cpu"]), "neu": r["new_files"]}
-        for r in rows
-    ])
-
-
 @app.get("/system-status", response_class=RedirectResponse)
 async def system_status_page_redirect():
     # Alte Reiter-URL (bis v3.5.0: eigener "Systemstatus"-Reiter) -- Scan- und
@@ -1381,13 +1322,40 @@ def _scan_und_suche_context(conn) -> dict:
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
+    from web.scan_status import age_label
+
     scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
-    scan_dur = [s["duration_s"] for s in scan_recent if s["duration_s"] is not None and s["status"] == "done"]
+    peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
+    scan_peak_mem_label = f"{peak_mb / 1024:.1f} GB" if peak_mb else "—"
+    scan_peak_mem_sub = (f"Speicher-Spitze · {peak_mb / total_ram_mb * 100:.0f} % RAM"
+                         if peak_mb and total_ram_mb else "Speicher-Spitze (30 T.)")
+
+    # Letzter Gesamtscan: neueste Gruppe mit mehreren Projekten (Sammel-Scan), sonst der letzte Scan.
+    multi = [g for g in groups if g["count"] > 1] or groups[:1]
+    if multi and multi[0]["ts_end"]:
+        g = multi[0]
+        t0 = datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00")).astimezone()
+        t1 = datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00")).astimezone()
+        mins = max(1, round((t1 - t0).total_seconds() / 60))
+        last_batch_label = f"{t0:%H:%M}–{t1:%H:%M}"
+        last_batch_sub = f"Gesamtscan {t0:%d.%m.} · {mins} Min."
+    else:
+        last_batch_label, last_batch_sub = "—", "Letzter Gesamtscan"
+
+    new_row = conn.execute(
+        "SELECT COALESCE(finished_at, started_at) AS t FROM scan_log "
+        "WHERE new_count > 0 ORDER BY started_at DESC LIMIT 1").fetchone()
+    last_new_files_label = (age_label(new_row["t"]) if new_row else None) or "—"
 
     return {
-        "scan_total_30d":   len(scan_recent),
-        "scan_median_s":    statistics.median(scan_dur) if scan_dur else 0,
-        "scan_errors_30d":  sum(s["error_count"] or 0 for s in scan_recent),
+        "last_batch_label":     last_batch_label,
+        "last_batch_sub":       last_batch_sub,
+        "scan_peak_mem_label":  scan_peak_mem_label,
+        "scan_peak_mem_sub":    scan_peak_mem_sub,
+        "last_new_files_label": last_new_files_label,
+        "search_p90_ms": (sorted(r["duration_ms"] or 0 for r in search_recent)
+                          [min(search_total_30d - 1, int(search_total_30d * 0.9))]
+                          if search_total_30d else 0),
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

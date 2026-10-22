@@ -14,6 +14,10 @@ import json
 import zipfile
 from pathlib import Path
 
+# Pro Scan-Zeile im Klartext nur so viele Fehlerdateien: dieselben defekten Dateien stehen
+# sonst in jeder Zeile jeder Nacht (ein Feld erreichte ueber 500'000 Zeichen).
+MAX_FEHLERDATEIEN = 20
+
 KLARTEXT = "klartext"
 ANONYM = "anonym"
 
@@ -122,7 +126,10 @@ def scan_csv(conn, mode: str) -> str:
     for r in rows:
         errors = json.loads(r["errors_json"] or "[]")
         if mode == KLARTEXT:
-            err = "; ".join(e.get("path") or e.get("filename") or "" for e in errors)
+            shown = [e.get("path") or e.get("filename") or "" for e in errors[:MAX_FEHLERDATEIEN]]
+            err = "; ".join(shown)
+            if len(errors) > MAX_FEHLERDATEIEN:
+                err += f"; … und {len(errors) - MAX_FEHLERDATEIEN} weitere"
             proj = r["project_name"] or ""
         else:
             err = "; ".join(sorted({_ext(e.get("filename") or e.get("path")) for e in errors} - {""}))

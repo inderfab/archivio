@@ -87,3 +87,15 @@ def test_zip_contains_all_four_and_readme(tmp_db):
     z = zipfile.ZipFile(io.BytesIO(ex.build_zip(tmp_db, ex.ANONYM)))
     assert sorted(z.namelist()) == ["LIESMICH.txt", "dokumentenverarbeitung.csv", "mcp.csv", "scan.csv", "suche.csv"]
     assert "Anonymisiert" in z.read("LIESMICH.txt").decode()
+
+
+def test_scan_klartext_caps_error_file_list(tmp_db):
+    errs = [{"filename": f"f{i}.pdf", "path": f"/nas/f{i}.pdf"} for i in range(50)]
+    with tmp_db:
+        tmp_db.execute(
+            "INSERT INTO scan_log (project_id, project_name, started_at, status, total, processed, new_count, "
+            "skipped, error_count, errors_json) VALUES (1,'P','2026-10-20T01:00:00Z','done',50,50,0,0,50,?)",
+            (json.dumps(errs),))
+    row = _rows(ex.scan_csv(tmp_db, ex.KLARTEXT))[1]
+    assert row[-1].count("/nas/f") == ex.MAX_FEHLERDATEIEN
+    assert row[-1].endswith("… und 30 weitere")
