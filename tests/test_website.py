@@ -84,6 +84,9 @@ def _resolve(href, page):
     target = DOCS / path.lstrip("/") if path.startswith("/") else (DOCS / page).parent / path
     if target.is_dir():
         target = target / "index.html"
+    elif not target.suffix and target.with_suffix(".html").exists():
+        # GitHub Pages liefert /docs als docs.html aus (Pfad ohne Endung).
+        target = target.with_suffix(".html")
     return target
 
 
@@ -108,7 +111,9 @@ def test_trust_page_has_contact_and_canonical(page):
 
 def test_homepage_links_docs_and_trust_pages():
     links = set(_parse("index.html").links)
-    for target in ["docs.html", *TRUST_PAGES]:
+    # Anleitung als /docs verlinkt: so erkennen Agent-Scanner die Doku-Seite
+    assert "/docs" in links
+    for target in ["mcp.html", *TRUST_PAGES]:
         assert target in links, f"Startseite verlinkt {target} nicht"
 
 
@@ -218,7 +223,7 @@ def test_sitemap_valid_and_complete():
     for loc in locs:
         assert loc.startswith(SITE)
         assert _resolve(loc, "index.html").exists(), f"sitemap.xml: {loc} existiert nicht"
-    for page in ["docs.html", *TRUST_PAGES]:
+    for page in ["docs.html", "mcp.html", *TRUST_PAGES]:
         assert SITE + page in locs
 
 
@@ -245,3 +250,42 @@ def test_internal_links_resolve(page):
         target = _resolve(href, page)
         if target is not None:
             assert target.exists(), f"{page}: Link {href!r} führt ins Leere"
+
+
+# ── MCP-Doku ────────────────────────────────────────────────────────────────
+
+def _mcp_tools_in_code():
+    import ast
+    src = (DOCS.parent / "helper" / "archivio_mcp.py").read_text(encoding="utf-8")
+    names = []
+    for node in ast.parse(src).body:
+        if isinstance(node, ast.FunctionDef) and any(
+            isinstance(d, ast.Call) and getattr(d.func, "attr", "") == "tool"
+            for d in node.decorator_list
+        ):
+            names.append(node.name)
+    return names
+
+
+def test_mcp_page_lists_exactly_the_real_tools():
+    html = (DOCS / "mcp.html").read_text(encoding="utf-8")
+    documented = re.findall(r"<tr><td><code>([a-z_]+)</code></td>", html)
+    code = _mcp_tools_in_code()
+    assert code, "keine MCP-Werkzeuge in helper/archivio_mcp.py gefunden"
+    assert sorted(documented) == sorted(code), (
+        f"mcp.html und helper/archivio_mcp.py laufen auseinander: "
+        f"nur Doku {set(documented) - set(code)}, nur Code {set(code) - set(documented)}"
+    )
+
+
+def test_mcp_tools_listed_in_llms_txt():
+    text = (DOCS / "llms.txt").read_text(encoding="utf-8")
+    assert SITE + "mcp.html" in text
+    for name in _mcp_tools_in_code():
+        assert name in text, f"llms.txt nennt Werkzeug {name} nicht"
+
+
+def test_mcp_page_title_names_product():
+    html = (DOCS / "mcp.html").read_text(encoding="utf-8")
+    assert "<title>Archivio MCP-Schnittstelle" in html
+    assert len(_visible_text(_parse("mcp.html"))) >= 500
