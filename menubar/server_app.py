@@ -16,6 +16,7 @@ import requests
 import rumps
 
 import menubar_bridge as bridge
+import restart_guard
 import updater
 
 HELPER_PORT        = bridge.HELPER_PORT
@@ -215,6 +216,36 @@ def _notify(message: str):
 
 _SERVER_RAM_LIMIT_GB = 20.0  # uvicorn-Prozess-RAM-Limit (ohne Worker-Prozesse)
 
+_restart_guard = restart_guard.RestartGuard()
+_server_problem: str | None = None   # Kurzgrund, solange der Server nicht startet (Menue)
+
+
+def _server_log_path() -> Path:
+    return (_DATA_DIR / "logs" / "server.log") if _IN_BUNDLE else (_CODE_ROOT / "logs" / "server.log")
+
+
+def _report_server_problem(final: bool) -> None:
+    """Haelt fest WARUM der Server nicht startet -- im Log, im Menue und beim Aufgeben
+    einmalig als Dialog, statt still und endlos neu zu starten."""
+    global _server_problem
+    short, long = restart_guard.diagnose(8000, _server_log_path())
+    _server_problem = short
+    log.error("Server startet nicht (Versuch %d/%d): %s", _restart_guard.fails,
+              restart_guard.MAX_FAILS, long)
+    if final:
+        log.error("Automatische Neustarts eingestellt. Im Menue «Server neu starten» "
+                  "waehlen, sobald die Ursache behoben ist.")
+        msg = (f"Der Archivio Server startet nicht.\n\n{short}\n\n"
+               f"Automatische Neustarts wurden nach {restart_guard.MAX_FAILS} Versuchen "
+               f"eingestellt. Ursache beheben, dann im Archivio-Menue "
+               f"«Server neu starten» waehlen.").replace('"', "'")
+        try:
+            subprocess.Popen(["osascript", "-e",
+                              f'display dialog "{msg}" with title "Archivio Server" '
+                              f'buttons {{"OK"}} default button "OK" with icon caution'])
+        except Exception:
+            pass
+
 
 def _scan_state() -> tuple[bool, bool]:
     """Gibt (projekt_scan_laeuft, mail_scan_laeuft) zurück."""
@@ -299,6 +330,7 @@ def _server_memory_watchdog():
         log.warning("psutil nicht verfügbar — Server-Watchdog deaktiviert")
         return
 
+    global _server_problem
     unresponsive = 0
     last_proj = last_mail = False   # zuletzt bekannter Scan-Stand (für Resume nach Crash)
     while True:
@@ -313,13 +345,26 @@ def _server_memory_watchdog():
                 # genau das gegenseitige Abschiessen, das wir vermeiden wollen.
                 if _server_responds():
                     unresponsive = 0
+                    _restart_guard.healthy()
+                    continue
+                # Bremse: stirbt der Server direkt nach dem Start wieder, nicht im
+                # 20-s-Takt endlos neu starten, sondern mit Wartezeit und nach
+                # MAX_FAILS Versuchen gar nicht mehr (Grund siehe _report_server_problem).
+                if not _restart_guard.may_restart():
                     continue
                 log.warning("Server-Prozess nicht aktiv — Neustart")
-                _notify("Archivio-Server war nicht aktiv — wird neu gestartet")
+                if _restart_guard.fails == 0:
+                    _notify("Archivio-Server war nicht aktiv — wird neu gestartet")
                 _restart_server(resume_projects=last_proj, resume_mail=last_mail,
                                 reason="Prozess tot")
+                _restart_guard.failed()
+                if _server_proc is None or _server_proc.poll() is not None:
+                    _report_server_problem(final=_restart_guard.gave_up)
                 unresponsive = 0
                 continue
+            _restart_guard.healthy()
+            if _server_problem and _restart_guard.fails == 0:
+                _server_problem = None
 
             # 2) Prozess lebt, antwortet aber nicht (erst nach mehreren Fehlversuchen)
             if not _server_responds():
@@ -423,6 +468,7 @@ class ArchivioServer(rumps.App):
             self._mcp_item,
             rumps.separator,
             rumps.MenuItem("Archivio öffnen",    callback=self.open_browser),
+            rumps.MenuItem("Server neu starten", callback=self.restart_server_manual),
             rumps.MenuItem("Auf Updates prüfen", callback=self.check_update),
             rumps.separator,
             rumps.MenuItem("Beenden", callback=self.quit_app),
@@ -495,8 +541,11 @@ class ArchivioServer(rumps.App):
         except Exception:
             server_ok = False
             nas_ok    = False
-        self._server_item.title = (
-            f"{'🟢' if server_ok else '🔴'}  Server {'läuft' if server_ok else 'offline'}")
+        if not server_ok and _server_problem:
+            self._server_item.title = f"🔴  Server startet nicht: {_server_problem[:70]}"
+        else:
+            self._server_item.title = (
+                f"{'🟢' if server_ok else '🔴'}  Server {'läuft' if server_ok else 'offline'}")
         self._nas_item.title = (
             f"{'🟢' if nas_ok else '🔴'}  NAS {'verbunden' if nas_ok else 'nicht verbunden'}")
         self._mcp_item.title = self._mcp_item_title()
@@ -510,6 +559,14 @@ class ArchivioServer(rumps.App):
         dort aus über /install-mcp auf diesem lokalen Prozess, nicht mehr automatisch
         beim Start (siehe shared/menubar_bridge.py::install_mcp_client)."""
         subprocess.run(["open", "http://127.0.0.1:8000/mcp-log"])
+
+    def restart_server_manual(self, _):
+        """Setzt die Neustart-Bremse zurueck und startet den Server sofort neu."""
+        global _server_problem
+        _restart_guard.reset()
+        _server_problem = None
+        threading.Thread(
+            target=lambda: _restart_server(reason="manuell"), daemon=True).start()
 
     def open_browser(self, _):
         subprocess.run(["open", "http://127.0.0.1:8000"])
