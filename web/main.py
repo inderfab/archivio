@@ -1326,6 +1326,8 @@ def _scan_und_suche_context(conn) -> dict:
 
     scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
     peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
+    peak_cpu = max((s["peak_cpu_pct"] or 0 for s in scan_recent), default=0)
+    scan_peak_cpu_label = f"{peak_cpu:.0f} %" if peak_cpu else "—"
     scan_peak_mem_label = f"{peak_mb / 1024:.1f} GB" if peak_mb else "—"
     scan_peak_mem_sub = (f"Speicher-Spitze · {peak_mb / total_ram_mb * 100:.0f} % RAM"
                          if peak_mb and total_ram_mb else "Speicher-Spitze (30 T.)")
@@ -1352,6 +1354,7 @@ def _scan_und_suche_context(conn) -> dict:
         "last_batch_sub":       last_batch_sub,
         "scan_peak_mem_label":  scan_peak_mem_label,
         "scan_peak_mem_sub":    scan_peak_mem_sub,
+        "scan_peak_cpu_label":  scan_peak_cpu_label,
         "last_new_files_label": last_new_files_label,
         "search_p90_ms": (sorted(r["duration_ms"] or 0 for r in search_recent)
                           [min(search_total_30d - 1, int(search_total_30d * 0.9))]

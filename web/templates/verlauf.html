@@ -52,12 +52,12 @@
   <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
     <h1 style="margin-bottom:0;">Verlauf</h1>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
-    <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
-            onclick="openExportDialog('/verlauf/export.zip', 'Alle Daten exportieren', 'Such-, Scan- und MCP-Verlauf sowie Dokumentenverarbeitung als CSV in einer ZIP-Datei.')">{{ icon_download() }} Alle Daten exportieren</button>
     <div class="section-help-panel">
       <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
       <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
     </div>
+    <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
+            onclick="openExportDialog('/verlauf/export.zip', 'Alle Daten exportieren', 'Such-, Scan- und MCP-Verlauf sowie Dokumentenverarbeitung als CSV in einer ZIP-Datei.')">{{ icon_download() }} Alle Daten exportieren</button>
   </div>
 
   <dialog id="export-dialog" style="margin:auto; border:1px solid var(--border); border-radius:var(--radius); padding:20px 22px; width:min(480px, 92vw); background:var(--bg); color:var(--text); box-shadow:0 12px 40px rgba(0,0,0,.25);">
@@ -230,13 +230,14 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
-          <p><strong>Letzter Gesamtscan:</strong> Zeitraum des letzten Scans über alle Projekte, von Start bis Ende. <strong>Speicher-Spitze:</strong> höchster Speicherbedarf eines Scans in 30 Tagen, im Vergleich zum Arbeitsspeicher des Macs. <strong>Zuletzt neue Dateien:</strong> wann ein Scan zuletzt etwas Neues gefunden hat. Der CSV-Export eignet sich für Supportanfragen.</p>
+          <p><strong>Letzter Gesamtscan:</strong> Zeitraum des letzten Scans über alle Projekte, von Start bis Ende. <strong>Speicher-Spitze:</strong> höchster Speicherbedarf eines Scans in 30 Tagen, im Vergleich zum Arbeitsspeicher des Macs. <strong>CPU-Spitze:</strong> höchste Prozessorauslastung eines Scans in 30 Tagen (100 % entsprechen einem vollen Kern). <strong>Zuletzt neue Dateien:</strong> wann ein Scan zuletzt etwas Neues gefunden hat. Der CSV-Export eignet sich für Supportanfragen.</p>
         </div>
       </h2>
       <div class="vf-stats" style="justify-content:space-between;">
         <div style="display:flex; gap:16px;">
           <div title="Letzter Scan über alle Projekte (Sammel-Scan), tatsächlich von Start bis Ende gemessen"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
           <div title="Höchster Speicherbedarf eines Scans in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">{{ scan_peak_mem_sub }}</div></div>
+          <div title="Höchste CPU-Auslastung eines Scans in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">CPU-Spitze (30 T.)</div></div>
           <div title="Wann ein Scan zuletzt neue Dateien gefunden hat"><div class="vf-stat-value">{{ last_new_files_label }}</div><div class="vf-stat-label">Zuletzt neue Dateien</div></div>
         </div>
         <div style="display:flex; gap:6px;">
