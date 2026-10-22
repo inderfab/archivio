@@ -149,21 +149,27 @@ def docs_csv(conn, mode: str) -> str:
     from web.dashboard import _error_reason, _extraction_overview
 
     ov = _extraction_overview(conn)
-    out = []
-    for ext, n in ov["unsupported_by_ext"].items():
-        out.append(["Nicht unterstütztes Format", ext, n, "", "", "", ""])
+    out = [["Übersicht", "", "", ov["total_docs"], "", "", "", "Dokumente gesamt"],
+           ["Übersicht", "", "", ov["searchable_total"], "", "", "", "mit durchsuchbarem Inhalt"]]
+    for g in ov["format_groups"]:
+        kat = "Nicht durchsuchbar (Office/Text)" if g["attention"] else "Nur über Dateiname"
+        for ext, n in g["exts"]:
+            out.append([kat, g["title"], ext, n, "", "", "", ""])
+    for ext, n in ov["error_by_ext"].items():
+        out.append(["Extraktionsfehler", "", ext, n, "", "", "", _error_reason(ext, None)])
     for ext, n in ov["no_text_by_ext"].items():
-        out.append(["Ohne Textinhalt", ext, n, "", "", "", ""])
-    out.append(["Zu gross (Zusammenfassung)", "", ov["oversized_total"], "", "", "", ""])
-    out.append(["Extraktionsfehler (Zusammenfassung)", "", ov["error_total"], "", "", "", ""])
+        out.append(["Ohne Textinhalt", "", ext, n, "", "", "", ""])
+    for ext, n in ov["oversized_by_ext"].items():
+        out.append(["Zu gross", "", ext, n, "", "", "", ""])
+    out.append(["Wartet auf Scan", "", "", ov["pending_total"], "", "", "", ""])
     for cat, files in (("Zu gross", ov["oversized_files"]), ("Ohne Textinhalt", ov["no_text_sample"]),
                        ("Extraktionsfehler", ov["error_files"])):
         for f in files:
             ext = _ext(f.get("filename") or f.get("path"))
             reason = f.get("reason") or (_error_reason(ext, f.get("path")) if cat == "Extraktionsfehler" else "")
-            out.append([cat, ext, 1, f.get("filename", "") if mode == KLARTEXT else "",
-                        f.get("path") or "" if mode == KLARTEXT else "", f.get("filesize", ""), reason])
-    return _csv(["Kategorie", "Endung", "Anzahl", "Dateiname", "Pfad", "Grösse (Bytes)", "Grund"], out)
+            out.append([cat + " (Einzeldatei)", "", ext, 1, f.get("filename", "") if mode == KLARTEXT else "",
+                        (f.get("path") or "") if mode == KLARTEXT else "", f.get("filesize", ""), reason])
+    return _csv(["Kategorie", "Gruppe", "Endung", "Anzahl", "Dateiname", "Pfad", "Grösse (Bytes)", "Grund"], out)
 
 
 _LIESMICH = """Archivio – Export der Verläufe

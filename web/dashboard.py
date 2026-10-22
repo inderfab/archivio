@@ -2122,6 +2122,51 @@ def _error_reason(extension: str, path: str | None) -> str:
     return "Datei fehlerhaft oder Format nicht unterstützt"
 
 
+# Gruppen fuer "Nur ueber den Dateinamen auffindbar": die Rohliste nach Endung (Hunderte
+# Zeilen, dominiert von Bildern) sagt nichts darueber, wo Handlungsbedarf besteht.
+_OFFICE_TEXT_FORMATE = {
+    ".doc", ".dot", ".xls", ".xlt", ".ppt", ".pps", ".rtf", ".odt", ".ods", ".odp",
+    ".pages", ".numbers", ".key", ".wpd", ".htm", ".html", ".mht", ".xml", ".msg",
+}
+_CAD_GEO_FORMATE = {
+    ".dwg", ".dxf", ".dwt", ".dws", ".vwx", ".vwxp", ".ifc", ".skp", ".rvt", ".rfa", ".pln",
+    ".mcd", ".3dm", ".stl", ".obj", ".fbx", ".shp", ".shx", ".dbf", ".cpg", ".prj", ".sbn",
+    ".sbx", ".pat", ".lin", ".ctb", ".stb", ".plt", ".dgn",
+}
+# (Schluessel, Titel, Hinweis, braucht Aufmerksamkeit)
+_FORMAT_GRUPPEN = (
+    ("office", "Office- und Textformate", "Inhalt nicht durchsuchbar, nur über den Dateinamen auffindbar", True),
+    ("bilder", "Bilder", "auch unter «Fotos» auffindbar", False),
+    ("cad", "CAD und Geodaten", "nur über den Dateinamen auffindbar", False),
+    ("sonstiges", "Sonstiges", "nur über den Dateinamen auffindbar", False),
+)
+
+
+def _format_gruppe(ext: str) -> str:
+    from web.thumbnails import ALL_GALLERY_EXTENSIONS
+    if ext in ALL_GALLERY_EXTENSIONS:
+        return "bilder"
+    if ext in _OFFICE_TEXT_FORMATE:
+        return "office"
+    if ext in _CAD_GEO_FORMATE:
+        return "cad"
+    return "sonstiges"
+
+
+def _format_groups(by_ext: dict[str, int]) -> list[dict]:
+    groups = []
+    for key, title, hint, attention in _FORMAT_GRUPPEN:
+        exts = [(e, n) for e, n in by_ext.items() if _format_gruppe(e) == key]
+        if not exts:
+            continue
+        groups.append({
+            "key": key, "title": title, "hint": hint, "attention": attention,
+            "total": sum(n for _, n in exts),
+            "exts": sorted(exts, key=lambda x: -x[1]),
+        })
+    return groups
+
+
 def _extraction_overview(conn) -> dict:
     """Kategorisierte Übersicht aller Dokumente, deren Inhalt (noch) nicht
     durchsuchbar ist -- Grundlage für den Abschnitt "Dokumentenverarbeitung" im
@@ -2235,7 +2280,24 @@ def _extraction_overview(conn) -> dict:
         "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
     ).fetchone()[0]
 
+    error_by_ext = {
+        row["extension"]: row["cnt"] for row in conn.execute(
+            f"SELECT extension, COUNT(*) AS cnt FROM documents WHERE extraction_status='error' "
+            f"AND extension IN ({err_placeholders}) GROUP BY extension ORDER BY cnt DESC",
+            _TEXT_EXTRACTABLE,
+        ).fetchall()
+    }
+    oversized_by_ext = dict(sorted(((e, listed_by_ext[e]) for e in oversized_exts), key=lambda kv: -kv[1]))
+    total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    ok_total = conn.execute("SELECT COUNT(*) FROM documents WHERE extraction_status='ok'").fetchone()[0]
+    format_groups = _format_groups(unsupported_by_ext)
+
     return {
+        "total_docs":          total_docs,
+        "searchable_total":    max(0, ok_total - no_text_total),
+        "format_groups":       format_groups,
+        "error_by_ext":        error_by_ext,
+        "oversized_by_ext":    oversized_by_ext,
         "unsupported_total":   sum(unsupported_by_ext.values()),
         "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
         "gallery_extensions":  ALL_GALLERY_EXTENSIONS,

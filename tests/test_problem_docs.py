@@ -212,7 +212,7 @@ def test_problem_docs_route_offers_finder_and_rescan_per_file(tmp_db):
     assert "/scan/kaputt.pdf" in r.text
     assert "/scan/scan.pdf" in r.text
     # Bild-Hinweis nur bei tatsächlichen Galerie-Formaten
-    assert "bereits über" in r.text
+    assert "auch unter «Fotos» auffindbar" in r.text
 
 
 def test_problem_docs_route_renders_all_categories(tmp_db):
@@ -229,7 +229,8 @@ def test_problem_docs_route_renders_all_categories(tmp_db):
     c = TestClient(app)
     r = c.get("/dashboard/problem-docs")
     assert r.status_code == 200
-    assert "Nicht unterstützte Dateiformate" in r.text
+    assert "Nur über den Dateinamen auffindbar" in r.text
+    assert "Bilder" in r.text
     assert "Zu gross für automatische Extraktion" in r.text
     assert "Fehler bei der Extraktion" in r.text
     assert "Kein Textinhalt gefunden" in r.text
@@ -342,3 +343,14 @@ def test_extract_now_runs_extraction_in_background_thread(tmp_db, monkeypatch, t
     row = tmp_db.execute("SELECT extraction_status FROM documents WHERE id=?", (doc_id,)).fetchone()
     assert row["extraction_status"] == "ok"
     assert "Wird im Hintergrund verarbeitet" in r.text
+
+
+def test_format_groups_split_by_kind():
+    from web.dashboard import _format_groups
+
+    groups = {g["key"]: g for g in _format_groups(
+        {".jpg": 90, ".dwg": 20, ".doc": 7, ".xls": 3, ".zip": 2, "": 1})}
+    assert groups["bilder"]["total"] == 90 and not groups["bilder"]["attention"]
+    assert groups["cad"]["total"] == 20
+    assert groups["office"]["total"] == 10 and groups["office"]["attention"]
+    assert groups["sonstiges"]["exts"] == [(".zip", 2), ("", 1)]
