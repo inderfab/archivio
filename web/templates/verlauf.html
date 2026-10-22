@@ -51,11 +51,13 @@
 <div class="verlauf-page">
   <div style="display:flex; align-items:center; gap:8px; position:relative; margin-bottom:16px;">
     <h1 style="margin-bottom:0;">Verlauf</h1>
+    <span style="position:relative; display:inline-flex;">
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
-    <div class="section-help-panel">
+    <div class="section-help-panel" style="left:0; right:auto;">
       <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
       <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
     </div>
+    </span>
     <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
             onclick="openExportDialog('/verlauf/export.zip', 'Alle Daten exportieren', 'Such-, Scan- und MCP-Verlauf sowie Dokumentenverarbeitung als CSV in einer ZIP-Datei.')">{{ icon_download() }} Alle Daten exportieren</button>
   </div>
@@ -188,13 +190,13 @@
         </div>
       </div>
       <form id="mcp-filter-form" class="vf-filters" method="get" action="/verlauf">
-        <select name="project_id">
+        <select name="project_id" onchange="this.form.submit()">
           <option value="">Alle Projekte</option>
           {% for p in mcp_projects %}
           <option value="{{ p.id }}" {% if filter_project_id == p.id|string %}selected{% endif %}>{{ p.name }}</option>
           {% endfor %}
         </select>
-        <select name="status">
+        <select name="status" onchange="this.form.submit()">
           <option value="">Alle Status</option>
           <option value="ok" {% if filter_status == 'ok' %}selected{% endif %}>Übermittelt</option>
           <option value="blocked" {% if filter_status == 'blocked' %}selected{% endif %}>Blockiert</option>

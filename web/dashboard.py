@@ -2154,8 +2154,13 @@ def _format_gruppe(ext: str) -> str:
 
 
 def _format_groups(by_ext: dict[str, int]) -> list[dict]:
+    """Gruppen fuer "Nur ueber den Dateinamen auffindbar". Office-/Textformate sind hier
+    bewusst NICHT dabei: deren Inhalt waere lesbar, sie gehoeren zu den Lesefehlern
+    (siehe _read_issues)."""
     groups = []
     for key, title, hint, attention in _FORMAT_GRUPPEN:
+        if key == "office":
+            continue
         exts = [(e, n) for e, n in by_ext.items() if _format_gruppe(e) == key]
         if not exts:
             continue
@@ -2165,6 +2170,63 @@ def _format_groups(by_ext: dict[str, int]) -> list[dict]:
             "exts": sorted(exts, key=lambda x: -x[1]),
         })
     return groups
+
+
+def _read_issues(error_by_ext: dict[str, int], unsupported_by_ext: dict[str, int]) -> list[dict]:
+    """Eine Liste je Format fuer "Fehler bei der Extraktion": echte Lesefehler (status error)
+    UND Office-/Textformate, deren Inhalt nicht gelesen wird (nicht aktiviert oder ohne
+    Leser). Beides ist fuer den Nutzer dasselbe: Text waere zu erwarten, ist aber nicht
+    durchsuchbar."""
+    from scanner import extractors as _extractors
+
+    readable = set(_extractors._REGISTRY.keys())
+    rows = []
+    for ext, n in error_by_ext.items():
+        rows.append({"ext": ext, "art": "error", "count": n, "can_read": ext in readable,
+                     "reason": _error_reason(ext, None)})
+    for ext, n in unsupported_by_ext.items():
+        if _format_gruppe(ext) != "office":
+            continue
+        can = ext in readable
+        rows.append({
+            "ext": ext, "art": "unsupported", "count": n, "can_read": can,
+            "reason": ("In den Einstellungen nicht aktiviert — Archivio kann dieses Format lesen"
+                       if can else "Format wird von Archivio nicht gelesen"),
+        })
+    return sorted(rows, key=lambda r: -r["count"])
+
+
+def problem_doc_files(conn, art: str, ext: str, limit: int = 50) -> tuple[list[dict], int]:
+    """Die ersten `limit` Dateien eines Formats aus "Fehler bei der Extraktion" samt
+    Gesamtzahl. art: 'error' (Lesefehler) oder 'unsupported' (Format nicht gelesen)."""
+    statuses = ("error",) if art == "error" else ("listed", "unsupported")
+    ph = ",".join("?" * len(statuses))
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM documents WHERE extension = ? AND extraction_status IN ({ph})",
+        (ext, *statuses)).fetchone()[0]
+    rows = conn.execute(f"""
+        SELECT d.id, d.filename, d.filesize, dp.path
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.extension = ? AND d.extraction_status IN ({ph})
+        ORDER BY d.filename LIMIT ?
+    """, (ext, *statuses, limit)).fetchall()
+    return [dict(r) for r in rows], total
+
+
+@router.get("/problem-docs/files", response_class=HTMLResponse)
+async def problem_docs_files(request: Request, art: str = "error", ext: str = ""):
+    from scanner import extractors as _extractors
+
+    conn = connection.get_connection()
+    try:
+        files, total = problem_doc_files(conn, art, ext)
+    finally:
+        conn.close()
+    return templates.TemplateResponse("_problem_doc_files.html", {
+        "request": request, "files": files, "total": total, "art": art, "ext": ext,
+        "can_read": ext in _extractors._REGISTRY,
+    })
 
 
 def _extraction_overview(conn) -> dict:
@@ -2291,8 +2353,11 @@ def _extraction_overview(conn) -> dict:
     total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
     ok_total = conn.execute("SELECT COUNT(*) FROM documents WHERE extraction_status='ok'").fetchone()[0]
     format_groups = _format_groups(unsupported_by_ext)
+    read_issues = _read_issues(error_by_ext, unsupported_by_ext)
 
     return {
+        "read_issues":         read_issues,
+        "read_issue_total":    sum(r["count"] for r in read_issues),
         "total_docs":          total_docs,
         "searchable_total":    max(0, ok_total - no_text_total),
         "format_groups":       format_groups,

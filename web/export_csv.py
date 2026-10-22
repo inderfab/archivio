@@ -152,11 +152,11 @@ def docs_csv(conn, mode: str) -> str:
     out = [["Übersicht", "", "", ov["total_docs"], "", "", "", "Dokumente gesamt"],
            ["Übersicht", "", "", ov["searchable_total"], "", "", "", "mit durchsuchbarem Inhalt"]]
     for g in ov["format_groups"]:
-        kat = "Nicht durchsuchbar (Office/Text)" if g["attention"] else "Nur über Dateiname"
         for ext, n in g["exts"]:
-            out.append([kat, g["title"], ext, n, "", "", "", ""])
-    for ext, n in ov["error_by_ext"].items():
-        out.append(["Extraktionsfehler", "", ext, n, "", "", "", _error_reason(ext, None)])
+            out.append(["Nur über Dateiname", g["title"], ext, n, "", "", "", ""])
+    for r in ov["read_issues"]:
+        out.append(["Fehler bei der Extraktion", "Lesefehler" if r["art"] == "error" else "Nicht gelesen",
+                    r["ext"], r["count"], "", "", "", r["reason"]])
     for ext, n in ov["no_text_by_ext"].items():
         out.append(["Ohne Textinhalt", "", ext, n, "", "", "", ""])
     for ext, n in ov["oversized_by_ext"].items():

@@ -1,0 +1,29 @@
+{% if not can_read and art == 'unsupported' %}
+<div class="problem-doc-row" style="color:var(--text-3);">Dieses Format kann Archivio nicht lesen — «Nochmals versuchen» wäre wirkungslos.</div>
+{% endif %}
+{% for doc in files %}
+<div class="problem-doc-row problem-doc-error">
+  <span class="status-dot {{ 'bad' if art == 'error' else 'warn' }}"></span>
+  <span class="problem-doc-name" title="{{ doc.path or doc.filename }}">{{ doc.filename }}</span>
+  {% if doc.path %}
+  <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
+          onclick="helperReveal(this.dataset.path)"
+          style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+    Im Finder
+  </button>
+  {% endif %}
+  {% if can_read %}
+  <button type="button" class="btn btn-sm"
+          hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
+          style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+    Nochmals versuchen
+  </button>
+  {% endif %}
+</div>
+{% endfor %}
+{% if total > files|length %}
+<div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ (total - files|length)|fmt_n }} weitere (erste {{ files|length }} angezeigt)</div>
+{% endif %}
+{% if not files %}
+<div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">Keine Dateien gefunden.</div>
+{% endif %}
