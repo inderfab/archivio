@@ -301,10 +301,14 @@ def test_mcp_log_csv_export(tmp_db):
     c = TestClient(app)
     c.get("/api/mcp/search", params={"q": "Grundriss"})
 
-    r = c.get("/mcp-log/export.csv")
+    r = c.get("/mcp-log/export.csv", params={"modus": "klartext"})
     assert r.status_code == 200
     assert "text/csv" in r.headers["content-type"]
     assert "plan.txt" in r.text
+
+    # Ohne Angabe gilt Anonymisiert: Dateinamen kommen nicht vor, nur die Endung.
+    anon = c.get("/mcp-log/export.csv")
+    assert "plan.txt" not in anon.text and ".txt" in anon.text
 
 
 def test_mcp_log_is_not_reachable_via_mcp_endpoints(tmp_db):
