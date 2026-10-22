@@ -161,6 +161,7 @@ cp config.yaml.example     "$APP/Contents/Resources/"
 cp VERSION                 "$APP/Contents/Resources/"
 cp menubar/server_app.py   "$APP/Contents/Resources/archivio_server.py"
 cp menubar/updater.py      "$APP/Contents/Resources/"
+cp menubar/restart_guard.py "$APP/Contents/Resources/"
 cp menubar/icon.png        "$APP/Contents/Resources/"
 cp archivio.icns           "$APP/Contents/Resources/"
 
