@@ -245,3 +245,11 @@ def test_internal_links_resolve(page):
         target = _resolve(href, page)
         if target is not None:
             assert target.exists(), f"{page}: Link {href!r} führt ins Leere"
+
+
+def test_app_links_point_to_current_domain():
+    """Die alte Domain bauchat.ch (inkl. info@bauchat.ch) gibt es nicht mehr."""
+    from pathlib import Path
+    root = Path(__file__).parent.parent
+    for f in list((root / "web" / "templates").glob("*.html")):
+        assert "bauchat" not in f.read_text(encoding="utf-8").lower(), f"alte Domain in {f.name}"
