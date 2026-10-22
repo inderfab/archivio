@@ -1297,10 +1297,13 @@ def _scan_und_suche_context(conn) -> dict:
     rows = conn.execute(
         "SELECT * FROM scan_log ORDER BY started_at DESC LIMIT 200"
     ).fetchall()
+    from scanner.scan_log import fehler_text
+
     scans = []
     for r in rows:
         d = dict(r)
         d["errors"] = _json.loads(d["errors_json"] or "[]")
+        d["reason"] = fehler_text(d["status"], d.get("error_message"))
         scans.append(d)
     groups = _group_scan_log_entries(scans)
 
@@ -1372,9 +1375,6 @@ def _scan_und_suche_context(conn) -> dict:
         "scan_peak_cpu_label":  scan_peak_cpu_label,
         "cpu_cores":            cores,
         "last_new_files_label": last_new_files_label,
-        "search_p90_ms": (sorted(r["duration_ms"] or 0 for r in search_recent)
-                          [min(search_total_30d - 1, int(search_total_30d * 0.9))]
-                          if search_total_30d else 0),
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

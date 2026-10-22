@@ -134,13 +134,18 @@ def scan_csv(conn, mode: str) -> str:
         else:
             err = "; ".join(sorted({_ext(e.get("filename") or e.get("path")) for e in errors} - {""}))
             proj = _proj(mode, r["project_id"], {})
+        from scanner.scan_log import fehler_text
+        msg = r["error_message"] if "error_message" in r.keys() else None
+        grund = fehler_text(r["status"], msg)
+        if mode == KLARTEXT and msg and grund:
+            grund = f"{grund} ({msg})"
         out.append([
             r["started_at"], r["finished_at"] or "", r["duration_s"] if r["duration_s"] is not None else "",
-            r["status"], proj, r["total"], r["processed"], r["new_count"], r["skipped"],
+            r["status"], grund, proj, r["total"], r["processed"], r["new_count"], r["skipped"],
             r["error_count"], r["peak_memory_mb"], r["peak_cpu_pct"], r["batch_id"] or "", err,
         ])
     return _csv(
-        ["Start", "Ende", "Dauer (s)", "Status", "Projekt", "Dateien gesamt", "Verarbeitet", "Neu",
+        ["Start", "Ende", "Dauer (s)", "Status", "Grund", "Projekt", "Dateien gesamt", "Verarbeitet", "Neu",
          "Übersprungen", "Fehler (Anzahl)", "Spitze Speicher (MB)", "Spitze CPU (%)", "Sammel-Scan",
          "Fehlerdateien" if mode == KLARTEXT else "Fehlerdateien (Endungen)"], out)
 

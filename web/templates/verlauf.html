@@ -86,10 +86,12 @@
     <summary>
       <span class="vf-dt">{{ s.started_at|fmt_ts }}</span>
       <span class="vf-obj">{{ s.project_name or '—' }}</span>
-      <span class="vf-metric">{{ s.duration_s|fmt_duration }}</span>
+      {% if s.reason %}<span class="vf-metric" style="color:{{ '#b45309' if s.status == 'cancelled' else '#b91c1c' }}; max-width:45%; overflow:hidden; text-overflow:ellipsis;" title="{{ s.reason }}">{{ s.reason }}</span>
+      {% else %}<span class="vf-metric">{{ s.duration_s|fmt_duration }}</span>{% endif %}
       <span class="vf-dot {{ 'g' if s.status == 'done' else ('y' if s.status == 'cancelled' else 'r') }}"></span>
     </summary>
     <div class="vf-detail">
+      {% if s.reason %}<div style="color:{{ '#b45309' if s.status == 'cancelled' else '#b91c1c' }}; margin-bottom:4px;">Grund: {{ s.reason }}{% if s.error_message and s.reason == 'Unerwarteter Fehler' %} ({{ s.error_message }}){% endif %}</div>{% endif %}
       <div style="color:var(--text);">
         Start {{ s.started_at|fmt_ts }} · Dauer {{ s.duration_s|fmt_duration }} · {{ s.processed }}/{{ s.total }} Dateien · {{ s.new_count }} neu
         · {{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% des Arbeitsspeichers){% endif %} · Rechenleistung {{ [100, (s.peak_cpu_pct or 0) / (cpu_cores or 1)]|min|round|int }} %
@@ -142,7 +144,6 @@
         <div style="display:flex; gap:16px;">
           <div><div class="vf-stat-value">{{ search_total_30d }}</div><div class="vf-stat-label">Suchen (30 Tage)</div></div>
           <div title="Die Hälfte der Suchen ist schneller, die Hälfte langsamer"><div class="vf-stat-value">{{ search_avg_ms|fmt_ms }}</div><div class="vf-stat-label">Typische Dauer</div></div>
-          <div title="Jede zehnte Suche dauert länger als dieser Wert"><div class="vf-stat-value">{{ search_p90_ms|fmt_ms }}</div><div class="vf-stat-label">Langsame Suchen</div></div>
           <div><div class="vf-stat-value">{{ search_empty_30d }}</div><div class="vf-stat-label">Ohne Treffer</div></div>
         </div>
         <div style="display:flex; gap:6px;">
@@ -174,7 +175,7 @@
     {# ── MCP-Verlauf (oben rechts) ── #}
     <div class="vf-box">
       <h2>
-        <span>Claude-Zugriffe (MCP)</span>
+        <span>KI-Schnittstelle (MCP)</span>
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Jede Suche und jedes vollständig geladene Dokument über die Claude/MCP-Schnittstelle, inklusive der Fälle, in denen etwas blockiert wurde (Norm oder <a href="/sperrliste">Sperrliste</a>). Dieses Protokoll ist selbst nicht über MCP abfragbar.</p>

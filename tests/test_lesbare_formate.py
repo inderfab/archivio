@@ -8,7 +8,7 @@ def test_supported_includes_every_reader(tmp_db):
 
     sup = _supported_extensions()
     assert set(_REGISTRY) <= sup
-    assert ".doc" in sup and ".htm" in sup and ".xml" in sup and ".xls" in sup
+    assert ".doc" in sup and ".htm" in sup and ".xml" in sup and ".xls" in sup and ".msg" in sup
 
 
 def test_extract_html_keeps_text_drops_markup(tmp_path):
@@ -39,3 +39,24 @@ def test_requeue_only_small_readable_listed_files(tmp_db):
     assert st["a.doc"] == "pending" and st["b.rtf"] == "pending"
     assert st["gross.doc"] == "listed" and st["c.jpg"] == "listed" and st["d.pdf"] == "listed"
     assert st["e.doc"] == "ok"
+
+
+def test_scan_fehler_text_is_plain_and_without_paths():
+    from scanner.scan_log import fehler_text
+
+    assert fehler_text("done", None) == ""
+    assert fehler_text("cancelled", None) == "Von Hand abgebrochen"
+    t = fehler_text("error", "Pfad existiert nicht: /Volumes/Groups/Geheim")
+    assert "NAS" in t and "/Volumes" not in t
+    assert fehler_text("error", None).startswith("Grund nicht gespeichert")
+
+
+def test_log_scan_stores_error_message(tmp_db):
+    from scanner.scan_log import log_scan
+
+    log_scan(tmp_db, None, "P", {"error": "Kein Lesezugriff auf /x"}, "2026-10-22T01:00:00Z",
+             "2026-10-22T01:00:01Z", "error")
+    log_scan(tmp_db, None, "P", {"error": "egal"}, "2026-10-22T02:00:00Z", "2026-10-22T02:00:01Z", "done")
+    rows = tmp_db.execute("SELECT status, error_message FROM scan_log ORDER BY started_at").fetchall()
+    assert rows[0]["error_message"] == "Kein Lesezugriff auf /x"
+    assert rows[1]["error_message"] is None

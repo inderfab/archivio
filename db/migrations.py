@@ -45,6 +45,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "029_chunks_ohne_embedding", _m029)
     _apply(conn, "030_photo_tags_project", _m030)
     _apply(conn, "031_photo_tags_mailbox", _m031)
+    _apply(conn, "039_scan_log_error_message", _m039)
     # Kein einmaliger Schritt: kommt spaeter ein Leser dazu (z.B. .xls), muessen dessen
     # bisher nur gelistete Dateien ebenfalls neu eingelesen werden.
     requeue_newly_readable(conn)
@@ -855,3 +856,12 @@ def requeue_newly_readable(conn: sqlite3.Connection):
     conn.commit()
     if n:
         log.info("%d bisher nur gelistete Dateien lesbarer Formate werden neu eingelesen", n)
+
+
+def _m039(conn: sqlite3.Connection):
+    """Grund eines gescheiterten oder abgebrochenen Scans -- vorher sah man im Verlauf nur
+    einen roten Punkt ohne Erklaerung."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_log)")}
+    if "error_message" not in cols:
+        conn.execute("ALTER TABLE scan_log ADD COLUMN error_message TEXT")
+    conn.commit()
