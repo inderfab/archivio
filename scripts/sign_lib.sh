@@ -148,6 +148,18 @@ notarize_and_staple() {
         return 1
     fi
 
-    xcrun stapler staple "$TARGET"
+    # Das Ticket wird ueber CloudKit geholt; kurz nach der Freigabe ist es dort noch nicht
+    # immer abrufbar oder die Verbindung reisst ab (Error 68). Der Build lief dann ohne
+    # Grund von vorn -- deshalb mehrere Versuche mit Pause.
+    local STAPLE_VERSUCH=0
+    until xcrun stapler staple "$TARGET"; do
+        STAPLE_VERSUCH=$((STAPLE_VERSUCH + 1))
+        if [ "$STAPLE_VERSUCH" -ge 6 ]; then
+            echo "  ❌ Stapeln von $TARGET nach $STAPLE_VERSUCH Versuchen fehlgeschlagen"
+            return 1
+        fi
+        echo "  ⚠️  Stapeln fehlgeschlagen (Versuch $STAPLE_VERSUCH/6) — warte 30s"
+        sleep 30
+    done
     echo "  ✓ notarisiert + gestapelt: $TARGET"
 }
