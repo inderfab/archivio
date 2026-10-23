@@ -59,8 +59,17 @@
     <span style="position:relative; display:inline-flex;">
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel" style="left:0; right:auto;">
-      <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
-      <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
+      <p>In den vier Protokollkästen hast du den Überblick.</p>
+      <p><strong>Such-Verlauf</strong> zeigt dir, wenn keine Resultate gefunden wurden oder eine Suche aussergewöhnlich lange gedauert hat.</p>
+      <p><strong>KI-Schnittstelle (MCP)</strong> zeigt dir alle Daten, die Archivio verlassen haben und über die Schnittstelle an einen KI-Dienst gelangt sind. Auch blockierte Anfragen werden protokolliert.</p>
+      <p><strong>Scan-Verlauf</strong>: Hier siehst du, wie lange die täglichen Scans gedauert haben und wie stark dein Gerät dabei ausgelastet war.</p>
+      <p><strong>Dokumentenverarbeitung</strong>: Hier werden Dateien aufgelistet, deren Inhalt nicht gelesen werden konnte, sowie gescannte PDFs, Bilder und nicht unterstützte Formate.</p>
+      <p>Solltest du Unregelmässigkeiten entdecken oder Formate haben, die du gerne extrahiert hättest, lass es mich wissen: <a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      <p style="display:flex; flex-direction:column; gap:4px;">
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot g"></span> alles OK</span>
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot y"></span> mit Einschränkungen</span>
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot r"></span> Fehler oder Datei mit Sperre</span>
+      </p>
     </div>
     </span>
     <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
