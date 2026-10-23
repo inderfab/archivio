@@ -134,8 +134,14 @@
 
         {# Aktionen: Freshness-Badge + 'Jetzt/Neu scannen' (nur aktiv + zugewiesen) #}
         <div class="project-actions">
-          {% if scan_status == 'running' %}
+          {# Nur das Postfach, das gerade gelesen wird, zeigt "Scannt…". Bei einem Scan aller
+             Postfaecher warten die anderen; beim Einzel-Scan bleiben sie unveraendert. #}
+          {% set mb_running = scan_status == 'running' and (c.mailbox_name == scan_current or (scan_only and c.mailbox_name == scan_only)) %}
+          {% set mb_waiting = scan_status == 'running' and not scan_only and not mb_running %}
+          {% if mb_running %}
             <span class="scan-badge running">Scannt…</span>
+          {% elif mb_waiting %}
+            <span class="scan-badge archived" title="Wartet, bis die anderen Postfächer gescannt sind">Wartet…</span>
           {% else %}
             {% if c.scan_fresh_label %}
               <span class="scan-badge {{ c.scan_fresh_class }}"
@@ -148,7 +154,8 @@
                   style="display:contents;">
               <input type="hidden" name="mailbox_name" value="{{ c.mailbox_name }}">
               <input type="hidden" name="context" value="mail">
-              <button type="submit" class="btn {{ 'btn' if c.last_scanned_at else 'btn-primary' }}">
+              <button type="submit" class="btn {{ 'btn' if c.last_scanned_at else 'btn-primary' }}"
+                      {% if scan_status == 'running' %}disabled title="Es läuft bereits ein Mail-Scan"{% endif %}>
                 {{ 'Neu scannen' if c.last_scanned_at else 'Jetzt scannen' }}</button>
             </form>
             {% endif %}

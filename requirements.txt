@@ -12,6 +12,8 @@ pypdfium2>=4.30        # PDF-Text/Rendering, Ersatz für PyMuPDF (AGPL-3.0, für
 pytesseract>=0.3.10    # OCR-Bridge zu Tesseract (Apache-2.0), rendert über pypdfium2
 python-docx>=1.1
 openpyxl>=3.1
+xlrd>=2.0              # altes Excel-Format .xls (BSD, reines Python)
+olefile>=0.47          # Outlook-Mails .msg (BSD) -- extract-msg ist GPL, deshalb eigener Leser
 striprtf>=0.0.26
 cryptography>=42.0     # AES-verschlüsselte PDFs (pypdf braucht es, sonst „AES algorithm"-Fehler)
 

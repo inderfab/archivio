@@ -219,7 +219,11 @@ _MAX_EXTRACT_MB = 30
 
 
 def _supported_extensions() -> set[str]:
-    return {e.lower() for e in settings.get("scanner.supported_extensions", [])}
+    """Konfigurierte Endungen PLUS jede Endung, fuer die Archivio einen Leser hat
+    (scanner/extractors.py). Vorher entschied allein config.yaml -- aeltere Installationen
+    ohne .doc/.rtf in der Liste lasen diese Formate nie, obwohl ein Leser da war."""
+    from scanner.extractors import _REGISTRY
+    return {e.lower() for e in settings.get("scanner.supported_extensions", [])} | set(_REGISTRY)
 
 
 def _excluded_folders() -> tuple[set[str], list[str]]:

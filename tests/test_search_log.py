@@ -322,7 +322,10 @@ def test_search_log_export_csv_contains_entry(tmp_db):
     tmp_db.commit()
 
     c = TestClient(app)
-    r = c.get("/search-log/export.csv")
+    anon = c.get("/search-log/export.csv")
+    assert "Vertrag" not in anon.text and "Wortanzahl" in anon.text, "Standard ist anonymisiert"
+
+    r = c.get("/search-log/export.csv", params={"modus": "klartext"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/csv")
     assert "attachment" in r.headers["content-disposition"]

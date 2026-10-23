@@ -471,6 +471,15 @@ def set_autostart(enabled: bool, log) -> None:
         log.error("Autostart umschalten fehlgeschlagen: %s", e)
 
 
+def _installed_app_location() -> bool:
+    """True, wenn die App aus /Applications (oder ~/Applications) laeuft. Ein Entwickler-
+    Build (z.B. dist/ im Repo) darf sich NICHT von selbst als Login-Item eintragen: sonst
+    startet nach jedem Neustart ein zweiter, ungewollter Server, der im Netz andere
+    Archivio-Server findet und die "Es gibt bereits andere Nutzer"-Meldung zeigt."""
+    p = str(app_path())
+    return p.startswith("/Applications/") or p.startswith(str(Path.home() / "Applications") + "/")
+
+
 def ensure_autostart_default(log, state_path: Path) -> bool:
     """Stellt sicher, dass Autostart aktiv ist, ausser der Nutzer hat es bewusst
     abgeschaltet. Noetig weil eine .pkg-Neuinstallation den kompletten .app-Ordner
@@ -486,6 +495,9 @@ def ensure_autostart_default(log, state_path: Path) -> bool:
     except Exception:
         pref = True
     actual = autostart_enabled()
+    if pref and not actual and not _installed_app_location():
+        log.info("Autostart nicht eingetragen: App laeuft nicht aus /Applications (%s)", app_path())
+        return actual
     if pref and not actual:
         set_autostart(True, log)
         actual = True

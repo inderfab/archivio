@@ -203,16 +203,22 @@ def test_problem_docs_route_offers_finder_and_rescan_per_file(tmp_db):
     _make_doc(tmp_db, p, "foto.jpg", ".jpg", "listed")
     tmp_db.commit()
 
-    r = TestClient(app).get("/dashboard/problem-docs")
+    c = TestClient(app)
+    r = c.get("/dashboard/problem-docs")
     assert r.status_code == 200
-    assert "Im Finder" in r.text
-    assert "Jetzt neu scannen" in r.text
-    assert f"/dashboard/extract-now/{err_id}" in r.text
+    # Fehler stehen als Formatzeile; die Einzeldateien kommen erst beim Aufklappen
+    assert "Inhalt nicht lesbar" in r.text
+    assert "problem-docs/files?art=error&amp;ext=.pdf" in r.text or "problem-docs/files?art=error&ext=.pdf" in r.text
+    files = c.get("/dashboard/problem-docs/files", params={"art": "error", "ext": ".pdf"})
+    assert files.status_code == 200
+    assert "Im Finder" in files.text and "Nochmals versuchen" in files.text
+    assert f"/dashboard/extract-now/{err_id}" in files.text
+    assert "/scan/kaputt.pdf" in files.text
+    # Kein-Textinhalt-Zeilen behalten ihre Einzeldateien direkt in der Liste
     assert f"/dashboard/extract-now/{scan_id}" in r.text
-    assert "/scan/kaputt.pdf" in r.text
     assert "/scan/scan.pdf" in r.text
     # Bild-Hinweis nur bei tatsächlichen Galerie-Formaten
-    assert "bereits über" in r.text
+    assert "auch unter «Fotos» auffindbar" in r.text
 
 
 def test_problem_docs_route_renders_all_categories(tmp_db):
@@ -229,14 +235,16 @@ def test_problem_docs_route_renders_all_categories(tmp_db):
     c = TestClient(app)
     r = c.get("/dashboard/problem-docs")
     assert r.status_code == 200
-    assert "Nicht unterstützte Dateiformate" in r.text
-    assert "Zu gross für automatische Extraktion" in r.text
-    assert "Fehler bei der Extraktion" in r.text
-    assert "Kein Textinhalt gefunden" in r.text
+    assert "Nur über den Dateinamen auffindbar" in r.text
+    assert "Bilder" in r.text
+    assert "Zu gross zum automatischen Lesen" in r.text
+    assert "Inhalt nicht lesbar" in r.text
+    assert "Kein Text enthalten" in r.text
     assert "riesig.pdf" in r.text
-    assert "kaputt.pdf" in r.text
     assert "scan.pdf" in r.text
-    assert "Jetzt scannen" in r.text
+    assert "Trotzdem lesen" in r.text
+    files = c.get("/dashboard/problem-docs/files", params={"art": "error", "ext": ".pdf"})
+    assert "kaputt.pdf" in files.text
 
 
 def test_problem_docs_route_shows_empty_state_when_nothing_open(tmp_db):
@@ -342,3 +350,27 @@ def test_extract_now_runs_extraction_in_background_thread(tmp_db, monkeypatch, t
     row = tmp_db.execute("SELECT extraction_status FROM documents WHERE id=?", (doc_id,)).fetchone()
     assert row["extraction_status"] == "ok"
     assert "Wird im Hintergrund verarbeitet" in r.text
+
+
+def test_format_groups_split_by_kind():
+    from web.dashboard import _format_groups, _format_gruppe
+
+    groups = {g["key"]: g for g in _format_groups(
+        {".jpg": 90, ".dwg": 20, ".doc": 7, ".xls": 3, ".zip": 2, "": 1})}
+    assert groups["bilder"]["total"] == 90
+    assert groups["cad"]["total"] == 20
+    assert "office" not in groups, "Office-/Textformate gehoeren zu den Lesefehlern"
+    assert groups["sonstiges"]["exts"] == [(".zip", 2), ("", 1)]
+    assert _format_gruppe(".doc") == "office"
+
+
+def test_read_issues_merge_errors_and_office_formats():
+    from web.dashboard import _read_issues
+
+    rows = _read_issues({".pdf": 100, ".doc": 2}, {".doc": 40, ".ppt": 10, ".jpg": 999, ".rtf": 5})
+    by = {(r["ext"], r["art"]): r for r in rows}
+    assert by[(".pdf", "error")]["count"] == 100
+    assert by[(".doc", "unsupported")]["can_read"] is True       # Leser vorhanden, nicht aktiviert
+    assert by[(".ppt", "unsupported")]["can_read"] is False      # kein Leser
+    assert (".jpg", "unsupported") not in by                     # Bilder sind kein Lesefehler
+    assert [r["count"] for r in rows] == sorted((r["count"] for r in rows), reverse=True)

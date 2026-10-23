@@ -74,7 +74,8 @@
         <span class="scan-cell" id="scan-cell-{{ p.id }}"
               {% if p.scan_status == 'running' %}hx-get="/dashboard/projects/{{ p.id }}/scan-status" hx-trigger="every 3s" hx-swap="outerHTML"{% endif %}>
         {% if p.scan_status == 'running' %}
-          <span class="scan-badge running">Scannt…</span>
+          {% if p.scan_queued %}<span class="scan-badge archived" title="Wartet, bis der laufende Scan fertig ist">Wartet…</span>
+          {% else %}<span class="scan-badge running">Scannt…</span>{% endif %}
           <button class="btn btn-cancel" style="margin-left:6px;"
                   hx-post="/dashboard/projects/{{ p.id }}/scan/cancel"
                   hx-target="#scan-cell-{{ p.id }}" hx-swap="outerHTML">Abbrechen</button>

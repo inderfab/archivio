@@ -5,6 +5,7 @@ import logging.handlers
 import os
 import re
 import signal
+import statistics
 import subprocess
 import sys
 import threading
@@ -38,7 +39,7 @@ def _setup_logging() -> None:
 _setup_logging()
 
 from fastapi import FastAPI, Form, Query, Request
-from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
+from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse, Response
 from fastapi.staticfiles import StaticFiles
 
 from db import connection
@@ -1122,6 +1123,15 @@ def _group_scan_log_entries(scans: list[dict]) -> list[dict]:
         g["total_duration_s"] = sum(e.get("duration_s") or 0 for e in es)
         g["ts_start"]       = min(e["started_at"] for e in es)
         g["ts_end"]         = max((e["finished_at"] for e in es if e.get("finished_at")), default=None)
+        # Tatsaechliche Dauer von Start bis Ende -- die Summe der Einzeldauern zaehlt
+        # parallel laufende Projekt-Scans mehrfach.
+        try:
+            g["wall_duration_s"] = (
+                datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00"))
+                - datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00"))
+            ).total_seconds() if g["ts_end"] else g["total_duration_s"]
+        except (ValueError, AttributeError):
+            g["wall_duration_s"] = g["total_duration_s"]
         g["peak_memory_mb"] = max((e["peak_memory_mb"] or 0) for e in es)
         g["peak_cpu_pct"]   = max((e["peak_cpu_pct"] or 0) for e in es)
         statuses = {e["status"] for e in es}
@@ -1184,108 +1194,90 @@ def _mcp_log_context(conn, project_id: str, status: str, date_from: str, date_to
     }
 
 
+def _csv_response(text: str, name: str, mode: str):
+    return HTMLResponse(
+        text, media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": f"attachment; filename={name}-{mode}.csv"},
+    )
+
+
 @app.get("/mcp-log/export.csv")
 async def mcp_log_export(
     project_id: str = Query(default=""),
     status:     str = Query(default=""),
     date_from:  str = Query(default=""),
     date_to:    str = Query(default=""),
+    modus:      str = Query(default=""),
 ):
-    import csv
-    import io
-    import json as _json
+    from web import export_csv
 
+    mode = export_csv.norm_mode(modus)
     conn = connection.get_connection()
-    clause, params = _mcp_log_query(project_id, status, date_from, date_to)
-    rows = conn.execute(
-        f"SELECT * FROM mcp_log {clause} ORDER BY ts DESC LIMIT 5000", params
-    ).fetchall()
-    projects   = conn.execute("SELECT id, name FROM projects").fetchall()
-    proj_names = {p["id"]: p["name"] for p in projects}
-    conn.close()
-
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Zeitstempel", "Tool", "Anfrage", "Projekt", "Status",
-                      "Übermittelte Dateien", "Zeichen", "Blockiert (Grund)"])
-    for r in rows:
-        files   = _json.loads(r["files_json"] or "[]")
-        blocked = _json.loads(r["blocked_json"] or "[]")
-        writer.writerow([
-            r["ts"], r["tool"], r["query"] or "",
-            proj_names.get(r["project_id"], ""), r["status"],
-            "; ".join(f.get("filename") or f.get("path") or "" for f in files),
-            r["chars_sent"],
-            "; ".join(
-                f"{b.get('filename') or b.get('path')} ({b.get('reason')})"
-                if (b.get("filename") or b.get("path")) else (b.get("reason") or "")
-                for b in blocked
-            ),
-        ])
-    return HTMLResponse(
-        buf.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=claude-zugriffe.csv"},
-    )
+    try:
+        clause, params = _mcp_log_query(project_id, status, date_from, date_to)
+        text = export_csv.mcp_csv(conn, mode, clause, params)
+    finally:
+        conn.close()
+    return _csv_response(text, "claude-zugriffe", mode)
 
 
 @app.get("/search-log/export.csv")
-async def search_log_export():
-    """CSV-Export des kompletten Suche-Protokolls (siehe scanner/search_log.py) --
-    dient als Rohdaten-Grundlage, um die Suche später anhand echter Anfragen zu
-    verbessern (z.B. häufige Anfragen ohne Treffer oder ohne Klick), ausserhalb
-    von Archivio selbst auszuwerten (Excel/Numbers). Ohne Filter-Parameter --
-    anders als /mcp-log hat die Systemstatus-Seite keine Filterleiste dafür,
-    ein kompletter Export reicht für diesen Zweck."""
-    import csv
-    import io
+async def search_log_export(modus: str = Query(default="")):
+    """CSV-Export des Suche-Protokolls (siehe scanner/search_log.py) als Rohdaten, um die
+    Suche anhand echter Anfragen zu verbessern, ausserhalb von Archivio auszuwerten.
+    modus=klartext|anonym (Standard anonym), siehe web/export_csv.py."""
+    from web import export_csv
 
+    mode = export_csv.norm_mode(modus)
     conn = connection.get_connection()
-    rows = conn.execute("SELECT * FROM search_log ORDER BY ts DESC LIMIT 20000").fetchall()
-    proj_names = {p["id"]: p["name"] for p in conn.execute("SELECT id, name FROM projects")}
-    conn.close()
+    try:
+        text = export_csv.search_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "suche-protokoll", mode)
 
-    buf = io.StringIO()
-    writer = csv.writer(buf)
-    writer.writerow(["Zeitstempel", "Art", "Anfrage", "Projekt", "Filter",
-                      "Treffer", "Dauer (ms)", "Klicks"])
-    for r in rows:
-        writer.writerow([
-            r["ts"], "Suche",
-            r["query"] or "", proj_names.get(r["project_id"], ""),
-            r["filters"] or "", r["result_count"], r["duration_ms"], r["clicks"],
-        ])
-    return HTMLResponse(
-        buf.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": "attachment; filename=suche-protokoll.csv"},
+
+@app.get("/scan-log/export.csv")
+async def scan_log_export(modus: str = Query(default="")):
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        text = export_csv.scan_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "scan-verlauf", mode)
+
+
+@app.get("/docs-log/export.csv")
+async def docs_log_export(modus: str = Query(default="")):
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        text = export_csv.docs_csv(conn, mode)
+    finally:
+        conn.close()
+    return _csv_response(text, "dokumentenverarbeitung", mode)
+
+
+@app.get("/verlauf/export.zip")
+async def verlauf_export_zip(modus: str = Query(default="")):
+    """Alle vier Verlaeufe als CSV in einer ZIP-Datei (fuer Supportanfragen)."""
+    from web import export_csv
+
+    mode = export_csv.norm_mode(modus)
+    conn = connection.get_connection()
+    try:
+        data = export_csv.build_zip(conn, mode)
+    finally:
+        conn.close()
+    return Response(
+        data, media_type="application/zip",
+        headers={"Content-Disposition": f"attachment; filename=archivio-verlauf-{mode}.zip"},
     )
-
-
-@app.get("/search-log/chart-data")
-async def search_log_chart_data(range: str = Query(default="30")):
-    """Tageswerte fürs Grafik-Panel im Such-Verlauf -- bewusst nur zwei einfache
-    Kennzahlen (Anzahl Suchen, Ø Dauer) statt einer grossen Auswertung, damit das
-    Diagramm ohne externe Bibliothek (kein Internet nötig) mit ein paar SVG-Balken
-    auskommt."""
-    conn = connection.get_connection()
-    where = ""
-    params: tuple = ()
-    if range != "all":
-        since = (datetime.now() - timedelta(days=30)).strftime("%Y-%m-%dT%H:%M:%SZ")
-        where = "WHERE ts >= ?"
-        params = (since,)
-    rows = conn.execute(f"""
-        SELECT substr(ts, 1, 10) AS day, COUNT(*) AS n, AVG(duration_ms) AS avg_ms,
-               SUM(CASE WHEN result_count = 0 THEN 1 ELSE 0 END) AS empty_n
-        FROM search_log {where}
-        GROUP BY day ORDER BY day
-    """, params).fetchall()
-    conn.close()
-    return JSONResponse([
-        {"day": r["day"], "count": r["n"], "avg_ms": round(r["avg_ms"] or 0), "empty": r["empty_n"]}
-        for r in rows
-    ])
 
 
 @app.get("/system-status", response_class=RedirectResponse)
@@ -1305,10 +1297,13 @@ def _scan_und_suche_context(conn) -> dict:
     rows = conn.execute(
         "SELECT * FROM scan_log ORDER BY started_at DESC LIMIT 200"
     ).fetchall()
+    from scanner.scan_log import fehler_text
+
     scans = []
     for r in rows:
         d = dict(r)
         d["errors"] = _json.loads(d["errors_json"] or "[]")
+        d["reason"] = fehler_text(d["status"], d.get("error_message"))
         scans.append(d)
     groups = _group_scan_log_entries(scans)
 
@@ -1328,8 +1323,10 @@ def _scan_und_suche_context(conn) -> dict:
     ).fetchall()
 
     search_total_30d = len(search_recent)
+    # Median statt Durchschnitt: einzelne Ausreisser (Satz-Anfragen mit 30-50 s) verzerren
+    # den Durchschnitt so stark, dass er nichts ueber die typische Suche aussagt.
     search_avg_ms = (
-        sum(r["duration_ms"] or 0 for r in search_recent) / search_total_30d if search_total_30d else 0
+        statistics.median(r["duration_ms"] or 0 for r in search_recent) if search_total_30d else 0
     )
     search_empty_30d = sum(1 for r in search_recent if r["result_count"] == 0)
     # Nur ein einzelner, guenstiger Aufruf pro Seitenaufruf -- kein Sampling waehrend
@@ -1337,7 +1334,50 @@ def _scan_und_suche_context(conn) -> dict:
     # das misst weiterhin nur RSS/CPU, keine zusaetzliche RAM-Erfassung dort noetig).
     total_ram_mb = psutil.virtual_memory().total / (1024 * 1024)
 
+    scan_recent = [s for s in scans if (s["started_at"] or "") >= since]
+    peak_mb = max((s["peak_memory_mb"] or 0 for s in scan_recent), default=0)
+    # psutil zaehlt pro Kern bis 100 % -- "102 %" versteht niemand. Umgerechnet auf die
+    # gesamte Rechenleistung des Macs.
+    peak_cpu = max((s["peak_cpu_pct"] or 0 for s in scan_recent), default=0)
+    cores = psutil.cpu_count() or 1
+    scan_peak_cpu_label = f"{min(100, peak_cpu / cores):.0f} %" if peak_cpu else "—"
+    scan_peak_mem_label = f"{peak_mb / 1024:.1f} GB" if peak_mb else "—"
+    scan_peak_mem_sub = "Speicher, höchster Wert"
+    scan_peak_mem_title = (f"Höchster Speicherbedarf eines Scans in 30 Tagen: "
+                           f"{peak_mb / total_ram_mb * 100:.0f} % des Arbeitsspeichers dieses Macs"
+                           if peak_mb and total_ram_mb else "Höchster Speicherbedarf eines Scans in 30 Tagen")
+
+    # Letzter Gesamtscan: neueste Gruppe mit mehreren Projekten (Sammel-Scan), sonst der letzte Scan.
+    multi = [g for g in groups if g["count"] > 1] or groups[:1]
+    if multi and multi[0]["ts_end"]:
+        g = multi[0]
+        t0 = datetime.fromisoformat(g["ts_start"].replace("Z", "+00:00")).astimezone()
+        t1 = datetime.fromisoformat(g["ts_end"].replace("Z", "+00:00")).astimezone()
+        mins = max(1, round((t1 - t0).total_seconds() / 60))
+        last_batch_label = f"{mins} Min." if mins < 120 else f"{mins // 60} Std. {mins % 60} Min."
+        last_batch_sub = f"Letzter Scan, {t0:%d.%m.} {t0:%H:%M}–{t1:%H:%M}"
+    else:
+        last_batch_label, last_batch_sub = "—", "Letzter Scan"
+        mins = None
+
+    from config import settings
+    from scanner.scan_log import worker_hinweis
+    current_workers = max(1, min(4, int(settings.get("scanner.num_workers", 1) or 1)))
+    ram_pct = peak_mb / total_ram_mb * 100 if peak_mb and total_ram_mb else 0
+    cpu_pct = min(100, peak_cpu / cores) if peak_cpu else 0
+    stall = any("in Folge fehlgeschlagen" in (s.get("error_message") or "") for s in scan_recent)
+    scan_hint = worker_hinweis(current_workers, mins, ram_pct, cpu_pct, stall)
+
     return {
+        "last_batch_label":     last_batch_label,
+        "current_workers":      current_workers,
+        "scan_hint":            scan_hint,
+        "last_batch_sub":       last_batch_sub,
+        "scan_peak_mem_label":  scan_peak_mem_label,
+        "scan_peak_mem_sub":    scan_peak_mem_sub,
+        "scan_peak_mem_title":  scan_peak_mem_title,
+        "scan_peak_cpu_label":  scan_peak_cpu_label,
+        "cpu_cores":            cores,
         "scans":            scans,
         "groups":           groups,
         "total_ram_mb":     total_ram_mb,

@@ -1,10 +1,29 @@
+{% from "_icons.html" import icon_download %}
+{# Endungen einer Gruppe als eine Zeile: ".jpg 90’056 · .png 12’443 · … +5 weitere" #}
+{% macro ext_summary(items, n=6) -%}
+  {%- for ext, cnt in items[:n] -%}{{ ext or '(ohne Endung)' }} {{ cnt|fmt_n }}{% if not loop.last %} · {% endif %}{%- endfor -%}
+  {%- if items|length > n %} · … +{{ items|length - n }} weitere{% endif -%}
+{%- endmacro %}
+{% macro ext_rows(items, dot) %}
+  {% for ext, cnt in items %}
+  <div class="problem-doc-row">
+    <span class="status-dot {{ dot }}"></span>
+    <span class="problem-doc-name">{{ ext or '(ohne Endung)' }}</span>
+    <span style="flex-shrink:0; color:var(--text-2); font-variant-numeric:tabular-nums;">{{ cnt|fmt_n }}</span>
+  </div>
+  {% endfor %}
+{% endmacro %}
 <div id="problem-docs-container">
   <div class="section-title" style="display:flex; align-items:center; justify-content:space-between; position:relative; margin-bottom:12px;">
     <span>Dokumentenverarbeitung</span>
+    <a class="btn btn-sm js-csv" href="/docs-log/export.csv" style="margin-left:auto; margin-right:8px; display:inline-flex; align-items:center; gap:5px; text-transform:none; letter-spacing:normal; font-weight:normal;">{{ icon_download() }} CSV</a>
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
-    <div class="section-help-panel">
-      <p>Übersicht aller Dokumente, deren Inhalt (noch) nicht durchsuchbar ist — aufgeteilt nach Grund. „Nicht unterstützte Dateiformate" ist normal (Bilder, CAD-Dateien, Videos, …), die anderen Kategorien lassen sich zumindest teilweise nachholen.</p>
-      <p><strong>Farbpunkt pro Zeile:</strong> rot = Fehler bei der Extraktion, grau = Inhalt unklar oder zu gross (kein Fehler, aber ungeprüft), grün = erwartet, kein Handlungsbedarf. Mit der Maus über den Punkt fahren zeigt den genauen Grund.</p>
+    <div class="section-help-panel" style="max-height:70vh; overflow-y:auto;">
+      <p>Archivio liest den Text aller Dokumente, damit die Suche auch im Inhalt findet. Diese Übersicht zeigt, wo das geklappt hat und wo nicht.</p>
+      <p><strong>Inhalt nicht lesbar (rot):</strong> Der Text konnte nicht gelesen werden. Häufige Gründe: Die Datei ist mit einem Passwort geschützt, beschädigt, war beim Scan in einem anderen Programm geöffnet, oder Archivio kann dieses Format nicht lesen (z. B. alte PowerPoint-Dateien). Ein Klick auf ein Format zeigt die betroffenen Dateien. «Nochmals versuchen» hilft, wenn die Datei nur kurz gesperrt war.</p>
+      <p><strong>Kein Text enthalten (grau):</strong> Die Datei wurde gelesen, enthält aber keinen Text, etwa ein Plan oder ein eingescanntes Dokument. Bei Plänen ist das normal.</p>
+      <p><strong>Zu gross zum automatischen Lesen (grau):</strong> Sehr grosse Dateien liest Archivio nicht automatisch, damit der Scan nicht stockt. «Trotzdem lesen» holt das für eine einzelne Datei nach.</p>
+      <p><strong>Nur über den Dateinamen auffindbar (grün):</strong> Bilder, Pläne im CAD-Format und andere Dateien ohne lesbaren Text. Sie werden über den Namen gefunden, Bilder zusätzlich unter «Fotos». Das ist normal.</p>
     </div>
   </div>
 
@@ -20,54 +39,65 @@
   </div>
   {% endif %}
 
-  {% set nothing_open = unsupported_total == 0 and oversized_total == 0 and error_total == 0 and no_text_total == 0 %}
-  {% if nothing_open %}
+  <div class="vf-stats">
+    <div><div class="vf-stat-value">{{ total_docs|fmt_n }}</div><div class="vf-stat-label">Dokumente</div></div>
+    <div><div class="vf-stat-value">{{ searchable_total|fmt_n }}</div><div class="vf-stat-label">Durchsuchbar</div></div>
+    <div><div class="vf-stat-value">{{ attention_total|fmt_n }}</div><div class="vf-stat-label">Probleme</div></div>
+    <div><div class="vf-stat-value">{{ filename_only_total|fmt_n }}</div><div class="vf-stat-label">Nur Dateinamen</div></div>
+  </div>
+
+  <div>
+  {% set plain_groups = format_groups %}
+  {% set has_attention = read_issue_total > 0 or no_text_total > 0 or oversized_total > 0 %}
+
+  {% if has_attention %}
+  <div class="pd-section">Braucht Aufmerksamkeit</div>
+  {% else %}
   <p style="color: var(--text-3); font-size: 13px; font-style: italic;">Keine offenen Punkte — alles verarbeitet.</p>
   {% endif %}
 
-  {% if error_total > 0 %}
+  {% if read_issue_total > 0 %}
   <details class="problem-docs" style="margin-bottom:8px;">
-    <summary class="problem-docs-summary">
-      <span>Fehler bei der Extraktion</span>
-      <span class="problem-docs-badge">{{ error_total }}</span>
+    <summary class="problem-docs-summary pd-summary">
+      <span class="status-dot bad pd-dot"></span>
+      <span class="pd-main">
+        <span class="pd-title">Inhalt nicht lesbar <span class="problem-docs-badge">{{ read_issue_total|fmt_n }}</span></span>
+      </span>
+      {% if error_total > 0 %}
       <button type="button" class="btn btn-sm"
               hx-post="/dashboard/retry-errors" hx-target="#problem-docs-container" hx-swap="outerHTML"
               onclick="event.stopPropagation()"
+              title="Setzt alle Dateien mit Lesefehler zurück, sie werden beim nächsten Scan neu gelesen"
               style="margin-left:auto; font-size:12px; padding:2px 10px; font-weight:normal; text-transform:none; letter-spacing:normal;">
-        ↺ Nochmals versuchen
+        ↺ Alle nochmals versuchen
       </button>
-    </summary>
-    <div class="problem-docs-list">
-      {% for doc in error_files %}
-      <div class="problem-doc-row problem-doc-error">
-        <span class="status-dot bad" title="{{ doc.reason }}"></span>
-        <span class="problem-doc-name" title="{{ doc.filename }}">{{ doc.filename }}</span>
-        {% if doc.path %}
-        <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
-                onclick="helperReveal(this.dataset.path)"
-                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Im Finder
-        </button>
-        {% endif %}
-        <button type="button" class="btn btn-sm"
-                hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
-                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Jetzt neu scannen
-        </button>
-      </div>
-      {% endfor %}
-      {% if error_total > error_files|length %}
-      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ error_total - error_files|length }} weitere</div>
       {% endif %}
+    </summary>
+    <div class="problem-docs-list" style="max-height:none; padding:6px 8px;">
+      {% for r in read_issues %}
+      <details class="problem-docs" style="margin-bottom:6px;"
+               hx-get="/dashboard/problem-docs/files?art={{ r.art }}&ext={{ r.ext|urlencode }}&reason={{ r.reason|urlencode }}"
+               hx-trigger="toggle once" hx-target="find .pd-files" hx-swap="innerHTML">
+        <summary class="problem-docs-summary pd-summary" title="{{ r.reason }}">
+          <span class="status-dot {{ 'bad' if r.art == 'error' else 'warn' }} pd-dot"></span>
+          <span class="pd-main">
+            <span class="pd-title">{{ r.ext or '(ohne Endung)' }} <span class="problem-docs-badge">{{ r.count|fmt_n }}</span></span>
+          </span>
+        </summary>
+        <div class="problem-docs-list pd-files"><div class="problem-doc-row" style="color:var(--text-3);">Lädt…</div></div>
+      </details>
+      {% endfor %}
     </div>
   </details>
   {% endif %}
 
   {% if no_text_total > 0 %}
   <details class="problem-docs" style="margin-bottom:8px;">
-    <summary class="problem-docs-summary">
-      <span>Kein Textinhalt gefunden</span>
-      <span class="problem-docs-badge">{{ no_text_total }}</span>
+    <summary class="problem-docs-summary pd-summary">
+      <span class="status-dot neutral pd-dot"></span>
+      <span class="pd-main">
+        <span class="pd-title">Kein Text enthalten <span class="problem-docs-badge">{{ no_text_total|fmt_n }}</span></span>
+      </span>
       <button type="button" class="btn btn-sm"
               hx-post="/dashboard/retry-no-text" hx-target="#problem-docs-container" hx-swap="outerHTML"
               onclick="event.stopPropagation()"
@@ -76,9 +106,7 @@
       </button>
     </summary>
     <div class="problem-docs-list">
-      <div class="problem-doc-row" style="color:var(--text-3); font-size:11px;">
-        {% for ext, cnt in no_text_by_ext.items() %}{{ ext or '(ohne Endung)' }}: {{ cnt }}{% if not loop.last %} · {% endif %}{% endfor %}
-      </div>
+      <div class="problem-doc-row" style="color:var(--text-3);">Meist Pläne oder gescannte PDFs, die nur aus Bildern bestehen. Die grössten {{ no_text_sample|length }} sind aufgelistet.</div>
       {% for doc in no_text_sample %}
       <div class="problem-doc-row problem-doc-no_text">
         <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }} — vermutlich gescanntes/bildbasiertes PDF ohne Textebene"></span>
@@ -87,18 +115,18 @@
         <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
                 onclick="helperReveal(this.dataset.path)"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Im Finder
+          Im Finder zeigen
         </button>
         {% endif %}
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Jetzt neu scannen
+          Nochmals versuchen
         </button>
       </div>
       {% endfor %}
       {% if no_text_total > no_text_sample|length %}
-      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ no_text_total - no_text_sample|length }} weitere</div>
+      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ (no_text_total - no_text_sample|length)|fmt_n }} weitere</div>
       {% endif %}
     </div>
   </details>
@@ -106,50 +134,56 @@
 
   {% if oversized_total > 0 %}
   <details class="problem-docs" style="margin-bottom:8px;">
-    <summary class="problem-docs-summary">
-      <span>Zu gross für automatische Extraktion</span>
-      <span class="problem-docs-badge">{{ oversized_total }}</span>
+    <summary class="problem-docs-summary pd-summary">
+      <span class="status-dot neutral pd-dot"></span>
+      <span class="pd-main">
+        <span class="pd-title">Zu gross zum automatischen Lesen <span class="problem-docs-badge">{{ oversized_total|fmt_n }}</span></span>
+      </span>
     </summary>
     <div class="problem-docs-list">
       {% for doc in oversized_files %}
       <div class="problem-doc-row">
         <span class="status-dot neutral" title="{{ doc.filesize|fmt_size }}"></span>
         <span class="problem-doc-name" title="{{ doc.path or doc.filename }}">{{ doc.filename }}</span>
+        <span style="flex-shrink:0; color:var(--text-3);">{{ doc.filesize|fmt_size }}</span>
+        {% if doc.path %}
+        <button type="button" class="btn btn-sm" data-path="{{ doc.path }}"
+                onclick="helperReveal(this.dataset.path)"
+                style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
+          Im Finder zeigen
+        </button>
+        {% endif %}
         <button type="button" class="btn btn-sm"
                 hx-post="/dashboard/extract-now/{{ doc.id }}" hx-target="#problem-docs-container" hx-swap="outerHTML"
                 style="font-size:11px; padding:2px 8px; font-weight:normal; flex-shrink:0;">
-          Jetzt scannen
+          Trotzdem lesen
         </button>
       </div>
       {% endfor %}
       {% if oversized_total > oversized_files|length %}
-      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ oversized_total - oversized_files|length }} weitere (grösste {{ oversized_files|length }} angezeigt)</div>
+      <div class="problem-doc-row" style="color:var(--text-3); font-style:italic;">… und {{ (oversized_total - oversized_files|length)|fmt_n }} weitere (grösste {{ oversized_files|length }} angezeigt)</div>
       {% endif %}
     </div>
   </details>
   {% endif %}
 
-  {% if unsupported_total > 0 %}
+
+  {% if plain_groups %}
+  <div class="pd-section" style="margin-top:14px;">Nur über den Dateinamen auffindbar <span style="font-weight:normal; text-transform:none; letter-spacing:normal;">· normal</span></div>
+  {% for g in plain_groups %}
   <details class="problem-docs" style="margin-bottom:8px;">
-    <summary class="problem-docs-summary">
-      <span>Nicht unterstützte Dateiformate</span>
-      <span class="problem-docs-badge">{{ unsupported_total }}</span>
+    <summary class="problem-docs-summary pd-summary">
+      <span class="status-dot ok pd-dot"></span>
+      <span class="pd-main">
+        <span class="pd-title">{{ g.title }} <span class="problem-docs-badge">{{ g.total|fmt_n }}</span></span>
+      </span>
+      {% if g.key == 'bilder' %}<a href="/" class="problem-doc-reason" style="margin-left:auto; flex:0 0 auto; text-transform:none; letter-spacing:normal; font-weight:normal;" onclick="event.stopPropagation()">→ {{ g.hint }}</a>{% endif %}
     </summary>
     <div class="problem-docs-list">
-      {% for ext, cnt in unsupported_by_ext.items() %}
-      <div class="problem-doc-row">
-        <span class="status-dot ok" title="{{ cnt }} Datei{{ 'en' if cnt != 1 else '' }} — erwartet, kein Handlungsbedarf"></span>
-        <span class="problem-doc-name">{{ ext or '(ohne Endung)' }}</span>
-        {% if ext in gallery_extensions %}<a href="/" class="problem-doc-reason" style="flex:0 1 auto;">→ bereits über Fotos zugänglich</a>{% endif %}
-      </div>
-      {% endfor %}
+      {{ ext_rows(g.exts, 'ok') }}
     </div>
   </details>
+  {% endfor %}
   {% endif %}
-
-  {% if pending_total > 0 %}
-  <div style="font-size:12px; color:var(--text-3); padding:4px 2px;">
-    {{ pending_total }} Dokument{{ "e" if pending_total != 1 else "" }} warten auf den nächsten Scan.
   </div>
-  {% endif %}
 </div>

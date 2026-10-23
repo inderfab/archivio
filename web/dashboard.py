@@ -125,6 +125,8 @@ async def dashboard(request: Request):
         "base_folders": settings.get("scanner.base_folders", []) or [],
         "fda_missing":  fda_missing,
         "scan_status":  _mail_scan.get("status"),
+        "scan_current": _mail_scan.get("current_mailbox"),
+        "scan_only":    _mail_scan.get("only_mailbox"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
@@ -587,6 +589,7 @@ def _scan_chip_response(request: Request, project_id: int):
         return HTMLResponse("")
     scan = _scans.get(project_id, {})
     running = scan.get("status") == "running"
+    queued = running and scan.get("phase") == "queued"
     st = project_scan_state(row["last_scanned_at"], row["archive_tier"] or 0)
     return templates.TemplateResponse("_scan_chip.html", {
         "request": request,
@@ -594,6 +597,7 @@ def _scan_chip_response(request: Request, project_id: int):
         "st": st,
         "hint": dropdown_hint(st),
         "running": running,
+        "queued": queued,
         "processed": scan.get("processed", 0),
         "total": scan.get("total", 0),
     })
@@ -796,6 +800,8 @@ async def mail_dashboard(request: Request):
         "configs":      cfg_list,
         "projects":     [dict(r) for r in projects],
         "scan_status":  _mail_scan.get("status"),
+        "scan_current": _mail_scan.get("current_mailbox"),
+        "scan_only":    _mail_scan.get("only_mailbox"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
@@ -1011,8 +1017,9 @@ async def mail_scan_one(
     """Scannt genau EIN Postfach (per-Postfach 'Jetzt scannen'-Button)."""
     if _mail_scan.get("status") != "running":
         _mail_scan.clear()
-        _mail_scan["status"]     = "running"
-        _mail_scan["started_at"] = _now()
+        _mail_scan["status"]       = "running"
+        _mail_scan["started_at"]   = _now()
+        _mail_scan["only_mailbox"] = mailbox_name
         threading.Thread(target=_run_mail_scan,
                          kwargs={"only_mailbox": mailbox_name}, daemon=True).start()
     return await _mail_section_response(request, connection.get_connection(), context)
@@ -2073,6 +2080,7 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "scan_fresh_label": _fresh_label,
         "scan_fresh_class": _fresh_class,
         "scan_status":      _scans.get(db["id"], {}).get("status"),
+        "scan_queued":      _scans.get(db["id"], {}).get("phase") == "queued",
         "nested":           [],
     }
 
@@ -2109,10 +2117,10 @@ def _discovered_projects_for_base(conn, base: str, db_by_path: dict) -> list[dic
     return results
 
 
-_TEXT_EXTRACTABLE = (
-    ".pdf", ".docx", ".doc", ".dotx", ".xlsx", ".xls", ".xlsm",
-    ".rtf", ".txt", ".csv", ".eml", ".msg", ".pptx", ".ppt",
-)
+# Formate, deren Text Archivio lesen kann -- eine Quelle, die Leser-Tabelle selbst.
+# Vorher eine eigene Liste mit .xls/.msg/.ppt, fuer die es gar keinen Leser gibt.
+from scanner.extractors import _REGISTRY as _EXTRACTOR_REGISTRY
+_TEXT_EXTRACTABLE = tuple(sorted(_EXTRACTOR_REGISTRY))
 
 def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".xlsx":
@@ -2120,6 +2128,111 @@ def _error_reason(extension: str, path: str | None) -> str:
     if extension == ".pdf":
         return "PDF fehlerhaft, passwortgeschützt oder unlesbar"
     return "Datei fehlerhaft oder Format nicht unterstützt"
+
+
+# Gruppen fuer "Nur ueber den Dateinamen auffindbar": die Rohliste nach Endung (Hunderte
+# Zeilen, dominiert von Bildern) sagt nichts darueber, wo Handlungsbedarf besteht.
+_OFFICE_TEXT_FORMATE = {
+    ".doc", ".dot", ".xls", ".xlt", ".ppt", ".pps", ".rtf", ".odt", ".ods", ".odp",
+    ".pages", ".numbers", ".key", ".wpd", ".htm", ".html", ".mht", ".xml", ".msg",
+}
+_CAD_GEO_FORMATE = {
+    ".dwg", ".dxf", ".dwt", ".dws", ".vwx", ".vwxp", ".ifc", ".skp", ".rvt", ".rfa", ".pln",
+    ".mcd", ".3dm", ".stl", ".obj", ".fbx", ".shp", ".shx", ".dbf", ".cpg", ".prj", ".sbn",
+    ".sbx", ".pat", ".lin", ".ctb", ".stb", ".plt", ".dgn",
+}
+# (Schluessel, Titel, Hinweis, braucht Aufmerksamkeit)
+_FORMAT_GRUPPEN = (
+    ("office", "Office- und Textformate", "Inhalt nicht durchsuchbar, nur über den Dateinamen auffindbar", True),
+    ("bilder", "Bilder", "auch unter «Fotos» auffindbar", False),
+    ("cad", "CAD und Geodaten", "nur über den Dateinamen auffindbar", False),
+    ("sonstiges", "Sonstiges", "nur über den Dateinamen auffindbar", False),
+)
+
+
+def _format_gruppe(ext: str) -> str:
+    from web.thumbnails import ALL_GALLERY_EXTENSIONS
+    if ext in ALL_GALLERY_EXTENSIONS:
+        return "bilder"
+    if ext in _OFFICE_TEXT_FORMATE:
+        return "office"
+    if ext in _CAD_GEO_FORMATE:
+        return "cad"
+    return "sonstiges"
+
+
+def _format_groups(by_ext: dict[str, int]) -> list[dict]:
+    """Gruppen fuer "Nur ueber den Dateinamen auffindbar". Office-/Textformate sind hier
+    bewusst NICHT dabei: deren Inhalt waere lesbar, sie gehoeren zu den Lesefehlern
+    (siehe _read_issues)."""
+    groups = []
+    for key, title, hint, attention in _FORMAT_GRUPPEN:
+        if key == "office":
+            continue
+        exts = [(e, n) for e, n in by_ext.items() if _format_gruppe(e) == key]
+        if not exts:
+            continue
+        groups.append({
+            "key": key, "title": title, "hint": hint, "attention": attention,
+            "total": sum(n for _, n in exts),
+            "exts": sorted(exts, key=lambda x: -x[1]),
+        })
+    return groups
+
+
+def _read_issues(error_by_ext: dict[str, int], unsupported_by_ext: dict[str, int]) -> list[dict]:
+    """Eine Liste je Format fuer "Fehler bei der Extraktion": echte Lesefehler (status error)
+    UND Office-/Textformate, deren Inhalt nicht gelesen wird (nicht aktiviert oder ohne
+    Leser). Beides ist fuer den Nutzer dasselbe: Text waere zu erwarten, ist aber nicht
+    durchsuchbar."""
+    from scanner import extractors as _extractors
+
+    readable = set(_extractors._REGISTRY.keys())
+    rows = []
+    for ext, n in error_by_ext.items():
+        rows.append({"ext": ext, "art": "error", "count": n, "can_read": ext in readable,
+                     "reason": _error_reason(ext, None)})
+    for ext, n in unsupported_by_ext.items():
+        if _format_gruppe(ext) != "office":
+            continue
+        rows.append({
+            "ext": ext, "art": "unsupported", "count": n, "can_read": ext in readable,
+            "reason": "Archivio kann dieses Format nicht lesen",
+        })
+    return sorted(rows, key=lambda r: -r["count"])
+
+
+def problem_doc_files(conn, art: str, ext: str, limit: int = 50) -> tuple[list[dict], int]:
+    """Die ersten `limit` Dateien eines Formats aus "Fehler bei der Extraktion" samt
+    Gesamtzahl. art: 'error' (Lesefehler) oder 'unsupported' (Format nicht gelesen)."""
+    statuses = ("error",) if art == "error" else ("listed", "unsupported")
+    ph = ",".join("?" * len(statuses))
+    total = conn.execute(
+        f"SELECT COUNT(*) FROM documents WHERE extension = ? AND extraction_status IN ({ph})",
+        (ext, *statuses)).fetchone()[0]
+    rows = conn.execute(f"""
+        SELECT d.id, d.filename, d.filesize, dp.path
+        FROM documents d
+        LEFT JOIN document_paths dp ON dp.document_id = d.id AND dp.is_primary = 1
+        WHERE d.extension = ? AND d.extraction_status IN ({ph})
+        ORDER BY d.filename LIMIT ?
+    """, (ext, *statuses, limit)).fetchall()
+    return [dict(r) for r in rows], total
+
+
+@router.get("/problem-docs/files", response_class=HTMLResponse)
+async def problem_docs_files(request: Request, art: str = "error", ext: str = "", reason: str = ""):
+    from scanner import extractors as _extractors
+
+    conn = connection.get_connection()
+    try:
+        files, total = problem_doc_files(conn, art, ext)
+    finally:
+        conn.close()
+    return templates.TemplateResponse("_problem_doc_files.html", {
+        "request": request, "files": files, "total": total, "art": art, "ext": ext, "reason": reason,
+        "can_read": ext in _extractors._REGISTRY,
+    })
 
 
 def _extraction_overview(conn) -> dict:
@@ -2235,7 +2348,31 @@ def _extraction_overview(conn) -> dict:
         "SELECT COUNT(*) FROM documents WHERE extraction_status='pending'"
     ).fetchone()[0]
 
+    error_by_ext = {
+        row["extension"]: row["cnt"] for row in conn.execute(
+            f"SELECT extension, COUNT(*) AS cnt FROM documents WHERE extraction_status='error' "
+            f"AND extension IN ({err_placeholders}) GROUP BY extension ORDER BY cnt DESC",
+            _TEXT_EXTRACTABLE,
+        ).fetchall()
+    }
+    oversized_by_ext = dict(sorted(((e, listed_by_ext[e]) for e in oversized_exts), key=lambda kv: -kv[1]))
+    total_docs = conn.execute("SELECT COUNT(*) FROM documents").fetchone()[0]
+    ok_total = conn.execute("SELECT COUNT(*) FROM documents WHERE extraction_status='ok'").fetchone()[0]
+    format_groups = _format_groups(unsupported_by_ext)
+    read_issues = _read_issues(error_by_ext, unsupported_by_ext)
+
+    filename_only_total = sum(g["total"] for g in format_groups)
+
     return {
+        "filename_only_total": filename_only_total,
+        "attention_total":     sum(r["count"] for r in read_issues) + no_text_total + oversized_total,
+        "read_issues":         read_issues,
+        "read_issue_total":    sum(r["count"] for r in read_issues),
+        "total_docs":          total_docs,
+        "searchable_total":    max(0, ok_total - no_text_total),
+        "format_groups":       format_groups,
+        "error_by_ext":        error_by_ext,
+        "oversized_by_ext":    oversized_by_ext,
         "unsupported_total":   sum(unsupported_by_ext.values()),
         "unsupported_by_ext":  dict(sorted(unsupported_by_ext.items(), key=lambda kv: -kv[1])),
         "gallery_extensions":  ALL_GALLERY_EXTENSIONS,
@@ -2405,14 +2542,29 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
 
-    # Mailbox-Projekte: Mail-Scan starten statt Datei-Scan
+    # Mailbox-Projekte: nur DIESES Postfach scannen (vorher liefen alle Postfaecher) und
+    # warten, bis es fertig ist -- so zeigt die Projektzeile "Scannt…" bis zum Ende und
+    # danach die echte Anzahl statt sofort "0 Dok. gefunden".
     if path.startswith("mailbox:"):
+        mailbox_name = path[len("mailbox:"):]
         if _mail_scan.get("status") != "running":
             _mail_scan.clear()
-            _mail_scan["status"]     = "running"
-            _mail_scan["started_at"] = _now()
-            threading.Thread(target=_run_mail_scan, daemon=True).start()
-        progress.update({"status": "done", "count": 0, "finished_at": _now()})
+            _mail_scan["status"]       = "running"
+            _mail_scan["started_at"]   = _now()
+            _mail_scan["only_mailbox"] = mailbox_name
+            t = threading.Thread(target=_run_mail_scan,
+                                 kwargs={"only_mailbox": mailbox_name}, daemon=True)
+            t.start()
+            t.join()
+        try:
+            _c = connection.get_connection()
+            count = _c.execute("SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)).fetchone()[0]
+            _c.close()
+        except Exception:
+            count = "?"
+        status = _mail_scan.get("status")
+        progress.update({"status": status if status in ("done", "error", "cancelled") else "done",
+                         "count": count, "error": _mail_scan.get("error", ""), "finished_at": _now()})
         return
 
     # Warten bis kein anderer Scan läuft (1 Worker-Prozess gleichzeitig)
@@ -2484,6 +2636,7 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
                 status=progress.get("status", "error"),
                 peak_memory_mb=sampler.peak_mb, peak_cpu_pct=sampler.peak_cpu,
                 batch_id=batch_id,
+                workers=max(1, min(4, int(settings.get("scanner.num_workers", 1) or 1))),
             )
             _conn.close()
         except Exception as exc:
@@ -2594,11 +2747,18 @@ def _scan_cell(project_id: int, status: str) -> str:
         folder    = scan.get("current_folder", "")
         progress  = f" {processed}/{total}" if total else ""
         label     = f"Scan: {folder}{progress}" if folder else f"Scannt…{progress}"
+        # Bei "Alle scannen" stehen alle Projekte auf running, die meisten warten nur auf
+        # den _scan_lock. Die sollen nicht "Scannt…" zeigen, sonst sieht es so aus, als
+        # liefen alle gleichzeitig.
+        badge_cls = "running"
+        if scan.get("phase") == "queued":
+            label, badge_cls = "Wartet…", "archived"
         return (
             f'<span class="scan-cell" id="{cid}" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '
             f'hx-trigger="every 3s" hx-swap="outerHTML">'
-            f'<span class="scan-badge running">{label}</span>'
+            f'<span class="scan-badge {badge_cls}" '
+            f'title="{"Wartet, bis der laufende Scan fertig ist" if badge_cls == "archived" else ""}">{label}</span>'
             f'<button class="btn btn-cancel" style="margin-left:6px;" '
             f'hx-post="/dashboard/projects/{project_id}/scan/cancel" '
             f'hx-target="#{cid}" hx-swap="outerHTML">Abbrechen</button>'

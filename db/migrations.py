@@ -45,6 +45,11 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "029_chunks_ohne_embedding", _m029)
     _apply(conn, "030_photo_tags_project", _m030)
     _apply(conn, "031_photo_tags_mailbox", _m031)
+    _apply(conn, "039_scan_log_error_message", _m039)
+    _apply(conn, "040_scan_log_workers", _m040)
+    # Kein einmaliger Schritt: kommt spaeter ein Leser dazu (z.B. .xls), muessen dessen
+    # bisher nur gelistete Dateien ebenfalls neu eingelesen werden.
+    requeue_newly_readable(conn)
 
 
 def _m030(conn: sqlite3.Connection):
@@ -831,3 +836,41 @@ def _m029(conn: sqlite3.Connection):
         log.info("document_chunks.embedding entfernt -- VACUUM beim naechsten Start")
     except Exception as exc:
         log.warning("embedding konnte nicht entfernt werden (SQLite zu alt?): %s", exc)
+
+
+def requeue_newly_readable(conn: sqlite3.Connection):
+    """Seit _supported_extensions() jede Endung mit Leser einschliesst, waeren bisher nur
+    gelistete Dateien dieser Formate (v.a. .doc/.rtf in aelteren Installationen) trotzdem
+    nie gelesen worden: der Schnellpfad im Scanner ueberspringt 'listed' bei unveraenderter
+    Datei. Auf 'pending' setzen, damit der naechste Scan sie einliest. PDFs und zu grosse
+    Dateien bleiben aussen vor (die waren aus anderen Gruenden nur gelistet)."""
+    from scanner.extractors import _REGISTRY
+
+    exts = sorted(e for e in _REGISTRY if e != ".pdf")
+    ph = ",".join("?" * len(exts))
+    n = conn.execute(
+        f"UPDATE documents SET extraction_status = 'pending' "
+        f"WHERE extraction_status IN ('listed', 'unsupported') AND extension IN ({ph}) "
+        f"AND filesize <= ? AND source_type = 'filesystem'",
+        (*exts, 30 * 1024 * 1024),
+    ).rowcount
+    conn.commit()
+    if n:
+        log.info("%d bisher nur gelistete Dateien lesbarer Formate werden neu eingelesen", n)
+
+
+def _m039(conn: sqlite3.Connection):
+    """Grund eines gescheiterten oder abgebrochenen Scans -- vorher sah man im Verlauf nur
+    einen roten Punkt ohne Erklaerung."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_log)")}
+    if "error_message" not in cols:
+        conn.execute("ALTER TABLE scan_log ADD COLUMN error_message TEXT")
+    conn.commit()
+
+
+def _m040(conn: sqlite3.Connection):
+    """Mit wie vielen Workern ein Scan lief -- hilft bei langen oder abgebrochenen Scans."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_log)")}
+    if "workers" not in cols:
+        conn.execute("ALTER TABLE scan_log ADD COLUMN workers INTEGER")
+    conn.commit()
