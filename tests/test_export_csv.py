@@ -13,10 +13,10 @@ def _rows(text):
 
 def _seed(conn):
     with conn:
-        conn.execute("INSERT INTO projects (id, name, path) VALUES (7, 'Feldstrasse Aarburg', '/nas/219 Feldstrasse')")
+        conn.execute("INSERT INTO projects (id, name, path) VALUES (7, 'Wiesenweg Seldwyla', '/nas/219 Wiesenweg')")
         conn.execute(
             "INSERT INTO search_log (ts, kind, query, project_id, filters, result_count, duration_ms, clicks) "
-            "VALUES ('2026-10-20T06:00:00Z','suche','Brandschutz Gipser Keller',7,'Typ: .pdf',61,321,1)")
+            "VALUES ('2026-10-20T06:00:00Z','suche','Brandschutz Gipser Muster',7,'Typ: .pdf',61,321,1)")
         conn.execute(
             "INSERT INTO mcp_log (ts, tool, query, project_id, files_json, chars_sent, blocked_json, status) "
             "VALUES ('2026-10-20T07:00:00Z','search','u wert glas',7,?,500,?, 'ok')",
@@ -25,7 +25,7 @@ def _seed(conn):
         conn.execute(
             "INSERT INTO scan_log (project_id, project_name, started_at, finished_at, duration_s, status, total, "
             "processed, new_count, skipped, error_count, errors_json, peak_memory_mb, peak_cpu_pct) "
-            "VALUES (7,'Feldstrasse Aarburg','2026-10-20T01:00:00Z','2026-10-20T01:10:00Z',600,'done',10,10,2,8,1,?,900,55)",
+            "VALUES (7,'Wiesenweg Seldwyla','2026-10-20T01:00:00Z','2026-10-20T01:10:00Z',600,'done',10,10,2,8,1,?,900,55)",
             (json.dumps([{"filename": "Vertrag Meier.pdf", "path": "/nas/219/Vertrag Meier.pdf"}]),))
 
 
@@ -38,12 +38,12 @@ def test_norm_mode_defaults_to_anonym():
 def test_search_klartext_and_anonym(tmp_db):
     _seed(tmp_db)
     kl = ex.search_csv(tmp_db, ex.KLARTEXT)
-    assert "Brandschutz Gipser Keller" in kl and "Feldstrasse Aarburg" in kl
+    assert "Brandschutz Gipser Muster" in kl and "Wiesenweg Seldwyla" in kl
     an = ex.search_csv(tmp_db, ex.ANONYM)
     assert "Brandschutz" not in an and "Feldstrasse" not in an
     r = _rows(an)
     assert r[0][2:4] == ["Wortanzahl", "Länge (Zeichen)"]
-    assert r[1][2:5] == ["3", str(len("Brandschutz Gipser Keller")), "Projekt 7"]
+    assert r[1][2:5] == ["3", str(len("Brandschutz Gipser Muster")), "Projekt 7"]
     assert r[1][5:9] == ["Typ: .pdf", "61", "321", "1"]
 
 
@@ -65,7 +65,7 @@ def test_scan_anonym_hides_project_and_paths(tmp_db):
     row = _rows(an)[1]
     assert "Projekt 7" in row and ".pdf" in row and "600" in row[2]
     kl = ex.scan_csv(tmp_db, ex.KLARTEXT)
-    assert "Feldstrasse Aarburg" in kl and "/nas/219/Vertrag Meier.pdf" in kl
+    assert "Wiesenweg Seldwyla" in kl and "/nas/219/Vertrag Meier.pdf" in kl
 
 
 def test_docs_csv_runs_and_anonymises(tmp_db):

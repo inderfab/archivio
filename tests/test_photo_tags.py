@@ -260,7 +260,7 @@ def test_rename_tag_rejects_empty_name(tmp_db):
 
 
 def test_tags_are_scoped_to_project(tmp_db, tmp_path):
-    pid = queries.insert_project(tmp_db, "200_Keller", str(tmp_path / "k"))
+    pid = queries.insert_project(tmp_db, "200_Atelier", str(tmp_path / "k"))
     glob = queries.get_or_create_tag(tmp_db, "Global")
     proj = queries.get_or_create_tag(tmp_db, "Global", (pid, None))
     assert glob != proj  # gleicher Name, anderer Scope
@@ -274,7 +274,7 @@ def test_tags_are_scoped_to_project(tmp_db, tmp_path):
 
 
 def test_endpoints_respect_project_scope(tmp_db, tmp_path):
-    pid = queries.insert_project(tmp_db, "200_Keller", str(tmp_path / "k"))
+    pid = queries.insert_project(tmp_db, "200_Atelier", str(tmp_path / "k"))
     (tmp_path / "k").mkdir()
     photo = tmp_path / "k" / "a.jpg"
     photo.write_bytes(_jpeg_bytes())

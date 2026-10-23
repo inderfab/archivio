@@ -34,7 +34,7 @@ def test_disabled_by_default_no_write(tmp_db):
 def test_enabled_inserts_pending_row(tmp_db):
     settings._settings.setdefault("rubrica", {})["enabled"] = True
 
-    ok = save_signature_source(_record(), "215 Flurhofstrasse St-Gallen", "INBOX")
+    ok = save_signature_source(_record(), "215 Rosenweg Beispielstadt", "INBOX")
     assert ok is True
 
     conn = get_rubrica_connection()
@@ -45,7 +45,7 @@ def test_enabled_inserts_pending_row(tmp_db):
     assert row["status"] == "pending"
     assert row["absender_email"] == "max@example.com"
     assert row["empfaenger"] == "empfang@example.com"
-    assert row["projekt"] == "215 Flurhofstrasse St-Gallen"
+    assert row["projekt"] == "215 Rosenweg Beispielstadt"
     assert row["postfach"] == "INBOX"
     assert "Freundliche Grüsse" in row["text"]
 

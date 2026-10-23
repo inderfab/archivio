@@ -18,14 +18,14 @@ def test_active_folder_projects_sorted_alphanumerically(tmp_db):
     ORDER BY liefert SQLite die rowid-Reihenfolge, also die der Aufschaltung."""
     from web.dashboard import _active_folder_projects
 
-    queries.insert_project(tmp_db, "122 BG Schönheim Urdorf", "/scan/122")
-    queries.insert_project(tmp_db, "017 Aepli Herisau", "/scan/017")
-    queries.insert_project(tmp_db, "099 Dürrenrain Pfungen", "/scan/099")
+    queries.insert_project(tmp_db, "122 BG Schönau Musterberg", "/scan/122")
+    queries.insert_project(tmp_db, "017 Lindenhof Bergwil", "/scan/017")
+    queries.insert_project(tmp_db, "099 Mühlerain Talwiesen", "/scan/099")
     tmp_db.execute("UPDATE projects SET active=1")
     tmp_db.commit()
 
     names = [r["name"] for r in _active_folder_projects(tmp_db)]
-    assert names == ["017 Aepli Herisau", "099 Dürrenrain Pfungen", "122 BG Schönheim Urdorf"]
+    assert names == ["017 Lindenhof Bergwil", "099 Mühlerain Talwiesen", "122 BG Schönau Musterberg"]
 
 
 def test_nested_projects_render_in_alphanumeric_order(tmp_path, tmp_db):

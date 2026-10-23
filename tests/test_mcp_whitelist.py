@@ -88,7 +88,7 @@ def test_scoped_search_by_project_name_resolves_to_real_id(tmp_db):
     """search() zeigt dem LLM nur den Projekt-NAMEN an, nie die
     interne DB-ID (siehe helper/archivio_mcp.py) -- ein späterer scope-Aufruf schickt
     deshalb den Namen oder eine daraus geratene Zahl, keine echte ID. Vorher wurde
-    z.B. project_id="211" (aus "211 Emmenhof Derendingen" geraten) via int() direkt
+    z.B. project_id="211" (aus "211 Sonnenhof Musterdorf" geraten) via int() direkt
     als DB-ID benutzt -- passte keine echte Projekt-ID zufällig, blockierte das
     genauso wie eine echte Whitelist-Sperre, obwohl das Projekt freigegeben war."""
     from fastapi.testclient import TestClient
@@ -96,12 +96,12 @@ def test_scoped_search_by_project_name_resolves_to_real_id(tmp_db):
 
     enabled, disabled = _two_projects(tmp_db)
     real_id = enabled
-    tmp_db.execute("UPDATE projects SET name='211 Emmenhof Derendingen' WHERE id=?", (real_id,))
+    tmp_db.execute("UPDATE projects SET name='211 Sonnenhof Musterdorf' WHERE id=?", (real_id,))
     tmp_db.commit()
     assert real_id != 211, "Testannahme verletzt: echte ID darf nicht zufällig 211 sein"
 
     c = TestClient(app)
-    for project_ref in ("211 Emmenhof Derendingen", "Emmenhof", "211"):
+    for project_ref in ("211 Sonnenhof Musterdorf", "Sonnenhof", "211"):
         r = c.get("/api/mcp/search", params={"q": "Fassadenkonzept", "project_id": project_ref})
         assert r.status_code == 200
         assert r.json()["results"], f"project_id={project_ref!r} sollte auf das freigegebene Projekt auflösen"
