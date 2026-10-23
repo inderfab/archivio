@@ -110,7 +110,8 @@ def test_trust_page_has_contact_and_canonical(page):
 
 
 def test_homepage_links_docs_and_trust_pages():
-    links = set(_parse("index.html").links)
+    raw = set(_parse("index.html").links)
+    links = raw | {h.lstrip("/") for h in raw}
     # Anleitung als /docs verlinkt: so erkennen Agent-Scanner die Doku-Seite
     assert "/docs" in links
     for target in ["mcp.html", *TRUST_PAGES]:
@@ -306,3 +307,16 @@ def test_app_links_point_to_current_domain():
     root = Path(__file__).parent.parent
     for f in list((root / "web" / "templates").glob("*.html")):
         assert "bauchat" not in f.read_text(encoding="utf-8").lower(), f"alte Domain in {f.name}"
+
+
+def test_all_pages_share_the_same_footer():
+    # Ein einheitlicher Footer auf allen Seiten, nur mit absoluten Links
+    footers = {}
+    for path in DOCS.glob("*.html"):
+        html = path.read_text(encoding="utf-8")
+        m = re.findall(r'<footer class="site-footer">.*?</footer>', html, re.S)
+        assert len(m) == 1, f"{path.name}: Footer fehlt oder doppelt"
+        footers[path.name] = m[0]
+    assert len(set(footers.values())) == 1, "Footer unterscheiden sich zwischen den Seiten"
+    hrefs = re.findall(r'href="([^"]+)"', next(iter(footers.values())))
+    assert all(h.startswith(("/", "mailto:")) for h in hrefs), hrefs

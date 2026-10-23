@@ -38,13 +38,6 @@
     }
     .callout strong { color: #111; }
 
-    footer {
-      border-top: 1px solid #e8e8e8; padding: 32px 48px;
-      display: flex; justify-content: space-between; align-items: center;
-      font-size: 13px; color: #999; flex-wrap: wrap; gap: 8px;
-    }
-    footer a { color: #999; text-decoration: none; }
-    footer a:hover { color: #111; }
 
     @media print {
       header, footer { display: none; }
@@ -53,8 +46,27 @@
     }
     @media (max-width: 600px) {
       header { padding: 20px 24px; }
-      footer { padding: 24px; flex-direction: column; align-items: flex-start; }
     }
+  </style>
+  <style>
+    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
+    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
+    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
+    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+    .site-footer ul { list-style: none; display: grid; gap: 7px; }
+    .site-footer a { color: #777; text-decoration: none; }
+    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
+    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+    .sf-brand { display: grid; gap: 4px; align-content: start; }
+    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
+    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
+    @media (max-width: 760px) {
+      .site-footer { padding: 36px 24px 24px; }
+      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+      .sf-brand { grid-column: 1 / -1; }
+    }
+    @media print { .site-footer { display: none; } }
   </style>
 </head>
 <body>
@@ -96,16 +108,39 @@
     <p>Viele Fragen beantworten bereits die <a href="docs.html">Anleitung</a>, die <a href="installation.html">Erstinstallation</a> und das <a href="merkblatt.html">Merkblatt zum Umgang mit euren Daten</a>. Archivio wird kostenlos angeboten, ein Anspruch auf Support besteht nicht (siehe <a href="haftungsausschluss.html">Haftungsausschluss</a>). Anfragen werden aber gerne beantwortet, und Vorschläge sind willkommen.</p>
   </main>
 
-  <footer>
-    <a href="mailto:info@architools.ch">info@architools.ch</a>
-    <div style="display:flex;gap:24px;align-items:center;flex-wrap:wrap;">
-      <a href="docs.html">Anleitung</a>
-      <a href="about.html">Über Archivio</a>
-      <a href="contact.html">Kontakt</a>
-      <a href="privacy.html">Datenschutz</a>
-      <a href="haftungsausschluss.html">Haftungsausschluss</a>
-      <span>© 2026 Archivio</span>
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/">Archivio</a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/docs">Anleitung</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Über</p>
+        <ul>
+          <li><a href="/about.html">Über Archivio</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+          <li><a href="mailto:info@architools.ch?subject=Archivio%20Feedback">Feedback senden</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
     </div>
+    <p class="sf-bottom">© 2026 architools, Winterthur</p>
   </footer>
 
 </body>
