@@ -30,7 +30,7 @@ Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz
 
 - [Startseite](https://architools.ch/): Überblick über Funktionen, Download für macOS
 - [Anleitung](https://architools.ch/docs.html): Installation und erster Start
-- [Häufige Fragen](https://architools.ch/#faq): Voraussetzungen, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, Updates, Testbetrieb
+- [Häufige Fragen](https://architools.ch/#faq): Voraussetzungen, bestehende Ablage, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, Updates, Testbetrieb
 - [Erstinstallation](https://architools.ch/installation.html): Schritt für Schritt nach dem Download
 - [MCP-Schnittstelle](https://architools.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
 - [Merkblatt zu euren Daten](https://architools.ch/merkblatt.html): was Archivio liest, was im Büro bleibt und was bei aktivierter KI-Schnittstelle übermittelt wird
