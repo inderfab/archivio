@@ -1,6 +1,6 @@
 # Archivio
 
-> Archivio ist eine lokale Dokumentenverwaltung und Volltextsuche für Architekturbüros. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche. Archivio läuft vollständig lokal auf einem Mac im Büro, ohne Cloud-Dienst und ohne eigene KI — Daten verlassen das Büro nicht.
+> Archivio ist eine lokale Dokumentensuche für Architekturbüros und bringt alle Projektdaten an einen Ort. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche. Archivio läuft vollständig lokal auf einem Mac im Büro, ohne Cloud-Dienst und ohne eigene KI — Daten verlassen das Büro nicht.
 
 Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz) unter dem Namen architools entwickelt. Es läuft auf macOS (Apple Silicon und Intel), ist von Apple notarisiert und zurzeit kostenlos. Es liest freigegebene Ordner auf dem Büro-Server (z. B. NAS) und verknüpfte Mailkonten ausschliesslich lesend und baut daraus einen lokalen Suchindex auf.
 
