@@ -1358,10 +1358,20 @@ def _scan_und_suche_context(conn) -> dict:
         last_batch_sub = f"Letzter Scan, {t0:%d.%m.} {t0:%H:%M}–{t1:%H:%M}"
     else:
         last_batch_label, last_batch_sub = "—", "Letzter Scan"
+        mins = None
 
+    from config import settings
+    from scanner.scan_log import worker_hinweis
+    current_workers = max(1, min(4, int(settings.get("scanner.num_workers", 1) or 1)))
+    ram_pct = peak_mb / total_ram_mb * 100 if peak_mb and total_ram_mb else 0
+    cpu_pct = min(100, peak_cpu / cores) if peak_cpu else 0
+    stall = any("in Folge fehlgeschlagen" in (s.get("error_message") or "") for s in scan_recent)
+    scan_hint = worker_hinweis(current_workers, mins, ram_pct, cpu_pct, stall)
 
     return {
         "last_batch_label":     last_batch_label,
+        "current_workers":      current_workers,
+        "scan_hint":            scan_hint,
         "last_batch_sub":       last_batch_sub,
         "scan_peak_mem_label":  scan_peak_mem_label,
         "scan_peak_mem_sub":    scan_peak_mem_sub,

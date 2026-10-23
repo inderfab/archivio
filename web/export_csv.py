@@ -142,11 +142,12 @@ def scan_csv(conn, mode: str) -> str:
         out.append([
             r["started_at"], r["finished_at"] or "", r["duration_s"] if r["duration_s"] is not None else "",
             r["status"], grund, proj, r["total"], r["processed"], r["new_count"], r["skipped"],
-            r["error_count"], r["peak_memory_mb"], r["peak_cpu_pct"], r["batch_id"] or "", err,
+            r["error_count"], r["peak_memory_mb"], r["peak_cpu_pct"],
+            (r["workers"] if "workers" in r.keys() and r["workers"] else ""), r["batch_id"] or "", err,
         ])
     return _csv(
         ["Start", "Ende", "Dauer (s)", "Status", "Grund", "Projekt", "Dateien gesamt", "Verarbeitet", "Neu",
-         "Übersprungen", "Fehler (Anzahl)", "Spitze Speicher (MB)", "Spitze CPU (%)", "Sammel-Scan",
+         "Übersprungen", "Fehler (Anzahl)", "Spitze Speicher (MB)", "Spitze CPU (%)", "Worker", "Sammel-Scan",
          "Fehlerdateien" if mode == KLARTEXT else "Fehlerdateien (Endungen)"], out)
 
 

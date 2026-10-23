@@ -60,3 +60,21 @@ def test_log_scan_stores_error_message(tmp_db):
     rows = tmp_db.execute("SELECT status, error_message FROM scan_log ORDER BY started_at").fetchall()
     assert rows[0]["error_message"] == "Kein Lesezugriff auf /x"
     assert rows[1]["error_message"] is None
+
+
+def test_worker_hinweis_only_when_useful():
+    from scanner.scan_log import worker_hinweis
+
+    assert worker_hinweis(1, 60, 10, 10, False) == ""                       # kurz -> nichts
+    assert "2 Workern" in worker_hinweis(1, 190, 20, 15, False)              # lang + Luft
+    assert worker_hinweis(1, 190, 60, 15, False) == ""                       # Speicher schon knapp
+    assert "Weniger Worker" in worker_hinweis(3, 30, 80, 10, False)          # Mac ueberlastet
+    assert "Weniger Worker" in worker_hinweis(2, 30, 20, 10, True)           # Abbruch durch Haenger
+    assert worker_hinweis(1, 30, 80, 10, True) == ""                         # 1 Worker: nichts zu reduzieren
+
+
+def test_log_scan_stores_workers(tmp_db):
+    from scanner.scan_log import log_scan
+
+    log_scan(tmp_db, None, "P", {}, "2026-10-23T01:00:00Z", "2026-10-23T01:00:05Z", "done", workers=2)
+    assert tmp_db.execute("SELECT workers FROM scan_log").fetchone()["workers"] == 2
