@@ -148,7 +148,7 @@ def test_mcp_search_scope_folders_only_excludes_documents(tmp_db, tmp_path):
     from fastapi.testclient import TestClient
     from web.main import app
 
-    project_dir = tmp_path / "Keller Winterthur"
+    project_dir = tmp_path / "Keller Musterwil"
     project_dir.mkdir()
     doc_path = project_dir / "Keller Neubau_Haustechnik.pdf"
     doc_path.write_text("Inhalt zum Begriff Keller", encoding="utf-8")
@@ -172,7 +172,7 @@ def test_mcp_search_scope_folders_only_excludes_documents(tmp_db, tmp_path):
     assert r.status_code == 200
     data = r.json()
     assert data["results"] == [], "scope=folders darf keine Dokument-/Dateinamen-Treffer liefern"
-    assert data["folders"], "Ordnername 'Keller Winterthur' haette gefunden werden muessen"
+    assert data["folders"], "Ordnername 'Keller Musterwil' haette gefunden werden muessen"
 
 
 def test_mcp_base_folders_returns_only_mcp_enabled_projects(tmp_db):

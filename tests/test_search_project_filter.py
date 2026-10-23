@@ -32,7 +32,7 @@ def test_search_shows_path_inside_filtered_project(tmp_db):
     from web.main import app
 
     other   = queries.insert_project(tmp_db, "000 Archivprojekte", "/scan/other")
-    keller  = queries.insert_project(tmp_db, "200 Keller Winterthur", "/scan/keller")
+    keller  = queries.insert_project(tmp_db, "200 Atelier Musterwil", "/scan/keller")
     _make_duplicated_doc(tmp_db, other, keller, "vorlage.pdf", "Fensterdetail als Vorlage")
     tmp_db.commit()
 
@@ -42,7 +42,7 @@ def test_search_shows_path_inside_filtered_project(tmp_db):
     # search_results.html rendert filepath -- muss den Keller-Pfad zeigen, nicht /scan/other/...
     assert "/scan/keller/vorlage.pdf" in r.text
     assert "/scan/other/vorlage.pdf" not in r.text
-    assert "200 Keller Winterthur" in r.text
+    assert "200 Atelier Musterwil" in r.text
 
 
 def test_search_without_project_filter_shows_primary_path(tmp_db):
@@ -52,7 +52,7 @@ def test_search_without_project_filter_shows_primary_path(tmp_db):
     from web.main import app
 
     other  = queries.insert_project(tmp_db, "000 Archivprojekte", "/scan/other")
-    keller = queries.insert_project(tmp_db, "200 Keller Winterthur", "/scan/keller")
+    keller = queries.insert_project(tmp_db, "200 Atelier Musterwil", "/scan/keller")
     _make_duplicated_doc(tmp_db, other, keller, "vorlage2.pdf", "Fensterdetail als Vorlage")
     tmp_db.commit()
 
@@ -67,7 +67,7 @@ def test_mcp_search_shows_path_inside_filtered_project(tmp_db):
     from web.main import app
 
     other  = queries.insert_project(tmp_db, "000 Archivprojekte", "/scan/other")
-    keller = queries.insert_project(tmp_db, "200 Keller Winterthur", "/scan/keller")
+    keller = queries.insert_project(tmp_db, "200 Atelier Musterwil", "/scan/keller")
     tmp_db.execute("UPDATE projects SET mcp_enabled=1 WHERE id=?", (keller,))
     _make_duplicated_doc(tmp_db, other, keller, "vorlage3.pdf", "Fensterdetail als Vorlage")
     tmp_db.commit()
@@ -79,4 +79,4 @@ def test_mcp_search_shows_path_inside_filtered_project(tmp_db):
     assert data["results"], "erwartete mindestens einen Treffer"
     hit = data["results"][0]
     assert hit["filepath"] == "/scan/keller/vorlage3.pdf"
-    assert hit["project_name"] == "200 Keller Winterthur"
+    assert hit["project_name"] == "200 Atelier Musterwil"

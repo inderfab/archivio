@@ -325,7 +325,7 @@ Die lokale KI-Suche (Ollama, Embeddings, generierte Antwort) ist **vollständig 
 
 - **Scope:** `search_in` (`docs,folders,filenames`, + `plans`). `docs` → `chunks_fts` (Fallback LIKE); `filenames` → `documents_fts` mit `filename:term*`; `folders` → `_search_folders`.
 - **`_make_fts_query`:** Split auf Space UND Punkt; deutsche Komposita (Nachbarwörter zusammengeklebt vor/rück).
-- **`_search_folders` (Filter-Fix seit 3.0.4):** filtert bei Projektauswahl nach **Projektpfad** (`dp.path LIKE projektpfad/%`), NICHT nur `project_id`. Grund: durch Hash-Dedup hat ein Dokument mehrere Pfade in verschiedenen Projekten → `project_id`-Filter zeigte sonst fremde Projektordner (z. B. HB-Therm/Skyframe bei Auswahl „200 Keller"). Vorfilterung in SQL (`LIKE %wort%`), `folder.exists()` (NAS-Stat) nur für die wenigen Treffer.
+- **`_search_folders` (Filter-Fix seit 3.0.4):** filtert bei Projektauswahl nach **Projektpfad** (`dp.path LIKE projektpfad/%`), NICHT nur `project_id`. Grund: durch Hash-Dedup hat ein Dokument mehrere Pfade in verschiedenen Projekten → `project_id`-Filter zeigte sonst fremde Projektordner (z. B. Ordner eines anderen Projekts bei Auswahl „200 Atelier"). Vorfilterung in SQL (`LIKE %wort%`), `folder.exists()` (NAS-Stat) nur für die wenigen Treffer.
 - **Such-Dropdown:** „Mail" liegt in der Gruppe „Kategorien".
 
 ---
@@ -459,7 +459,7 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 ## 16. Sicherheits-Randbedingung (IMMER beachten)
 
-Die lokal gelesenen **Mail-Zugangsdaten (bauchat/strut, `config.yaml`) dürfen NIE nach GitHub**. `config.yaml` ist gitignored, das Datenverzeichnis liegt außerhalb des Repos, nur Code wird committet. `*.db` ist gitignored.
+Die lokal gelesenen **Mail-Zugangsdaten (Büro-Postfächer, `config.yaml`) dürfen NIE nach GitHub**. `config.yaml` ist gitignored, das Datenverzeichnis liegt außerhalb des Repos, nur Code wird committet. `*.db` ist gitignored.
 
 ---
 

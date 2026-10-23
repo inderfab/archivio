@@ -48,7 +48,7 @@ def _resolve_mcp_project_ref(conn, raw: str) -> tuple[str, str | None]:
     project_id auf. Grund: search() zeigt dem LLM in den Treffern
     nur den Projekt-NAMEN an (nie die interne DB-ID, siehe helper/archivio_mcp.py)
     -- ein späterer scope-Aufruf schickt deshalb fast immer den Namen oder eine aus
-    dem Namen geratene Zahl (z.B. "211" aus "211 Emmenhof Derendingen"), keine echte
+    dem Namen geratene Zahl (z.B. "211" aus "211 Sonnenhof Musterdorf"), keine echte
     ID. Ohne diese Auflösung landet man bei _project_mcp_enabled(conn, 211) und
     bekommt "nicht freigegeben" zurück, obwohl das Projekt (mit anderer echter ID)
     längst freigegeben ist -- nicht unterscheidbar von einer echten Sperre.

@@ -12,12 +12,12 @@ from scanner.mail_scanner import _encode_imap_utf7
 
 
 def test_encode_imap_utf7_is_ascii_safe_for_umlauts():
-    name = "200_Keller_Winterthur/Möbelierung"
+    name = "200_Atelier_Musterwil/Möbelierung"
     encoded = _encode_imap_utf7(name)
     encoded.encode("ascii")  # darf nicht raisen
-    assert encoded == "200_Keller_Winterthur/M&APY-belierung"
+    assert encoded == "200_Atelier_Musterwil/M&APY-belierung"
 
 
 def test_encode_imap_utf7_roundtrip_ascii_names_unchanged():
-    name = "219_Feldstrasse_Aarburg"
+    name = "219_Wiesenweg_Seldwyla"
     assert _encode_imap_utf7(name) == name

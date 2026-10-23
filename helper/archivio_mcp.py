@@ -192,7 +192,7 @@ def search(query: str, project: str = "", scope: str = "docs,filenames,folders")
     query: Suchbegriff(e).
     project: optional, zum Einschränken auf ein Projekt -- den Projektnamen genau so
     übernehmen, wie er in eckigen Klammern [...] bei einem vorherigen Treffer stand
-    (z.B. "211 Emmenhof Derendingen" oder auch nur "Emmenhof"), keine ID erfinden.
+    (z.B. "211 Sonnenhof Musterdorf" oder auch nur "Sonnenhof"), keine ID erfinden.
     scope: Komma-getrennt aus "docs" (Dokumentinhalt), "filenames" (Dateinamen),
     "folders" (Ordnernamen) — standardmässig alle drei aktiv.
 
@@ -429,7 +429,7 @@ def copy_documents_to_folder(document_ids: str, title: str = "Gesammelte Dokumen
     freigegebenes Projekt, erkannte Norm, Sperrliste) oder ohne Datei werden
     übersprungen und im Ergebnis einzeln mit Grund gemeldet.
     title: kurzer, sprechender Name für den neuen Ordner -- passend zum Inhalt wählen,
-    z.B. "Brandschutz Emmenhof".
+    z.B. "Brandschutz Sonnenhof".
     """
     import base64
     import re
