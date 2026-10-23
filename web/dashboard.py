@@ -587,6 +587,7 @@ def _scan_chip_response(request: Request, project_id: int):
         return HTMLResponse("")
     scan = _scans.get(project_id, {})
     running = scan.get("status") == "running"
+    queued = running and scan.get("phase") == "queued"
     st = project_scan_state(row["last_scanned_at"], row["archive_tier"] or 0)
     return templates.TemplateResponse("_scan_chip.html", {
         "request": request,
@@ -594,6 +595,7 @@ def _scan_chip_response(request: Request, project_id: int):
         "st": st,
         "hint": dropdown_hint(st),
         "running": running,
+        "queued": queued,
         "processed": scan.get("processed", 0),
         "total": scan.get("total", 0),
     })
@@ -2073,6 +2075,7 @@ def _db_project_entry(conn, db, label: str | None = None) -> dict:
         "scan_fresh_label": _fresh_label,
         "scan_fresh_class": _fresh_class,
         "scan_status":      _scans.get(db["id"], {}).get("status"),
+        "scan_queued":      _scans.get(db["id"], {}).get("phase") == "queued",
         "nested":           [],
     }
 
@@ -2594,11 +2597,18 @@ def _scan_cell(project_id: int, status: str) -> str:
         folder    = scan.get("current_folder", "")
         progress  = f" {processed}/{total}" if total else ""
         label     = f"Scan: {folder}{progress}" if folder else f"Scannt…{progress}"
+        # Bei "Alle scannen" stehen alle Projekte auf running, die meisten warten nur auf
+        # den _scan_lock. Die sollen nicht "Scannt…" zeigen, sonst sieht es so aus, als
+        # liefen alle gleichzeitig.
+        badge_cls = "running"
+        if scan.get("phase") == "queued":
+            label, badge_cls = "Wartet…", "archived"
         return (
             f'<span class="scan-cell" id="{cid}" '
             f'hx-get="/dashboard/projects/{project_id}/scan-status" '
             f'hx-trigger="every 3s" hx-swap="outerHTML">'
-            f'<span class="scan-badge running">{label}</span>'
+            f'<span class="scan-badge {badge_cls}" '
+            f'title="{"Wartet, bis der laufende Scan fertig ist" if badge_cls == "archived" else ""}">{label}</span>'
             f'<button class="btn btn-cancel" style="margin-left:6px;" '
             f'hx-post="/dashboard/projects/{project_id}/scan/cancel" '
             f'hx-target="#{cid}" hx-swap="outerHTML">Abbrechen</button>'

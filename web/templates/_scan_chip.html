@@ -2,7 +2,8 @@
 <span style="display:inline-flex; align-items:center; gap:8px;" data-pid="{{ project_id }}" data-hint="{{ hint }}" data-running="{{ '1' if running else '' }}"
   {% if running %}hx-get="/dashboard/projects/{{ project_id }}/scan-chip" hx-trigger="every 2s" hx-target="#scan-chip" hx-swap="innerHTML"{% endif %}>
   {% if running %}
-    <span class="scan-badge running">scannt…{% if total %} {{ processed }}/{{ total }}{% endif %}</span>
+    {% if queued %}<span class="scan-badge archived" title="Wartet, bis der laufende Scan fertig ist">wartet auf laufenden Scan…</span>
+    {% else %}<span class="scan-badge running">scannt…{% if total %} {{ processed }}/{{ total }}{% endif %}</span>{% endif %}
   {% else %}
     <span class="scan-badge {{ cls }}" title="{{ st.text }}">{% if st.state == 'fresh' %}✓ {% elif st.state in ('stale', 'never') %}⚠ {% endif %}{{ st.label }}</span>
     <button type="button" class="scan-now-btn"
