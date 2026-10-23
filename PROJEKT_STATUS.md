@@ -439,6 +439,7 @@ Zwei Betriebsarten, **in beiden wird das Datenverzeichnis entfernt**: `--komplet
 
 ## 14. Offene Punkte / Beobachten
 
+- **Geplant: Helper-Erkennung in der Weboberfläche** — siehe `plans/helper-erkennung.md` (Knöpfe nur zeigen, wenn sie auf dem Gerät funktionieren; Mail-Ersatzweg nur noch am Server-Mac).
 - **TODO: Mail-Passwörter in den macOS-Schlüsselbund** statt im Klartext in `config.yaml` (`mail.password` bzw. `password` pro Mailkonto, gelesen in `scanner/mail_scanner.py:connect_imap`, geschrieben in `web/dashboard.py`). Ziel: Passwort beim Anlegen des Kontos in den Schlüsselbund (z. B. `keyring` oder `security add-generic-password`), in der Config nur ein Verweis; bestehende Klartext-Passwörter beim Start migrieren; Backup/Import (`missing_password_accounts`) anpassen. Danach FAQ «Wie werden Mail-Zugangsdaten gespeichert?» auf der Website (`docs/index.html`, Text + FAQPage-Schema) nachführen.
 - **RAM-Wachstum des Servers über Laufzeit** (schleichend). Mit Watchdog+launchd unkritisch, aber Ursache nie final geprofiled. Könnte man mit tracemalloc auf dem iMac untersuchen.
 - **Adresse `archivio:8000`** statt `windows.local:8000`: geht über (a) Bonjour LocalHostname `archivio` → `archivio.local:8000`, oder (b) Router-DNS + feste IP → `archivio:8000`. Kein App-Change nötig; ggf. LaunchAgent, der `scutil --set LocalHostName archivio` setzt.
