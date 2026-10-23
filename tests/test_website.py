@@ -231,6 +231,9 @@ def test_sitemap_valid_and_complete():
         assert _resolve(loc, "index.html").exists(), f"sitemap.xml: {loc} existiert nicht"
     for page in ["docs.html", "mcp.html", *TRUST_PAGES]:
         assert SITE + page in locs
+    # lastmod (falls gesetzt) im Format JJJJ-MM-TT, damit Google geänderte Seiten neu liest
+    for el in root.findall("sm:url/sm:lastmod", ns):
+        assert re.fullmatch(r"\d{4}-\d{2}-\d{2}", el.text.strip()), el.text
 
 
 def test_robots_references_sitemap():
