@@ -32,6 +32,13 @@
     ul { margin: 0 0 14px 20px; color: #333; }
     li { margin-bottom: 6px; }
 
+    .intro { display: grid; grid-template-columns: 150px 1fr; gap: 32px; align-items: start; margin-bottom: 8px; }
+    .intro-photo { width: 150px; height: 150px; border-radius: 50%; object-fit: cover; display: block; }
+    .intro-text { min-width: 0; }
+    .intro-name { font-size: 18px; font-weight: 700; letter-spacing: -0.2px; margin-bottom: 2px; }
+    .intro-role { font-size: 14px; color: #888; margin-bottom: 18px; }
+    .signature { margin-top: 20px; }
+
     .callout {
       background: #f7f7f7; border-left: 3px solid #111; padding: 14px 18px;
       border-radius: 0 6px 6px 0; margin: 20px 0; font-size: 14px; color: #444;
@@ -53,6 +60,8 @@
     }
     @media (max-width: 600px) {
       header { padding: 20px 24px; }
+      .intro { grid-template-columns: 1fr; gap: 18px; }
+      .intro-photo { width: 112px; height: 112px; }
       footer { padding: 24px; flex-direction: column; align-items: flex-start; }
     }
   </style>
@@ -74,7 +83,28 @@
   <main class="page">
     <h1>Über Archivio</h1>
 
-    <p>Archivio ist eine lokale Dokumentenverwaltung und Volltextsuche für Architekturbüros. Die Software wird von Fabio, Architekt aus Winterthur, entwickelt und ist aus dem eigenen Büroalltag entstanden: Pläne, Protokolle, Offerten, Mails und Fotos liegen über Jahre verteilt in Projektordnern, Postfächern und auf dem Server. Wer eine bestimmte Planversion, eine Abmachung aus einer alten Mail oder ein Baustellenfoto sucht, verliert dabei oft viel Zeit mit der Suche. Gerade wenn man die Dokumente nicht selber bearbeitet und abgelegt hat, sind sie schwer zu finden.</p>
+    <section class="intro">
+      <img class="intro-photo" src="img/fabio-indergand.jpg" alt="Porträt von Fabio Indergand" width="150" height="150">
+      <div class="intro-text">
+        <p class="intro-name">Fabio Indergand</p>
+        <p class="intro-role">Architekt MSc ETH SIA, Winterthur</p>
+
+        <p>Als Architekt habe ich täglich viel Zeit mit der Suche nach Dokumenten auf dem Server verbracht, Zeit, die ich lieber in den Entwurf investiert hätte. «Das muss doch einfacher gehen», dachte ich mir 2023 und begann, Archivio zu entwickeln.</p>
+
+        <p>Gestartet ist das Projekt als Online-Dienst unter dem Namen Bauchat. Nach reiflicher Überlegung habe ich daraus ein Programm gemacht, das vollständig lokal im Büro läuft und selbst keine KI enthält.</p>
+
+        <p>Ich bin selbst KI-Enthusiast. Einen KI-Dienst ohne Kontrolle mit dem ganzen Büroserver zu verbinden, halte ich aber für keine gute Idee. Deshalb hat Archivio eine MCP-Schnittstelle, die nur auf die Projekte zugreift, die man ausdrücklich freigibt. Die Normenerkennung schützt zusätzlich davor, dass urheberrechtlich geschützte Normen aus Versehen in der Cloud landen.</p>
+
+        <p>Ich möchte, dass Architektinnen und Architekten mehr Zeit für den Entwurf haben und weniger für die Organisation. Deshalb stelle ich Archivio allen kostenlos zur Verfügung.</p>
+
+        <p>Hast du Verbesserungsvorschläge, Kritik oder Lob? Schreib mir gerne an <a href="mailto:info@architools.ch">info@architools.ch</a>.</p>
+
+        <p class="signature">Liebe Grüsse<br>Fabio</p>
+      </div>
+    </section>
+
+    <h2>Was Archivio ist</h2>
+    <p>Archivio ist eine lokale Dokumentenverwaltung und Volltextsuche für Architekturbüros. Pläne, Protokolle, Offerten, Mails und Fotos liegen über Jahre verteilt in Projektordnern, Postfächern und auf dem Server. Wer eine bestimmte Planversion, eine Abmachung aus einer alten Mail oder ein Baustellenfoto sucht, verliert dabei oft viel Zeit. Gerade wenn man die Dokumente nicht selber bearbeitet und abgelegt hat, sind sie schwer zu finden.</p>
 
     <p>Archivio macht diesen Bestand mit einer übergreifenden Suche zugänglich, unabhängig von Ordnerstruktur, Dateiformat oder Projekt. Es ersetzt keine Ablage und keine Datensicherung, sondern macht die bestehende Ablage durchsuchbar.</p>
 

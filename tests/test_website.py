@@ -171,8 +171,14 @@ def test_provider_named_consistently():
     for page in ["about.html", "privacy.html", "haftungsausschluss.html"]:
         html = (DOCS / page).read_text(encoding="utf-8")
         assert "architools" in html and "Fabio Indergand" in html, page
+    # «Bauchat» ist der alte Name: nur als Projektgeschichte auf der Über-Seite erlaubt,
+    # nie als Anbieter.
+    history = "unter dem Namen Bauchat"
     for path in DOCS.glob("*.html"):
-        assert "Bauchat" not in path.read_text(encoding="utf-8"), f"alter Anbietername in {path.name}"
+        text = path.read_text(encoding="utf-8")
+        if path.name == "about.html":
+            text = text.replace(history, "", 1)
+        assert "Bauchat" not in text, f"alter Anbietername in {path.name}"
 
 
 def _unescape(text):
