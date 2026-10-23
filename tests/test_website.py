@@ -320,3 +320,10 @@ def test_all_pages_share_the_same_footer():
     assert len(set(footers.values())) == 1, "Footer unterscheiden sich zwischen den Seiten"
     hrefs = re.findall(r'href="([^"]+)"', next(iter(footers.values())))
     assert all(h.startswith(("/", "mailto:")) for h in hrefs), hrefs
+
+
+def test_homepage_has_author_and_publish_date_for_link_previews():
+    # LinkedIn Post Inspector liest Autor und Datum aus diesen Meta-Tags
+    html = (DOCS / "index.html").read_text(encoding="utf-8")
+    assert '<meta name="author" content="Fabio Indergand">' in html
+    assert re.search(r'<meta name="publish_date" property="og:publish_date" content="\d{4}-\d{2}-\d{2}T', html)
