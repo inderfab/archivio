@@ -125,6 +125,8 @@ async def dashboard(request: Request):
         "base_folders": settings.get("scanner.base_folders", []) or [],
         "fda_missing":  fda_missing,
         "scan_status":  _mail_scan.get("status"),
+        "scan_current": _mail_scan.get("current_mailbox"),
+        "scan_only":    _mail_scan.get("only_mailbox"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
@@ -798,6 +800,8 @@ async def mail_dashboard(request: Request):
         "configs":      cfg_list,
         "projects":     [dict(r) for r in projects],
         "scan_status":  _mail_scan.get("status"),
+        "scan_current": _mail_scan.get("current_mailbox"),
+        "scan_only":    _mail_scan.get("only_mailbox"),
         "scan_new":     _mail_scan.get("total_new"),
         "scan_error":   _mail_scan.get("error"),
         "scan_detail":  _mail_scan.get("detail"),
@@ -1013,8 +1017,9 @@ async def mail_scan_one(
     """Scannt genau EIN Postfach (per-Postfach 'Jetzt scannen'-Button)."""
     if _mail_scan.get("status") != "running":
         _mail_scan.clear()
-        _mail_scan["status"]     = "running"
-        _mail_scan["started_at"] = _now()
+        _mail_scan["status"]       = "running"
+        _mail_scan["started_at"]   = _now()
+        _mail_scan["only_mailbox"] = mailbox_name
         threading.Thread(target=_run_mail_scan,
                          kwargs={"only_mailbox": mailbox_name}, daemon=True).start()
     return await _mail_section_response(request, connection.get_connection(), context)
@@ -2537,14 +2542,29 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
     progress = _scans[project_id]
     cancel_flag = _cancel_flags.get(project_id, {})
 
-    # Mailbox-Projekte: Mail-Scan starten statt Datei-Scan
+    # Mailbox-Projekte: nur DIESES Postfach scannen (vorher liefen alle Postfaecher) und
+    # warten, bis es fertig ist -- so zeigt die Projektzeile "Scannt…" bis zum Ende und
+    # danach die echte Anzahl statt sofort "0 Dok. gefunden".
     if path.startswith("mailbox:"):
+        mailbox_name = path[len("mailbox:"):]
         if _mail_scan.get("status") != "running":
             _mail_scan.clear()
-            _mail_scan["status"]     = "running"
-            _mail_scan["started_at"] = _now()
-            threading.Thread(target=_run_mail_scan, daemon=True).start()
-        progress.update({"status": "done", "count": 0, "finished_at": _now()})
+            _mail_scan["status"]       = "running"
+            _mail_scan["started_at"]   = _now()
+            _mail_scan["only_mailbox"] = mailbox_name
+            t = threading.Thread(target=_run_mail_scan,
+                                 kwargs={"only_mailbox": mailbox_name}, daemon=True)
+            t.start()
+            t.join()
+        try:
+            _c = connection.get_connection()
+            count = _c.execute("SELECT COUNT(*) FROM documents WHERE project_id=?", (project_id,)).fetchone()[0]
+            _c.close()
+        except Exception:
+            count = "?"
+        status = _mail_scan.get("status")
+        progress.update({"status": status if status in ("done", "error", "cancelled") else "done",
+                         "count": count, "error": _mail_scan.get("error", ""), "finished_at": _now()})
         return
 
     # Warten bis kein anderer Scan läuft (1 Worker-Prozess gleichzeitig)
