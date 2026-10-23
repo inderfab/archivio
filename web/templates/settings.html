@@ -341,7 +341,8 @@
       </div>
       <div id="diag-results"></div>
       <div style="display:flex; align-items:center; gap:8px; flex-wrap:wrap; padding-top:4px;">
-        <button type="button" class="add-btn" onclick="starteDeinstallation()">Archivio von diesem Mac entfernen…</button>
+        <button type="button" class="add-btn" onclick="starteDeinstallation()"
+                style="background:#dc2626; color:#fff; border-color:#dc2626;">Archivio von diesem Mac entfernen…</button>
         <span id="deinst-status" style="font-size:12px; color:var(--text-3);"></span>
       </div>
     </div>
@@ -472,6 +473,9 @@ fetch('/api/backup/import-status').then(r => r.json()).then(s => {
 // sich Server-App und Helper, und der Helper hat mit der Deinstallation nichts zu
 // tun. Der Server läuft ohnehin auf genau dem Mac, um den es geht.
 function starteDeinstallation() {
+  if (!confirm('Willst du Archivio wirklich von diesem Mac entfernen?\n\n'
+             + 'Danach öffnet sich auf dem Server-Mac das Deinstallationsprogramm, '
+             + 'das nochmals durch die einzelnen Schritte führt.')) return;
   var s = document.getElementById('deinst-status');
   s.textContent = 'Programm wird geöffnet…';
   fetch('/api/deinstallation/oeffnen', { method: 'POST' })

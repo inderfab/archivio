@@ -59,8 +59,17 @@
     <span style="position:relative; display:inline-flex;">
     <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
     <div class="section-help-panel" style="left:0; right:auto;">
-      <p>Vier Protokolle, gleich aufgebaut — Zeitpunkt, betroffenes Objekt, farbiger Status-Punkt (grün = ok, gelb = mit Einschränkung/blockiert, rot = Fehler). Auf eine Zeile klicken zeigt die vollen Details.</p>
-      <p>Der Status der letzten Sicherung steht unverändert in den Einstellungen unter „Sicherung &amp; Umzug".</p>
+      <p>In den vier Protokollkästen hast du den Überblick.</p>
+      <p><strong>Such-Verlauf</strong> zeigt dir, wenn keine Resultate gefunden wurden oder eine Suche aussergewöhnlich lange gedauert hat.</p>
+      <p><strong>KI-Schnittstelle (MCP)</strong> zeigt dir alle Daten, die Archivio verlassen haben und über die Schnittstelle an einen KI-Dienst gelangt sind. Auch blockierte Anfragen werden protokolliert.</p>
+      <p><strong>Scan-Verlauf</strong>: Hier siehst du, wie lange die täglichen Scans gedauert haben und wie stark dein Gerät dabei ausgelastet war.</p>
+      <p><strong>Dokumentenverarbeitung</strong>: Hier werden Dateien aufgelistet, deren Inhalt nicht gelesen werden konnte, sowie gescannte PDFs, Bilder und nicht unterstützte Formate.</p>
+      <p>Solltest du Unregelmässigkeiten entdecken oder Formate haben, die du gerne extrahiert hättest, lass es mich wissen: <a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      <p style="display:flex; flex-direction:column; gap:4px;">
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot g"></span> alles OK</span>
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot y"></span> mit Einschränkungen</span>
+        <span style="display:flex; align-items:center; gap:8px;"><span class="vf-dot r"></span> Fehler oder Datei mit Sperre</span>
+      </p>
     </div>
     </span>
     <button type="button" class="btn btn-sm" id="export-all" style="margin-left:auto; display:inline-flex; align-items:center; gap:5px;"
@@ -96,7 +105,7 @@
     <div class="vf-detail">
       {% if s.reason %}<div style="color:{{ '#b45309' if s.status == 'cancelled' else '#b91c1c' }}; margin-bottom:4px;">Grund: {{ s.reason }}{% if s.error_message and s.reason == 'Unerwarteter Fehler' %} ({{ s.error_message }}){% endif %}</div>{% endif %}
       <div style="color:var(--text);">
-        Start {{ s.started_at|fmt_ts }} · Dauer {{ s.duration_s|fmt_duration }} · {{ s.processed }}/{{ s.total }} Dateien · {{ s.new_count }} neu
+        Start {{ s.started_at|fmt_ts }} · Dauer {{ s.duration_s|fmt_duration }} · {{ s.processed }}/{{ s.total }} Dateien · {{ s.new_count }} neu{% if s.workers %} · {{ s.workers }} Worker{% endif %}
         · {{ s.peak_memory_mb|round|int }} MB{% if total_ram_mb %} ({{ (s.peak_memory_mb / total_ram_mb * 100)|round(1) }}% des Arbeitsspeichers){% endif %} · Rechenleistung {{ [100, (s.peak_cpu_pct or 0) / (cpu_cores or 1)]|min|round|int }} %
       </div>
       {% if s.errors %}
@@ -229,14 +238,20 @@
         <button type="button" class="section-help-btn" onclick="toggleSectionHelp(this)">?</button>
         <div class="section-help-panel">
           <p>Startzeit, Dauer, Anzahl geprüfter Dateien, Fehler mit Dateipfad, sowie Spitzenwerte bei Speicher- und CPU-Nutzung während des Scans.</p>
-          <p><strong>Dauer des letzten Scans</strong> über alle Projekte, von Start bis Ende. <strong>max. RAM:</strong> höchster Speicherbedarf eines Scans in den letzten 30 Tagen. <strong>max. CPU:</strong> höchste Auslastung der Rechenleistung dieses Macs in den letzten 30 Tagen. Ein roter Punkt bedeutet, dass der Scan nicht durchlief, der Grund steht in der Zeile. Der CSV-Export eignet sich für Supportanfragen.</p>
+          <p><strong>Dauer des letzten Scans</strong> über alle Projekte, von Start bis Ende. <strong>max. RAM:</strong> höchster Speicherbedarf eines Scans in den letzten 30 Tagen. <strong>max. CPU:</strong> höchste Auslastung der Rechenleistung dieses Macs in den letzten 30 Tagen. <strong>Worker:</strong> wie viele Dateien gleichzeitig verarbeitet werden, einstellbar unter Einstellungen → Scanner. Mehr Worker scannen schneller, belasten den Mac aber stärker. Ein roter Punkt bedeutet, dass der Scan nicht durchlief, der Grund steht in der Zeile. Der CSV-Export eignet sich für Supportanfragen.</p>
         </div>
       </h2>
       <div class="vf-stats">
         <div title="Letzter Scan über alle Projekte, von Start bis Ende"><div class="vf-stat-value">{{ last_batch_label }}</div><div class="vf-stat-label">{{ last_batch_sub }}</div></div>
         <div title="{{ scan_peak_mem_title }}"><div class="vf-stat-value">{{ scan_peak_mem_label }}</div><div class="vf-stat-label">max. RAM</div></div>
         <div title="Höchste Auslastung der Rechenleistung dieses Macs durch einen Scan in den letzten 30 Tagen"><div class="vf-stat-value">{{ scan_peak_cpu_label }}</div><div class="vf-stat-label">max. CPU</div></div>
+        <div title="Wie viele Dateien gleichzeitig verarbeitet werden (Einstellungen → Scanner)"><div class="vf-stat-value">{{ current_workers }}</div><div class="vf-stat-label">Worker</div></div>
       </div>
+      {% if scan_hint %}
+      <div style="font-size:11.5px; color:#92400e; background:#fffbeb; border:1px solid #fde68a; border-radius:var(--radius); padding:6px 10px; margin-bottom:8px;">
+        {{ scan_hint|replace("Einstellungen → Scanner", '<a href="/dashboard/settings" style="color:inherit;">Einstellungen → Scanner</a>')|safe }}
+      </div>
+      {% endif %}
       {% if not groups %}
       <p class="vf-empty">Noch keine protokollierten Scans.</p>
       {% else %}

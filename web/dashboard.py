@@ -2613,6 +2613,7 @@ def _run_scan(project_id: int, path: str, scan_mail: bool = True, batch_id: str 
                 status=progress.get("status", "error"),
                 peak_memory_mb=sampler.peak_mb, peak_cpu_pct=sampler.peak_cpu,
                 batch_id=batch_id,
+                workers=max(1, min(4, int(settings.get("scanner.num_workers", 1) or 1))),
             )
             _conn.close()
         except Exception as exc:

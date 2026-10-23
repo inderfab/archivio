@@ -46,6 +46,7 @@ def run(conn: sqlite3.Connection):
     _apply(conn, "030_photo_tags_project", _m030)
     _apply(conn, "031_photo_tags_mailbox", _m031)
     _apply(conn, "039_scan_log_error_message", _m039)
+    _apply(conn, "040_scan_log_workers", _m040)
     # Kein einmaliger Schritt: kommt spaeter ein Leser dazu (z.B. .xls), muessen dessen
     # bisher nur gelistete Dateien ebenfalls neu eingelesen werden.
     requeue_newly_readable(conn)
@@ -864,4 +865,12 @@ def _m039(conn: sqlite3.Connection):
     cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_log)")}
     if "error_message" not in cols:
         conn.execute("ALTER TABLE scan_log ADD COLUMN error_message TEXT")
+    conn.commit()
+
+
+def _m040(conn: sqlite3.Connection):
+    """Mit wie vielen Workern ein Scan lief -- hilft bei langen oder abgebrochenen Scans."""
+    cols = {r[1] for r in conn.execute("PRAGMA table_info(scan_log)")}
+    if "workers" not in cols:
+        conn.execute("ALTER TABLE scan_log ADD COLUMN workers INTEGER")
     conn.commit()
