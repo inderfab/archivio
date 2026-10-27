@@ -530,8 +530,9 @@
       </div>
 
       <form id="dl-form" class="dl-form" onsubmit="return submitEmailForm(event)">
-        <p class="dl-form-hint">Für Update-Benachrichtigungen bei grösseren Versionen. Kein Newsletter, jederzeit mit einem Klick abmeldbar.</p>
+        <p class="dl-form-hint">Für Update-Benachrichtigungen bei grösseren Versionen. Du bekommst eine Mail, in der du die Adresse bestätigst. Kein Newsletter, jederzeit mit einem Klick abmeldbar.</p>
         <input type="email" id="dl-email" class="dl-email-input" placeholder="E-Mail-Adresse" required>
+        <input type="text" id="dl-website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
         <button type="submit" class="btn-download" id="btn-dl">Herunterladen</button>
       </form>
 
@@ -640,7 +641,7 @@
   </footer>
 
   <script>
-    var _TRACKING_URL = 'https://script.google.com/macros/s/AKfycby3IWoq8oU-gZPvwclyks_AubvfkMmxrJvQ1P2P1zplYEBfxbVr8oo31AUc1JTnvhlnQg/exec';
+    var _DIENST = 'https://anmeldung.architools.ch';
     var _latestVersion = '';
 
     // Version beim Seitenload im Hintergrund holen
@@ -649,12 +650,14 @@
       .then(function(d) { _latestVersion = d.tag_name || ''; })
       .catch(function() {});
 
-    function _track(payload) {
-      fetch(_TRACKING_URL, {
+    // Anmeldung und Download-Zähler gehen an den eigenen Server (Schweiz). Das läuft nebenher
+    // und darf den Download nie blockieren oder verzögern.
+    function _senden(pfad, payload) {
+      fetch(_DIENST + pfad, {
         method: 'POST',
-        mode: 'no-cors',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        keepalive: true
       }).catch(function() {});
     }
 
@@ -674,8 +677,8 @@
         return false;
       }
 
-      // Speichern läuft parallel und darf den Download nie blockieren oder verzögern
-      _track({ type: 'email-signup', email: email });
+      // Speichern läuft parallel; die Bestätigungsmail kommt vom Server
+      _senden('/anmelden', { email: email, website: document.getElementById('dl-website').value });
 
       downloadLatest();
       return false;
@@ -686,8 +689,8 @@
       btn.textContent = 'Wird geladen…';
       btn.disabled = true;
 
-      // Tracking parallel feuern — Download nicht blockieren
-      _track({ type: 'download', version: _latestVersion });
+      // Zählen läuft parallel, der Download wird nie blockiert
+      if (_latestVersion) { _senden('/download', { version: _latestVersion }); }
 
       fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
         .then(function(r) { return r.json(); })

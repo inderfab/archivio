@@ -68,7 +68,8 @@
   </header>
 
   <div class="page" id="content">
-    <!-- wird per JS befüllt, je nachdem ob ein Token in der URL steht -->
+    <h1>Weiterleitung …</h1>
+    <noscript><p>Bitte öffne den Abmelde-Link aus der E-Mail mit aktiviertem JavaScript oder schreibe an <a href="mailto:info@architools.ch">info@architools.ch</a>.</p></noscript>
   </div>
 
   <footer class="site-footer">
@@ -107,52 +108,14 @@
   </footer>
 
   <script>
-    // Dieselbe Apps-Script-Web-App wie auf index.html (dort _TRACKING_URL).
-    var TRACKING_URL = 'https://script.google.com/macros/s/AKfycby3IWoq8oU-gZPvwclyks_AubvfkMmxrJvQ1P2P1zplYEBfxbVr8oo31AUc1JTnvhlnQg/exec';
-
-    var params = new URLSearchParams(window.location.search);
-    var token = params.get('token');
-    var content = document.getElementById('content');
-
-    function renderInvalid() {
-      content.innerHTML =
-        '<h1>Kein gültiger Abmelde-Link</h1>' +
-        '<p>Bitte nutzen Sie den Link aus Ihrer E-Mail.</p>';
-    }
-
-    function renderConfirm() {
-      content.innerHTML =
-        '<h1>Von Update-Benachrichtigungen abmelden?</h1>' +
-        '<p>Möchten Sie sich von den Update-Benachrichtigungen abmelden?</p>' +
-        '<button id="btn-unsub">Ja, abmelden</button>';
-      document.getElementById('btn-unsub').addEventListener('click', doUnsubscribe);
-    }
-
-    function renderDone() {
-      content.innerHTML =
-        '<h1>Sie wurden abgemeldet.</h1>' +
-        '<p>Ihre E-Mail-Adresse wird nicht mehr für Update-Benachrichtigungen verwendet.</p>';
-    }
-
-    function doUnsubscribe() {
-      var btn = document.getElementById('btn-unsub');
-      btn.disabled = true;
-      btn.textContent = 'Wird bearbeitet…';
-
-      fetch(TRACKING_URL, {
-        method: 'POST',
-        mode: 'no-cors',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ type: 'unsubscribe', token: token })
-      })
-        .catch(function () {})
-        .then(renderDone);
-    }
-
-    if (!token) {
-      renderInvalid();
+    // Die Abmeldung läuft über den Server von Archivio. Alte Links dieser Seite werden weitergeleitet.
+    var token = new URLSearchParams(window.location.search).get('token');
+    if (token) {
+      window.location.replace('https://anmeldung.architools.ch/abmelden?token=' + encodeURIComponent(token));
     } else {
-      renderConfirm();
+      document.getElementById('content').innerHTML =
+        '<h1>Kein gültiger Abmelde-Link</h1>' +
+        '<p>Bitte nutze den Link aus der E-Mail oder schreibe an <a href="mailto:info@architools.ch">info@architools.ch</a>.</p>';
     }
   </script>
 
