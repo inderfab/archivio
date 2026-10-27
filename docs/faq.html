@@ -1,0 +1,421 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Häufige Fragen (FAQ) – Archivio</title>
+  <meta name="description" content="Antworten zu Archivio: Kosten, Installation, Server-Mac, Suche, Texterkennung, Datenschutz, Zugriffsrechte, Updates und die optionale KI-Schnittstelle (MCP).">
+  <link rel="canonical" href="https://architools.ch/faq.html">
+  <script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@type": "FAQPage",
+  "mainEntity": [
+    {
+      "@type": "Question",
+      "name": "Was kostet Archivio?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Archivio ist zurzeit kostenlos. Fragen beantworten wir gerne per E-Mail an info@architools.ch."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Können wir Archivio zuerst im Kleinen testen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ja. Am einfachsten startet ihr mit ein oder zwei Projektordnern und ohne Mail-Anbindung. Wenn die Suche im Alltag überzeugt, gebt ihr weitere Ordner frei."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Muss ich meine Ablage auf dem Server neu organisieren?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio liest eure bestehende Ablage so, wie sie ist, egal ob sauber strukturiert oder über die Jahre gewachsen. Ihr müsst keine Ordner umbenennen, verschieben oder neu sortieren. Archivio verändert an der Ablage auch nichts, sondern baut nur einen eigenen Suchindex auf. Welche Ordner durchsucht werden, legt ihr bei der Einrichtung fest."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Was ist der Unterschied zu einer Dokumentenverwaltung (DMS)?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Bei einer Dokumentenverwaltung (DMS) werden die Dateien im DMS abgelegt, es ersetzt meist den klassischen Dateiserver. Archivio lässt die bestehende Ordnerstruktur auf dem Server, wie sie ist, und macht sie durchsuchbar. Mehr dazu unter Warum Archivio."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Muss jeder Mitarbeiter im Büro Archivio installieren?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio wird nur auf einem einzigen Mac im Büro installiert. Dieser Mac ist der Archivio-Server: Er ist mit dem Datei-Server oder NAS verbunden, liest die freigegebenen Ordner und baut den Suchindex auf. Alle anderen im Büro öffnen Archivio einfach im Browser, wie eine Website, und suchen dort. Mitarbeiter können den Archivio Helper installieren. Damit öffnen sie Suchergebnisse direkt lokal im passenden Programm und können den Archivio-Link für den bürointernen Versand sowie die MCP-Schnittstelle zu KI-Anwendungen nutzen."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Was braucht der Server-Mac?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft und per Kabel am Netz hängt: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Ist die Software vertrauenswürdig signiert?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ja. Archivio ist mit einer Apple Developer ID signiert und von Apple notarisiert. macOS prüft das Installationspaket und lässt die Installation deshalb ohne zusätzliche Sperren zu."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wie kommen Updates?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Archivio prüft einmal täglich, ob eine neue Version verfügbar ist, und zeigt sie im Menü an. Installiert wird das Update erst, wenn ihr es bestätigt. Das Update startet ihr direkt in der Menüleiste."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Ersetzt Archivio die Datensicherung?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio macht die bestehende Ablage durchsuchbar, ersetzt aber weder die Ablage noch die Datensicherung. Die Originaldateien bleiben auf eurem Server und werden dort wie bisher gesichert."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Findet Archivio auch Text in eingescannten Dokumenten?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Ja. PDFs ohne Textebene, etwa gescannte Verträge, unterschriebene Protokolle oder Scans, liest Archivio per Texterkennung (OCR) ein und macht sie durchsuchbar, auf Deutsch, Französisch, Italienisch und Englisch. Das läuft lokal auf dem Server-Mac, nichts wird dafür an einen Online-Dienst geschickt. Grossformatige Pläne (ab A1) werden nicht erkannt, sie bleiben über den Dateinamen auffindbar. Handschrift wird je nach Qualität des Scans nur teilweise erkannt."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Warum nicht einfach im Finder suchen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Im Finder lässt sich auch auf dem Server suchen. Auf Netzlaufwerken gibt es dafür aber meist keinen Index: Jede Suche geht die Ordner neu durch, das dauert, und Filter nach Projekt, Dateityp oder Datum fehlen weitgehend. Archivio baut einen Index über alle freigegebenen Projektordner und Postfächer, und alle im Büro nutzen denselben."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wie teile ich eine Datei, ohne eine Kopie zu verschicken?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Mit einem Archivio-Link: Rechtsklick auf die Datei im Finder, dann unter Schnellaktionen oder Dienste «Archivio-Link kopieren» wählen und den Link z. B. in eine Mail einfügen. Ein Klick darauf öffnet die Originaldatei auf dem Server. Jeder, der den Archivio Helper installiert hat, kann das Original direkt öffnen."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann ich Archivio von überall im Internet öffnen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio sieht aus wie eine Website und wird im Browser geöffnet, ist aber keine Website im Internet. Die Suche läuft auf dem Archivio-Mac in eurem Büro und ist nur von Geräten erreichbar, die im selben Büronetzwerk sind: per Netzwerkkabel oder über das Büro-WLAN, nicht über ein Gäste-WLAN. Von zu Hause oder unterwegs geht es nur, wenn euer Büro einen VPN-Zugang ins Büronetz hat. Das ist gewollt: So kommt niemand von aussen an eure Daten."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Verlassen unsere Daten das Büro?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt. Details im Merkblatt zu euren Daten."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann Archivio Dateien verändern oder löschen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio greift ausschliesslich lesend auf freigegebene Ordner und Postfächer zu. Es verändert, verschiebt, benennt oder löscht keine Dateien, sondern baut nur einen eigenen Suchindex auf."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wer im Büro sieht was?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Die Oberfläche ist nur im internen Netzwerk erreichbar und hat keine eigene Benutzerverwaltung: Alle im Büronetz sehen, was indexiert ist. Deshalb legt ihr pro Ordner fest, was Archivio sehen darf, und schliesst Bereiche wie Personaldossiers oder Verträge vollständig aus."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Wie werden Mail-Zugangsdaten gespeichert?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Die Mail-Anbindung ist optional. Wenn ihr sie nutzt, speichert Archivio Server und Benutzername in der Konfiguration auf dem Server-Mac, das Passwort im macOS-Schlüsselbund. Nichts davon wird übermittelt, und Sicherungen enthalten keine Passwörter. Für einen ersten Test könnt ihr Archivio auch ganz ohne Mail betreiben und Postfächer später hinzufügen."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Braucht Archivio eine KI oder ein Abo?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Archivio funktioniert ganz ohne KI und ohne Abo. Wer KI verwenden will, nutzt die, die er schon kennt, und bindet sie über die MCP-Schnittstelle an. Die Schnittstelle ist optional und standardmässig ausgeschaltet."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Welche KI-Anwendungen lassen sich anbinden?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Unterstützt werden Anwendungen, die MCP-Server lokal auf dem Mac einbinden. ChatGPT bindet MCP-Server über die Cloud von OpenAI an und bräuchte dafür einen Zugang zum Archivio-Server aus dem Internet. Das ist aus Datenschutzgründen zurzeit nicht vorgesehen."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Was bekommt die KI zu sehen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nur Ausschnitte der Dokumente, die sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt. Neue Projekte sind nie automatisch freigegeben. Zusätzlich lassen sich Ordner und Dateien über die Sperrliste ausschliessen. Jeder Zugriff und jede Blockierung steht unter «Verwaltung → Verlauf»."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Werden Normen an die KI übermittelt?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Normen sind urheberrechtlich geschützt. Dokumente, die Archivio als Norm erkennt (SIA, VSS und weitere), werden nie über die MCP-Schnittstelle übermittelt, auch nicht aus freigegebenen Projekten."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann die KI über Archivio Dateien verändern?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Nein. Sie kann suchen, lesen, Dateien öffnen und im Finder zeigen. Neue Dateien legt sie nur im Downloads-Ordner an, wenn sie PDFs zusammenfügt oder Dokumente in einen neuen Ordner kopiert. Die Originale bleiben unverändert."
+      }
+    },
+    {
+      "@type": "Question",
+      "name": "Kann eine KI nicht direkt auf den Server zugreifen?",
+      "acceptedAnswer": {
+        "@type": "Answer",
+        "text": "Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst."
+      }
+    }
+  ]
+}
+  </script>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff; color: #111; line-height: 1.7;
+    }
+    header {
+      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
+    }
+    .back-link { font-size: 13px; color: #999; text-decoration: none; }
+    .back-link:hover { color: #111; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 16px; }
+    h2 { font-size: 13px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #999; margin: 48px 0 6px; }
+    .intro { color: #333; margin-bottom: 8px; }
+    a { color: #111; }
+
+    details { border-top: 1px solid #e8e8e8; padding: 18px 0; }
+    details:last-of-type { border-bottom: 1px solid #e8e8e8; }
+    summary {
+      font-size: 16px; font-weight: 600; cursor: pointer; list-style: none;
+      display: flex; justify-content: space-between; gap: 16px;
+    }
+    summary::-webkit-details-marker { display: none; }
+    summary::after { content: "+"; color: #999; font-weight: 400; font-size: 20px; line-height: 1; }
+    details[open] summary::after { content: "–"; }
+    details p { margin-top: 10px; font-size: 15px; color: #333; }
+
+    @media (max-width: 600px) {
+      header { padding: 20px 24px; }
+    }
+    @media print {
+      header { display: none; }
+      details > *:not(summary) { display: block; }
+    }
+  </style>
+  <style>
+    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
+    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
+    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
+    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+    .site-footer ul { list-style: none; display: grid; gap: 7px; }
+    .site-footer a { color: #777; text-decoration: none; }
+    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
+    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+    .sf-brand { display: grid; gap: 4px; align-content: start; }
+    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
+    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
+    @media (max-width: 760px) {
+      .site-footer { padding: 36px 24px 24px; }
+      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+      .sf-brand { grid-column: 1 / -1; }
+    }
+    @media print { .site-footer { display: none; } }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <div class="page">
+    <h1>Häufige Fragen</h1>
+    <p class="intro">Fehlt eine Antwort? Schreibt an <a href="mailto:info@architools.ch">info@architools.ch</a>.</p>
+
+    <h2>Einstieg</h2>
+    <details>
+      <summary>Was kostet Archivio?</summary>
+      <p>Archivio ist zurzeit kostenlos. Fragen beantworten wir gerne per E-Mail an info@architools.ch.</p>
+    </details>
+    <details>
+      <summary>Können wir Archivio zuerst im Kleinen testen?</summary>
+      <p>Ja. Am einfachsten startet ihr mit ein oder zwei Projektordnern und ohne Mail-Anbindung. Wenn die Suche im Alltag überzeugt, gebt ihr weitere Ordner frei.</p>
+    </details>
+    <details>
+      <summary>Muss ich meine Ablage auf dem Server neu organisieren?</summary>
+      <p>Nein. Archivio liest eure bestehende Ablage so, wie sie ist, egal ob sauber strukturiert oder über die Jahre gewachsen. Ihr müsst keine Ordner umbenennen, verschieben oder neu sortieren. Archivio verändert an der Ablage auch nichts, sondern baut nur einen eigenen Suchindex auf. Welche Ordner durchsucht werden, legt ihr bei der Einrichtung fest.</p>
+    </details>
+    <details>
+      <summary>Was ist der Unterschied zu einer Dokumentenverwaltung (DMS)?</summary>
+      <p>Bei einer Dokumentenverwaltung (DMS) werden die Dateien im DMS abgelegt, es ersetzt meist den klassischen Dateiserver. Archivio lässt die bestehende Ordnerstruktur auf dem Server, wie sie ist, und macht sie durchsuchbar. Mehr dazu unter <a href="warum.html">Warum Archivio</a>.</p>
+    </details>
+
+    <h2>Installation und Betrieb</h2>
+    <details>
+      <summary>Muss jeder Mitarbeiter im Büro Archivio installieren?</summary>
+      <p>Nein. Archivio wird nur auf einem einzigen Mac im Büro installiert. Dieser Mac ist der Archivio-Server: Er ist mit dem Datei-Server oder NAS verbunden, liest die freigegebenen Ordner und baut den Suchindex auf. Alle anderen im Büro öffnen Archivio einfach im Browser, wie eine Website, und suchen dort. Mitarbeiter können den Archivio Helper installieren. Damit öffnen sie Suchergebnisse direkt lokal im passenden Programm und können den Archivio-Link für den bürointernen Versand sowie die MCP-Schnittstelle zu KI-Anwendungen nutzen.</p>
+    </details>
+    <details>
+      <summary>Was braucht der Server-Mac?</summary>
+      <p>Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft und per Kabel am Netz hängt: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst.</p>
+    </details>
+    <details>
+      <summary>Ist die Software vertrauenswürdig signiert?</summary>
+      <p>Ja. Archivio ist mit einer Apple Developer ID signiert und von Apple notarisiert. macOS prüft das Installationspaket und lässt die Installation deshalb ohne zusätzliche Sperren zu.</p>
+    </details>
+    <details>
+      <summary>Wie kommen Updates?</summary>
+      <p>Archivio prüft einmal täglich, ob eine neue Version verfügbar ist, und zeigt sie im Menü an. Installiert wird das Update erst, wenn ihr es bestätigt. Das Update startet ihr direkt in der Menüleiste.</p>
+    </details>
+    <details>
+      <summary>Ersetzt Archivio die Datensicherung?</summary>
+      <p>Nein. Archivio macht die bestehende Ablage durchsuchbar, ersetzt aber weder die Ablage noch die Datensicherung. Die Originaldateien bleiben auf eurem Server und werden dort wie bisher gesichert.</p>
+    </details>
+
+    <h2>Suche</h2>
+    <details>
+      <summary>Findet Archivio auch Text in eingescannten Dokumenten?</summary>
+      <p>Ja. PDFs ohne Textebene, etwa gescannte Verträge, unterschriebene Protokolle oder Scans, liest Archivio per Texterkennung (OCR) ein und macht sie durchsuchbar, auf Deutsch, Französisch, Italienisch und Englisch. Das läuft lokal auf dem Server-Mac, nichts wird dafür an einen Online-Dienst geschickt. Grossformatige Pläne (ab A1) werden nicht erkannt, sie bleiben über den Dateinamen auffindbar. Handschrift wird je nach Qualität des Scans nur teilweise erkannt.</p>
+    </details>
+    <details>
+      <summary>Warum nicht einfach im Finder suchen?</summary>
+      <p>Im Finder lässt sich auch auf dem Server suchen. Auf Netzlaufwerken gibt es dafür aber meist keinen Index: Jede Suche geht die Ordner neu durch, das dauert, und Filter nach Projekt, Dateityp oder Datum fehlen weitgehend. Archivio baut einen Index über alle freigegebenen Projektordner und Postfächer, und alle im Büro nutzen denselben.</p>
+    </details>
+    <details>
+      <summary>Wie teile ich eine Datei, ohne eine Kopie zu verschicken?</summary>
+      <p>Mit einem Archivio-Link: Rechtsklick auf die Datei im Finder, dann unter Schnellaktionen oder Dienste «Archivio-Link kopieren» wählen und den Link z.&nbsp;B. in eine Mail einfügen. Ein Klick darauf öffnet die Originaldatei auf dem Server. Jeder, der den Archivio Helper installiert hat, kann das Original direkt öffnen.</p>
+    </details>
+    <details>
+      <summary>Kann ich Archivio von überall im Internet öffnen?</summary>
+      <p>Nein. Archivio sieht aus wie eine Website und wird im Browser geöffnet, ist aber keine Website im Internet. Die Suche läuft auf dem Archivio-Mac in eurem Büro und ist nur von Geräten erreichbar, die im selben Büronetzwerk sind: per Netzwerkkabel oder über das Büro-WLAN, nicht über ein Gäste-WLAN. Von zu Hause oder unterwegs geht es nur, wenn euer Büro einen VPN-Zugang ins Büronetz hat. Das ist gewollt: So kommt niemand von aussen an eure Daten.</p>
+    </details>
+
+    <h2>Daten und Sicherheit</h2>
+    <details>
+      <summary>Verlassen unsere Daten das Büro?</summary>
+      <p>Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt. Details im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
+    </details>
+    <details>
+      <summary>Kann Archivio Dateien verändern oder löschen?</summary>
+      <p>Nein. Archivio greift ausschliesslich lesend auf freigegebene Ordner und Postfächer zu. Es verändert, verschiebt, benennt oder löscht keine Dateien, sondern baut nur einen eigenen Suchindex auf.</p>
+    </details>
+    <details>
+      <summary>Wer im Büro sieht was?</summary>
+      <p>Die Oberfläche ist nur im internen Netzwerk erreichbar und hat keine eigene Benutzerverwaltung: Alle im Büronetz sehen, was indexiert ist. Deshalb legt ihr pro Ordner fest, was Archivio sehen darf, und schliesst Bereiche wie Personaldossiers oder Verträge vollständig aus.</p>
+    </details>
+    <details>
+      <summary>Wie werden Mail-Zugangsdaten gespeichert?</summary>
+      <p>Die Mail-Anbindung ist optional. Wenn ihr sie nutzt, speichert Archivio Server und Benutzername in der Konfiguration auf dem Server-Mac, das Passwort im macOS-Schlüsselbund. Nichts davon wird übermittelt, und Sicherungen enthalten keine Passwörter. Für einen ersten Test könnt ihr Archivio auch ganz ohne Mail betreiben und Postfächer später hinzufügen.</p>
+    </details>
+
+    <h2>KI-Schnittstelle (MCP)</h2>
+    <details>
+      <summary>Braucht Archivio eine KI oder ein Abo?</summary>
+      <p>Nein. Archivio funktioniert ganz ohne KI und ohne Abo. Wer KI verwenden will, nutzt die, die er schon kennt, und bindet sie über die <a href="mcp.html">MCP-Schnittstelle</a> an. Die Schnittstelle ist optional und standardmässig ausgeschaltet.</p>
+    </details>
+    <details>
+      <summary>Welche KI-Anwendungen lassen sich anbinden?</summary>
+      <p>Als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Unterstützt werden Anwendungen, die MCP-Server lokal auf dem Mac einbinden. ChatGPT bindet MCP-Server über die Cloud von OpenAI an und bräuchte dafür einen Zugang zum Archivio-Server aus dem Internet. Das ist aus Datenschutzgründen zurzeit nicht vorgesehen.</p>
+    </details>
+    <details>
+      <summary>Was bekommt die KI zu sehen?</summary>
+      <p>Nur Ausschnitte der Dokumente, die sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt. Neue Projekte sind nie automatisch freigegeben. Zusätzlich lassen sich Ordner und Dateien über die Sperrliste ausschliessen. Jeder Zugriff und jede Blockierung steht unter «Verwaltung → Verlauf».</p>
+    </details>
+    <details>
+      <summary>Werden Normen an die KI übermittelt?</summary>
+      <p>Nein. Normen sind urheberrechtlich geschützt. Dokumente, die Archivio als Norm erkennt (SIA, VSS und weitere), werden nie über die MCP-Schnittstelle übermittelt, auch nicht aus freigegebenen Projekten.</p>
+    </details>
+    <details>
+      <summary>Kann die KI über Archivio Dateien verändern?</summary>
+      <p>Nein. Sie kann suchen, lesen, Dateien öffnen und im Finder zeigen. Neue Dateien legt sie nur im Downloads-Ordner an, wenn sie PDFs zusammenfügt oder Dokumente in einen neuen Ordner kopiert. Die Originale bleiben unverändert.</p>
+    </details>
+    <details>
+      <summary>Kann eine KI nicht direkt auf den Server zugreifen?</summary>
+      <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst.</p>
+    </details>
+  </div>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/">Archivio</a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Über</p>
+        <ul>
+          <li><a href="/about.html">Über Archivio</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 architools, Winterthur</p>
+  </footer>
+
+</body>
+</html>

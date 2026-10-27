@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+<meta charset="UTF-8">
+<title>Archivio – Normen erkennen und prüfen</title>
+<style>
+:root {
+  --text:    #1f2937;
+  --text-2:  #6b7280;
+  --text-3:  #9ca3af;
+  --border:  #e5e7eb;
+  --bg:      #ffffff;
+  --bg-2:    #f9fafb;
+  --accent:  #111827;
+  --radius:  6px;
+}
+* { box-sizing: border-box; }
+html, body {
+  margin: 0; padding: 0;
+  background: transparent;
+  font-family: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  color: var(--text);
+  overflow: hidden;
+}
+
+.demo-frame {
+  position: relative;
+  width: 680px;
+  margin: 0 auto;
+  padding: 24px;
+  background: var(--bg);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  box-shadow: 0 10px 32px rgba(0,0,0,.08);
+  overflow: hidden;
+  opacity: 0;
+}
+
+/* ── Synthetischer Cursor ── */
+.cursor {
+  position: absolute; left: 0; top: 0; width: 22px; height: 22px;
+  z-index: 90; pointer-events: none; will-change: transform;
+  filter: drop-shadow(0 1px 2px rgba(0,0,0,.4));
+  opacity: 0;
+}
+.click-ring {
+  position: absolute; left: 0; top: 0; width: 26px; height: 26px;
+  margin-left: -8px; margin-top: -8px;
+  border-radius: 50%; background: rgba(17,24,39,.18);
+  z-index: 89; pointer-events: none; opacity: 0; will-change: transform, opacity;
+}
+
+.badge { font-size: 10px; font-weight: 700; letter-spacing: .05em; text-transform: uppercase; padding: 2px 6px; border-radius: 4px; flex-shrink: 0; }
+.badge-pdf  { background: #fee2e2; color: #991b1b; }
+</style>
+<style>
+  .demo-frame { min-height: 420px; }
+
+  .head {
+    display: flex; align-items: center; gap: 10px;
+    padding-bottom: 12px; margin-bottom: 6px; border-bottom: 2px solid var(--accent);
+  }
+  .head-title { font-size: 16px; font-weight: 700; letter-spacing: -.01em; }
+  .head-sub { font-size: 12px; color: var(--text-3); }
+  .btn {
+    margin-left: auto; font-size: 12px; font-weight: 600; padding: 6px 12px;
+    border: 1px solid var(--border); border-radius: var(--radius); background: var(--bg);
+    color: var(--text); transition: background .1s, border-color .1s;
+  }
+  .btn.pressed { background: var(--bg-2); border-color: #9ca3af; }
+
+  .row {
+    display: flex; align-items: center; gap: 10px; height: 52px; padding: 0 8px;
+    border-bottom: 1px solid var(--border); opacity: 0;
+  }
+  .row:nth-child(even) { background: #f5f5f5; }
+  .file { flex: 1; min-width: 0; }
+  .file-name { font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .file-path { font-size: 11px; color: var(--text-3); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  .chip {
+    font-size: 11px; font-weight: 700; padding: 3px 8px; border-radius: 999px;
+    background: #eef2ff; color: #3730a3; white-space: nowrap; flex-shrink: 0;
+    transform: scale(.6); opacity: 0;
+  }
+  .lock {
+    display: inline-flex; align-items: center; gap: 4px; font-size: 11px; color: var(--text-2);
+    white-space: nowrap; flex-shrink: 0; opacity: 0;
+  }
+  .lock svg { width: 13px; height: 13px; stroke: var(--text-2); fill: none; stroke-width: 1.8; }
+
+  .status {
+    width: 150px; flex-shrink: 0; display: flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-2); white-space: nowrap;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: #d1d5db; flex-shrink: 0; }
+  .dot.ok  { background: #16a34a; }
+  .dot.bad { background: #dc2626; }
+  .spin {
+    width: 12px; height: 12px; border-radius: 50%; flex-shrink: 0;
+    border: 2px solid #d1d5db; border-top-color: var(--accent);
+    animation: spin .7s linear infinite; display: none;
+  }
+  @keyframes spin { to { transform: rotate(360deg); } }
+  .status .label-bad { color: #b91c1c; font-weight: 600; }
+  .status .label-ok  { color: #166534; font-weight: 600; }
+
+  .progress {
+    margin-top: 14px; font-size: 12px; color: var(--text-2); opacity: 0;
+    display: flex; align-items: center; gap: 10px;
+  }
+  .bar { flex: 1; height: 4px; border-radius: 2px; background: var(--border); overflow: hidden; }
+  .bar-fill { height: 100%; width: 0; background: var(--accent); }
+
+  .summary {
+    position: absolute; left: 24px; right: 24px; bottom: 22px;
+    display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--text-2);
+    padding: 10px 12px; border-radius: var(--radius); background: var(--bg-2); border: 1px solid var(--border);
+    opacity: 0;
+  }
+  .summary strong { color: var(--text); }
+</style>
+</head>
+<body>
+
+<div class="demo-frame" id="frame">
+  <div class="head">
+    <div>
+      <div class="head-title">Normen</div>
+      <div class="head-sub">automatisch erkannt beim Scan</div>
+    </div>
+    <div class="btn" id="btn-check">Alle prüfen</div>
+  </div>
+
+  <div id="rows"></div>
+
+  <div class="progress" id="progress">
+    <span id="progress-text">Aktualität wird geprüft: 0 von 5</span>
+    <div class="bar"><div class="bar-fill" id="bar-fill"></div></div>
+  </div>
+
+  <div class="summary" id="summary">
+    <span class="dot ok"></span><span><strong>3</strong> aktuell</span>
+    <span class="dot bad" style="margin-left:10px;"></span><span><strong>2</strong> veraltet — neuere Ausgabe beschaffen</span>
+  </div>
+
+  <div class="click-ring" id="click-ring"></div>
+  <svg class="cursor" id="cursor" viewBox="0 0 24 24" fill="none">
+    <path d="M4 2 L4 20 L9 15.5 L12.5 21.5 L15 20 L11.5 14 L18 13.5 Z" fill="#111827" stroke="#fff" stroke-width="1"/>
+  </svg>
+</div>
+
+<script>
+// Gemeinsame Timeline-Helfer für die architools.ch-Feature-Animationen (SVG/CSS/JS,
+// kein Video). Jede Animation treibt ihre eigene requestAnimationFrame-Schleife;
+// diese Datei stellt nur die Interpolations-Bausteine bereit.
+
+function easeInOutCubic(x) { return x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2; }
+function clamp01(x) { return Math.max(0, Math.min(1, x)); }
+function fadeIn(t, start, dur) { return clamp01((t - start) / dur); }
+function fadeOut(t, start, dur) { return 1 - fadeIn(t, start, dur); }
+
+// Cursor, der sich entlang fester Wegpunkte {t,x,y} bewegt (ease-in-out zwischen
+// je zwei Punkten) und an definierten Zeitpunkten einen Klick-Puls auslöst.
+function makeCursor(cursorEl, ringEl, waypoints, clicks) {
+  function posAt(t) {
+    if (t <= waypoints[0].t) return waypoints[0];
+    for (var i = 0; i < waypoints.length - 1; i++) {
+      var a = waypoints[i], b = waypoints[i + 1];
+      if (t >= a.t && t <= b.t) {
+        var span = b.t - a.t;
+        var f = span > 0 ? easeInOutCubic(clamp01((t - a.t) / span)) : 1;
+        return { x: a.x + (b.x - a.x) * f, y: a.y + (b.y - a.y) * f };
+      }
+    }
+    return waypoints[waypoints.length - 1];
+  }
+  return {
+    render: function (t, visibleFrom, visibleTo) {
+      var pos = posAt(t);
+      var vis = fadeIn(t, visibleFrom, 0.2) * fadeOut(t, visibleTo, 0.3);
+      cursorEl.style.opacity = vis;
+      cursorEl.style.transform = 'translate(' + pos.x + 'px,' + pos.y + 'px)';
+      var ringOpacity = 0, ringScale = 0.4, rx = 0, ry = 0;
+      (clicks || []).forEach(function (c) {
+        var dt = t - c.t;
+        if (dt >= -0.02 && dt <= 0.4) {
+          var f = clamp01(dt / 0.4);
+          ringOpacity = 1 - f; ringScale = 0.4 + f * 1.3; rx = c.x; ry = c.y;
+        }
+      });
+      ringEl.style.opacity = ringOpacity;
+      ringEl.style.transform = 'translate(' + rx + 'px,' + ry + 'px) scale(' + ringScale + ')';
+    }
+  };
+}
+
+function loopPlayer(loopSeconds, renderFn) {
+  var startTs = null;
+  var SPEED = 0.8; // ca. 25% langsamer
+  function tick(ts) {
+    if (startTs === null) startTs = ts;
+    var elapsed = ((ts - startTs) / 1000 * SPEED) % loopSeconds;
+    renderFn(elapsed);
+    requestAnimationFrame(tick);
+  }
+  requestAnimationFrame(tick);
+}
+
+</script>
+<script>
+(function(){
+  // Fantasie-Projekte, echte Normnummern. ok=false: es gibt eine neuere Ausgabe.
+  var NORMS = [
+    {chip: 'SIA 118',    year: '2013', ok: true,  name: 'Allgemeine Bedingungen für Bauarbeiten.pdf', path: 'Büro › Normen › SIA'},
+    {chip: 'SIA 380/1',  year: '2009', ok: false, name: 'Heizwärmebedarf_2009.pdf',                   path: '214 Seeblick Uster › Energie'},
+    {chip: 'SIA 500',    year: '2009', ok: true,  name: 'Hindernisfreie Bauten.pdf',                  path: 'Büro › Normen › SIA'},
+    {chip: 'SIA 181',    year: '2006', ok: false, name: 'Schallschutz im Hochbau.pdf',                path: '208 Lindenhof Wil › Bauphysik'},
+    {chip: 'VSS 40 291', year: '2019', ok: true,  name: 'Parkieren – Geometrie der Anlagen.pdf',      path: 'Büro › Normen › VSS'}
+  ];
+  var LOCK = '<svg viewBox="0 0 24 24"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>';
+
+  var rowsEl = document.getElementById('rows');
+  var rows = NORMS.map(function (n) {
+    var r = document.createElement('div');
+    r.className = 'row';
+    r.innerHTML =
+      '<span class="badge badge-pdf">pdf</span>' +
+      '<div class="file"><div class="file-name">' + n.name + '</div><div class="file-path">' + n.path + '</div></div>' +
+      '<span class="chip">' + n.chip + '</span>' +
+      '<span class="lock">' + LOCK + 'für KI gesperrt</span>' +
+      '<span class="status"><span class="spin"></span><span class="dot"></span><span class="label">Ungeprüft</span></span>';
+    rowsEl.appendChild(r);
+    return {
+      el: r, n: n,
+      chip: r.querySelector('.chip'), lock: r.querySelector('.lock'),
+      spin: r.querySelector('.spin'), dot: r.querySelector('.dot'), label: r.querySelector('.label')
+    };
+  });
+
+  var frame = document.getElementById('frame');
+  var btn = document.getElementById('btn-check');
+  var progress = document.getElementById('progress');
+  var progressText = document.getElementById('progress-text');
+  var barFill = document.getElementById('bar-fill');
+  var summary = document.getElementById('summary');
+
+  var P_REST = {x: 360, y: 300};
+  var P_BTN  = {x: 600, y: 42};
+  var CLICK  = 3.7;
+  var cursor = makeCursor(
+    document.getElementById('cursor'), document.getElementById('click-ring'),
+    [
+      {t: 0.0, x: P_REST.x, y: P_REST.y},
+      {t: 2.6, x: P_REST.x, y: P_REST.y},
+      {t: 3.6, x: P_BTN.x,  y: P_BTN.y},
+      {t: 4.4, x: P_BTN.x,  y: P_BTN.y},
+      {t: 5.4, x: 590,      y: 150},
+      {t: 12.0, x: 590,     y: 150}
+    ],
+    [{t: CLICK, x: P_BTN.x, y: P_BTN.y}]
+  );
+
+  var DETECT_START = 0.5, DETECT_STEP = 0.32;   // Erkennen beim Scan
+  var CHECK_START = 4.1, CHECK_STEP = 0.75;     // Prüfen nach dem Klick
+  var LOOP = 12.8;
+
+  function render(t) {
+    cursor.render(t, 2.4, 12.0);
+    btn.classList.toggle('pressed', t >= CLICK - 0.05 && t < CLICK + 0.25);
+
+    var checked = 0;
+    rows.forEach(function (r, i) {
+      var tRow = DETECT_START + i * DETECT_STEP;
+      r.el.style.opacity = fadeIn(t, tRow - 0.3, 0.25);
+      var pop = fadeIn(t, tRow + 0.25, 0.2);
+      r.chip.style.opacity = pop;
+      r.chip.style.transform = 'scale(' + (0.6 + 0.4 * pop) + ')';
+      r.lock.style.opacity = fadeIn(t, tRow + 0.45, 0.2);
+
+      var tCheck = CHECK_START + i * CHECK_STEP;
+      var running = t >= tCheck && t < tCheck + 0.55;
+      var done = t >= tCheck + 0.55;
+      if (done) checked++;
+      r.spin.style.display = running ? 'inline-block' : 'none';
+      r.dot.style.display = running ? 'none' : 'inline-block';
+      r.dot.className = 'dot' + (done ? (r.n.ok ? ' ok' : ' bad') : '');
+      if (done) {
+        r.label.className = r.n.ok ? 'label-ok' : 'label-bad';
+        r.label.textContent = r.n.ok ? 'Aktuell · ' + r.n.year : 'Veraltet · ' + r.n.year;
+      } else {
+        r.label.className = 'label';
+        r.label.textContent = running ? 'wird geprüft…' : 'Ungeprüft';
+      }
+    });
+
+    var checkEnd = CHECK_START + (rows.length - 1) * CHECK_STEP + 0.55;
+    progress.style.opacity = fadeIn(t, CHECK_START - 0.2, 0.2) * fadeOut(t, checkEnd + 0.4, 0.3);
+    progressText.textContent = 'Aktualität wird geprüft: ' + checked + ' von ' + rows.length;
+    barFill.style.width = (checked / rows.length * 100) + '%';
+    summary.style.opacity = fadeIn(t, checkEnd + 0.6, 0.3);
+
+    frame.style.opacity = fadeIn(t, 0, 0.25) * fadeOut(t, 11.5, 0.7);
+  }
+
+  loopPlayer(LOOP, render);
+})();
+</script>
+
+</body>
+</html>

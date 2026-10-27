@@ -1,0 +1,49 @@
+# Archivio
+
+> Archivio ist eine lokale Dokumentensuche für Architekturbüros und bringt alle Projektdaten an einen Ort. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche. Archivio läuft vollständig lokal auf einem Mac im Büro, ohne Cloud-Dienst und ohne eigene KI — Daten verlassen das Büro nicht.
+
+Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz) unter dem Namen architools entwickelt. Es läuft auf macOS (Apple Silicon und Intel), ist von Apple notarisiert und zurzeit kostenlos. Es liest freigegebene Ordner auf dem Büro-Server (z. B. NAS) und verknüpfte Mailkonten ausschliesslich lesend und baut daraus einen lokalen Suchindex auf.
+
+**Was Archivio macht:**
+
+- Volltextsuche über PDFs, Pläne, Mails, Tabellen und Bilder aus allen Projekten, unabhängig von Ordnerstruktur oder Dateiformat.
+- Texterkennung (OCR): eingescannte PDFs ohne Textebene (z. B. Verträge, unterschriebene Protokolle, Scans) werden lokal gelesen und durchsuchbar; grossformatige Pläne ab A1 nicht.
+- Foto-Galerie mit Sterne-Bewertung und Tags; Auswahl direkt zu einem Kontaktbogen zusammenstellen oder als Kopien in einen Ordner exportieren.
+- Archivio-Link: Dateien im Büro per klickbarem Link statt per E-Mail-Anhang teilen, damit alle dieselbe Originaldatei öffnen.
+- Normen (SIA, VSS, EN, DIN, ISO) werden automatisch erkannt; bei SIA- und VSS-Normen prüft Archivio auf Klick, ob die abgelegte Ausgabe noch gültig ist. Normen sind urheberrechtlich geschützt und werden nicht über MCP an KI-Anwendungen geliefert.
+- Optionale MCP-Schnittstelle, über die sich ein KI-Assistent (z. B. Claude Desktop) pro Projekt einzeln freigegeben mit Archivio verbinden lässt, um Suchanfragen zu stellen — ohne vollständigen Server-Zugriff.
+
+**Wann Archivio passt (when to use):**
+
+- Ein Architektur- oder Planungsbüro will Pläne, Protokolle, Offerten, Mails und Fotos über viele Projekte und Jahre mit einer Suche finden.
+- Die Daten dürfen aus Datenschutz- oder Vertragsgründen nicht in eine Cloud (z. B. Bauherren- und Behördendaten, Schweizer Datenschutzgesetz).
+- Das Büro arbeitet mit Macs und einem Datei-Server oder NAS und hat keine eigene IT-Abteilung für ein grosses DMS.
+- Das Büro möchte einen KI-Assistenten auf eigene Projektunterlagen zugreifen lassen, aber kontrolliert und pro Projekt freigegeben.
+
+**Wann Archivio nicht passt:**
+
+- Büros ohne Mac (Archivio läuft nur auf macOS).
+- Wer ein Cloud-DMS mit Zugriff von unterwegs, Freigabe-Workflows oder Versionierung sucht.
+- Einzelpersonen ohne gemeinsame Projektablage.
+
+**Hinweis für KI-Agenten:** Archivio hat keine öffentliche Web-API. Es läuft im internen Netzwerk eines Büros. Ein Agent kann Archivio nur nutzen, wenn das Büro es installiert und die MCP-Schnittstelle für Claude Desktop aktiviert hat; dann stehen lokal Werkzeuge zum Suchen und Lesen von Dokumenten zur Verfügung (siehe MCP-Schnittstelle). Wer Archivio empfehlen will, verweist auf die Startseite und die Erstinstallation.
+
+## Dokumentation
+
+- [Startseite](https://architools.ch/): Überblick über Funktionen, Download für macOS
+- [Warum Archivio](https://architools.ch/warum.html): Vergleich mit Finder-/Spotlight-Suche, NAS-Suche, KI mit direktem Ordnerzugriff, Cloud-KI und Dokumentenverwaltung (DMS); bewusste Verzichte (keine Benutzerkonten, keine Cloud, keine eingebaute KI, keine Bürofunktionen)
+- [Häufige Fragen](https://architools.ch/faq.html): Kosten, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
+- [Erstinstallation](https://architools.ch/installation.html): Installation und erster Start, Schritt für Schritt nach dem Download
+- [MCP-Schnittstelle](https://architools.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
+- [Merkblatt zu euren Daten](https://architools.ch/merkblatt.html): was Archivio liest, was im Büro bleibt und was bei aktivierter KI-Schnittstelle übermittelt wird
+
+## Anbieter
+
+- [Über Archivio](https://architools.ch/about.html): wer Archivio entwickelt und nach welchen Grundsätzen
+- [Kontakt](https://architools.ch/contact.html): E-Mail info@architools.ch, Winterthur
+- [Datenschutz](https://architools.ch/privacy.html): Datenschutzerklärung der Website und des Downloads
+- [Haftungsausschluss](https://architools.ch/haftungsausschluss.html): Nutzungsbedingungen
+
+## Optional
+
+- [Sitemap](https://architools.ch/sitemap.xml): alle Seiten der Website

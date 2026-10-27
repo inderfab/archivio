@@ -1,0 +1,197 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Warum Archivio</title>
+  <meta name="description" content="Wie sich Archivio von der Suche im Finder, der Suche im NAS, KI mit Ordnerzugriff, Cloud-KI und Dokumentenverwaltung unterscheidet, und worauf es bewusst verzichtet.">
+  <link rel="canonical" href="https://architools.ch/warum.html">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff; color: #111; line-height: 1.7;
+    }
+    header {
+      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
+    }
+    .back-link { font-size: 13px; color: #999; text-decoration: none; }
+    .back-link:hover { color: #111; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
+    h2 { font-size: 18px; font-weight: 700; margin: 44px 0 10px; letter-spacing: -0.2px; }
+    p { margin-bottom: 14px; color: #333; }
+    a { color: #111; }
+
+    /* Vergleichstabelle: schmal, auf dem Handy seitlich scrollbar mit fixer erster Spalte */
+    .cmp-wrap { margin: 28px 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .cmp { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; line-height: 1.4; }
+    .cmp col.c-label { width: 34%; }
+    .cmp col.c-val { width: 11%; }
+    .cmp th, .cmp td { padding: 9px 6px; border-bottom: 1px solid #eee; text-align: center; vertical-align: middle; }
+    .cmp thead th { font-size: 11px; font-weight: 600; color: #777; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #ccc; white-space: nowrap; }
+    .cmp tbody th { text-align: left; font-weight: 400; color: #333; padding-left: 0; }
+    .cmp .col-a { background: #f5f5f5; color: #111; font-weight: 700; }
+    .cmp thead .col-a { color: #111; border-radius: 6px 6px 0 0; }
+    .cmp td { color: #111; font-size: 15px; }
+    .cmp td.no { color: #ccc; }
+    .cmp td.part { color: #999; }
+    .cmp-legend { font-size: 12px; color: #999; margin-bottom: 26px; }
+
+    .cats { list-style: none; display: grid; gap: 8px; font-size: 14px; color: #444; margin-bottom: 14px; }
+    .cats strong { color: #111; }
+
+    .bewusst { list-style: none; display: grid; gap: 14px; margin-top: 16px; }
+    .bewusst li { color: #333; padding-left: 18px; position: relative; }
+    .bewusst li::before { content: "–"; position: absolute; left: 0; color: #999; }
+    .bewusst strong { color: #111; }
+
+    @media (max-width: 600px) {
+      header { padding: 20px 24px; }
+      .cmp { min-width: 560px; }
+      .cmp tbody th { position: sticky; left: 0; background: #fff; }
+    }
+  </style>
+  <style>
+    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
+    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
+    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
+    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+    .site-footer ul { list-style: none; display: grid; gap: 7px; }
+    .site-footer a { color: #777; text-decoration: none; }
+    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
+    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+    .sf-brand { display: grid; gap: 4px; align-content: start; }
+    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
+    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
+    @media (max-width: 760px) {
+      .site-footer { padding: 36px 24px 24px; }
+      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+      .sf-brand { grid-column: 1 / -1; }
+    }
+    @media print { .site-footer { display: none; } }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <div class="page">
+    <h1>Warum Archivio</h1>
+
+    <p>Dateien im Büro lassen sich auf verschiedene Arten suchen. So unterscheidet sich Archivio von den üblichen Wegen.</p>
+
+    <div class="cmp-wrap">
+      <table class="cmp">
+        <colgroup><col class="c-label"><col class="c-val" span="6"></colgroup>
+        <thead>
+          <tr>
+            <th></th>
+            <th class="col-a">Archivio</th>
+            <th>Finder</th>
+            <th>NAS</th>
+            <th>KI direkt</th>
+            <th>Cloud-KI</th>
+            <th>DMS</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr><th>Alle Projekte in einer Suche</th>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="part">◐</td><td>✓</td><td>✓</td></tr>
+          <tr><th>Schnell dank Index über den ganzen Server</th>
+            <td class="col-a">✓</td><td class="no">–</td><td>✓</td><td class="no">–</td><td>✓</td><td>✓</td></tr>
+          <tr><th>Bestehende Ablage bleibt, wie sie ist</th>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td></tr>
+          <tr><th>Mails, Scans und Fotos zusammen</th>
+            <td class="col-a">✓</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td></tr>
+          <tr><th>Suche läuft im Büro, ohne Cloud</th>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
+          <tr><th>Normen erkannt und für KI gesperrt</th>
+            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+          <tr><th>KI-Freigabe pro Projekt, mit Protokoll</th>
+            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td><td class="no">–</td></tr>
+          <tr><th>Kostenlos, ohne Abo</th>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p class="cmp-legend">✓ ja &nbsp;·&nbsp; ◐ teilweise oder nur mit Zusatzprogrammen &nbsp;·&nbsp; – nein</p>
+
+    <ul class="cats">
+      <li><strong>Finder:</strong> Suche im Finder oder mit Spotlight, auch auf dem geöffneten Server. Dort gibt es meist keinen Index: Der Mac durchsucht die Ordner bei jeder Anfrage neu, das dauert, und gute Filter fehlen.</li>
+      <li><strong>NAS (Dateiserver):</strong> die Suchfunktion des Dateiservers, z.&nbsp;B. Synology Universal Search oder QNAP Qsirch. Mails nur, wenn sie als Dateien auf dem Server liegen, Texterkennung über Zusatz-Apps.</li>
+      <li><strong>KI direkt:</strong> ein KI-Programm mit Zugriff auf die Ordner, z.&nbsp;B. Claude Desktop mit Dateizugriff. Ohne Index liest es Ordner für Ordner und Datei für Datei, und je nach Einstellung kann es Dateien verändern oder verschieben.</li>
+      <li><strong>Cloud-KI:</strong> KI im Büro-Abo eines Cloud-Anbieters, z.&nbsp;B. ChatGPT oder Microsoft Copilot. Die Ablage muss dafür in die Cloud, Freigaben und Protokoll laufen über den Administrator.</li>
+      <li><strong>DMS:</strong> Dokumentenverwaltung, z.&nbsp;B. ecoDMS oder Paperless. Die Dateien werden in das System abgelegt, statt in der bestehenden Ordnerstruktur zu bleiben.</li>
+    </ul>
+
+    <h2>Bewusst einfach</h2>
+    <p>Archivio macht eine Sache: Dateien finden, egal wo und wie diese vorliegen. Bewusst wird auf andere Punkte verzichtet:</p>
+    <ul class="bewusst">
+      <li><strong>Keine Benutzerkonten:</strong> Wer im Büronetz ist, kann suchen. Keine mühsame Rechteverwaltung, kein «Oh, ich habe mein Passwort vergessen». Wer im Büronetz ist, gehört zum Team und hat Zugriff.</li>
+      <li><strong>Keine Cloud:</strong> Archivio läuft auf einem Mac im Büro, von unterwegs über euren VPN-Zugang.</li>
+      <li><strong>Keine eingebaute KI:</strong> Archivio funktioniert ganz ohne KI. Es ist auch nicht nötig, jedes Programm mit KI auszustatten: Die Volltextsuche in der Datenbank ist schneller, braucht weniger Ressourcen und liefert bei gleicher Anfrage immer dieselben Treffer. Zudem ist die Entwicklung der KI so schnell, dass ein kleiner Anbieter kaum mithalten kann. Statt Gutes nachzubauen, versorgt Archivio die führenden KI-Modelle über die <a href="mcp.html">MCP-Schnittstelle</a> mit den Daten, die wirklich zählen. Wer KI verwenden will, nutzt die, die er schon kennt. Die grossen Modelle müssen für alle funktionieren. Archivio ist spezifisch für die Deutschschweizer Architekturbüros gemacht, von jemandem aus der Branche, der ihre realen Herausforderungen kennt.</li>
+      <li><strong>Keine Stundenerfassung, Rechnungsstellung oder Planversand:</strong> Dafür gibt es gute Bürosoftware. Archivio läuft nebenher und führt alles zusammen.</li>
+    </ul>
+
+    <h2>Warum nicht einfach im Finder suchen?</h2>
+    <p>Im Finder lässt sich auch auf dem Server suchen. Auf Netzlaufwerken gibt es dafür aber meist keinen Index: Jede Suche geht die Ordner neu durch, das dauert, und Filter nach Projekt, Dateityp oder Datum fehlen weitgehend. Archivio baut einen Index über alle freigegebenen Projektordner und Postfächer, und alle im Büro nutzen denselben.</p>
+
+    <h2>Kann eine KI nicht direkt auf den Server zugreifen?</h2>
+    <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst.</p>
+  </div>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/">Archivio</a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Über</p>
+        <ul>
+          <li><a href="/about.html">Über Archivio</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 architools, Winterthur</p>
+  </footer>
+
+</body>
+</html>

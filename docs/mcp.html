@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivio MCP-Schnittstelle</title>
+  <meta name="description" content="Archivio MCP-Schnittstelle: Werkzeuge, Einrichtung (zum Beispiel in Claude Desktop) und Datenschutz. Lokale Dokumentensuche für Architekturbüros mit KI-Assistenten nutzen.">
+  <link rel="canonical" href="https://architools.ch/mcp.html">
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff; color: #111; line-height: 1.7;
+    }
+    header {
+      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .wordmark {
+      display: inline-flex; align-items: center; gap: 9px;
+      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
+    }
+    .back-link { font-size: 13px; color: #999; text-decoration: none; }
+    .back-link:hover { color: #111; }
+
+    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
+    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
+    h2 { font-size: 18px; font-weight: 700; margin: 34px 0 10px; letter-spacing: -0.2px; }
+    p { margin-bottom: 14px; color: #333; }
+    p:last-child { margin-bottom: 0; }
+    a { color: #111; }
+    ul, ol { margin: 0 0 14px 20px; color: #333; }
+    li { margin-bottom: 6px; }
+    code { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.9em; background: #f2f2f2; border-radius: 4px; padding: 1px 5px; }
+    .table-wrap { overflow-x: auto; margin: 4px 0 18px; }
+    table { border-collapse: collapse; width: 100%; font-size: 14px; }
+    th, td { text-align: left; vertical-align: top; padding: 9px 10px; border-bottom: 1px solid #e8e8e8; }
+    th { font-weight: 600; color: #111; border-bottom: 1px solid #ccc; }
+    td { color: #333; }
+    td:first-child { white-space: nowrap; }
+
+    .callout {
+      background: #f7f7f7; border-left: 3px solid #111; padding: 14px 18px;
+      border-radius: 0 6px 6px 0; margin: 20px 0; font-size: 14px; color: #444;
+    }
+    .callout strong { color: #111; }
+
+
+    @media print {
+      header, footer { display: none; }
+      .page { padding: 0; max-width: none; }
+      a { color: #111; text-decoration: none; }
+    }
+    @media (max-width: 600px) {
+      thead { display: none; }
+      table, tbody, tr, td { display: block; width: 100%; }
+      tr { padding: 10px 0; border-bottom: 1px solid #e8e8e8; }
+      td { border: 0; padding: 2px 0; white-space: normal; }
+      td:last-child { font-size: 12px; color: #888; }
+      header { padding: 20px 24px; }
+    }
+  </style>
+  <style>
+    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
+    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
+    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
+    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+    .site-footer ul { list-style: none; display: grid; gap: 7px; }
+    .site-footer a { color: #777; text-decoration: none; }
+    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
+    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+    .sf-brand { display: grid; gap: 4px; align-content: start; }
+    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
+    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
+    @media (max-width: 760px) {
+      .site-footer { padding: 36px 24px 24px; }
+      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+      .sf-brand { grid-column: 1 / -1; }
+    }
+    @media print { .site-footer { display: none; } }
+  </style>
+</head>
+<body>
+
+  <header>
+    <a class="wordmark" href="index.html">
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
+        <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
+        <path d="m8 13 4-7 4 7" stroke-width="2"/>
+        <path d="M9.1 11h5.7" stroke-width="2"/>
+      </svg>
+      Archivio
+    </a>
+    <a class="back-link" href="index.html">← Zurück</a>
+  </header>
+
+  <main class="page">
+    <h1>Archivio MCP-Schnittstelle</h1>
+
+    <p>Über die MCP-Schnittstelle (Model Context Protocol) kann ein KI-Assistent, zum Beispiel Claude Desktop, in Archivio suchen und gefundene Dokumente lesen. So lassen sich Fragen zu Projektunterlagen direkt im Chat stellen, ohne Dateien von Hand hochzuladen. Als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Die Schnittstelle ist optional und standardmässig ausgeschaltet.</p>
+
+    <div class="callout">
+      <strong>Kurz:</strong> Der MCP-Server läuft lokal auf dem Arbeitsplatz-Mac, zusammen mit dem Archivio Helper. Er fragt den Archivio-Server im Büronetz ab. Es gibt keine öffentliche Web-API und keinen Zugriff von aussen.
+    </div>
+
+    <h2>So funktioniert es</h2>
+    <p>Die KI-Anwendung (am Beispiel Claude Desktop) startet den Archivio-MCP-Server als lokales Programm (stdio) auf dem eigenen Mac. Bei einer KI-Suche wird die Schnittstelle automatisch aufgerufen: Stellt jemand im Chat eine Frage, sucht das KI-Programm selbstständig in Archivio, bei Bedarf mehrfach, und liest die passenden Dokumente. Der MCP-Server leitet die Anfragen an den Archivio-Server im Büronetz weiter und gibt die Treffer an die KI zurück. Was dabei an die KI übermittelt wird, sind die Ausschnitte der Dokumente, die für die Frage abgerufen werden, und nur aus Projekten, die dafür freigegeben sind.</p>
+
+    <h2>Voraussetzungen</h2>
+    <ul>
+      <li>Archivio ist im Büro auf dem Server-Mac installiert.</li>
+      <li>Auf dem Arbeitsplatz-Mac laufen der <strong>Archivio Helper</strong> und eine unterstützte KI-Anwendung, aktuell <strong>Claude Desktop</strong>.</li>
+      <li>Der Arbeitsplatz ist im Büronetz (Kabel oder Büro-WLAN).</li>
+      <li>Mindestens ein Projekt ist für KI-Anwendungen freigegeben.</li>
+    </ul>
+
+    <h2>Einrichtung</h2>
+    <ol>
+      <li>Archivio im Browser öffnen und auf der Seite <strong>Helper</strong> den Archivio Helper installieren.</li>
+      <li>Auf derselben Seite unter «KI-Schnittstelle (MCP) einrichten» <strong>Claude Desktop</strong> wählen und auf <strong>MCP-Schnittstelle installieren</strong> klicken. Der Helper trägt Archivio in die Konfiguration von Claude Desktop ein, andere Einträge bleiben unverändert.</li>
+      <li><strong>Claude Desktop neu starten.</strong> Danach erscheint Archivio in Claude unter den verbundenen Werkzeugen.</li>
+      <li>In Archivio unter <strong>Projekte</strong> die gewünschten Projekte mit dem Roboter-Symbol freigeben. Ohne Freigabe liefert die Schnittstelle keine Treffer.</li>
+    </ol>
+
+    <h2>Werkzeuge</h2>
+    <p>Diese Werkzeuge stellt der Archivio-MCP-Server bereit. Der Servername in der KI-Anwendung ist <code>archivio</code>.</p>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Werkzeug</th><th>Was es tut</th><th>Wirkung</th></tr></thead>
+        <tbody>
+          <tr><td><code>search</code></td><td>Volltextsuche in Dokumenten, Mails, Datei- und Ordnernamen, optional auf ein Projekt eingeschränkt. Jeder Treffer hat eine ID.</td><td>nur lesend</td></tr>
+          <tr><td><code>read_document</code></td><td>Lädt den Text eines gefundenen Dokuments blockweise in die Unterhaltung, zum Lesen, Zusammenfassen oder Beantworten von Fragen.</td><td>nur lesend</td></tr>
+          <tr><td><code>list_folder</code></td><td>Listet den Inhalt eines Ordners innerhalb der Archivio-Projektordner.</td><td>nur lesend</td></tr>
+          <tr><td><code>open_file</code></td><td>Öffnet eine Datei in der zugehörigen App auf dem eigenen Mac.</td><td>nur lesend</td></tr>
+          <tr><td><code>reveal_file</code></td><td>Zeigt eine Datei im Finder.</td><td>nur lesend</td></tr>
+          <tr><td><code>merge_documents_to_pdf</code></td><td>Fügt mehrere gefundene PDFs zu einer neuen PDF-Datei im Downloads-Ordner zusammen.</td><td>legt neue Datei an</td></tr>
+          <tr><td><code>copy_documents_to_folder</code></td><td>Kopiert die Originaldateien gefundener Dokumente in einen neuen Ordner im Downloads-Ordner. Die Originale bleiben unverändert.</td><td>legt neue Dateien an</td></tr>
+        </tbody>
+      </table>
+    </div>
+    <p>Die lesenden Werkzeuge sind gegenüber der KI als «nur lesend» gekennzeichnet. Dateien öffnen, im Finder zeigen und Ordner auflisten funktioniert nur innerhalb der Projektordner, die in Archivio konfiguriert sind.</p>
+
+    <h2>Beispiele für Fragen</h2>
+    <ul>
+      <li>«Welche Bodenbeläge sind im Treppenhaus von Projekt 300 vorgesehen?»</li>
+      <li>«Fasse die Mails mit dem Sanitärplaner zur Materialwahl zusammen.»</li>
+      <li>«Erstelle mir ein PDF mit je einem Treppenhausplan pro Projekt.»</li>
+      <li>«Wo liegt die aktuelle Kostenschätzung für das Projekt Sonnenhof?»</li>
+    </ul>
+
+    <h2>Datenschutz und Kontrolle</h2>
+    <ul>
+      <li><strong>Freigabe pro Projekt:</strong> Neue Projekte sind nie automatisch für KI-Anwendungen sichtbar.</li>
+      <li><strong>Sperrliste:</strong> Unter «Verwaltung → Sperrliste» lassen sich zusätzlich Ordner oder Dateien für die Schnittstelle sperren.</li>
+      <li><strong>Normen:</strong> Als Norm erkannte Dokumente (SIA und weitere) werden nie übermittelt.</li>
+      <li><strong>Protokoll:</strong> Jeder Zugriff und jede Blockierung wird unter «Verwaltung → Verlauf» festgehalten.</li>
+    </ul>
+    <p>Für die Nutzung von Claude empfehlen wir ein Team- oder Enterprise-Konto. Details dazu im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
+
+    <h2>Andere KI-Anwendungen</h2>
+    <p>Als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Unterstützt werden Anwendungen, die MCP-Server lokal über eine Konfigurationsdatei einbinden. ChatGPT bindet MCP-Server über die Cloud von OpenAI an und bräuchte dafür einen Zugang zum Archivio-Server aus dem Internet. Das ist aus Datenschutzgründen zurzeit nicht vorgesehen. Bei Interesse freuen wir uns über eine Nachricht an <a href="mailto:info@architools.ch">info@architools.ch</a>.</p>
+  </main>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/">Archivio</a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Über</p>
+        <ul>
+          <li><a href="/about.html">Über Archivio</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 architools, Winterthur</p>
+  </footer>
+
+</body>
+</html>

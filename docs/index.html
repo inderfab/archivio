@@ -1,0 +1,731 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivio – Alle Projektdaten an einem Ort, für Architekturbüros</title>
+  <meta name="description" content="Archivio durchsucht Pläne, Mails, Dokumente und Fotos aus allen Projekten in einer Suche, zeigt Projektfotos in einer Galerie und teilt Dateien per Link. Vollständig lokal, ohne Cloud. Kostenlos für macOS.">
+  <link rel="canonical" href="https://architools.ch/">
+  <meta name="author" content="Fabio Indergand">
+  <meta name="publish_date" property="og:publish_date" content="2026-10-23T00:00:00+02:00">
+
+  <meta property="og:type" content="website">
+  <meta property="og:site_name" content="Archivio">
+  <meta property="og:url" content="https://architools.ch/">
+  <meta property="og:title" content="Archivio – Alle Projektdaten an einem Ort, für Architekturbüros">
+  <meta property="og:description" content="Pläne, Mails, Dokumente und Fotos aus allen Projekten in einer Suche, mit Fotogalerie und Datei-Links. Vollständig lokal, ohne Cloud. Kostenlos für macOS.">
+  <meta property="og:image" content="https://architools.ch/img/og-image.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:locale" content="de_CH">
+
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:title" content="Archivio – Alle Projektdaten an einem Ort, für Architekturbüros">
+  <meta name="twitter:description" content="Pläne, Mails, Dokumente und Fotos aus allen Projekten in einer Suche, mit Fotogalerie und Datei-Links. Vollständig lokal, ohne Cloud. Kostenlos für macOS.">
+  <meta name="twitter:image" content="https://architools.ch/img/og-image.png">
+
+  <script type="application/ld+json">
+  {
+    "@context": "https://schema.org",
+    "@type": "SoftwareApplication",
+    "name": "Archivio",
+    "url": "https://architools.ch/",
+    "image": "https://architools.ch/img/og-image.png",
+    "description": "Archivio ist eine lokale Dokumentensuche für Architekturbüros und bringt alle Projektdaten an einen Ort. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche, macht eingescannte PDFs per Texterkennung (OCR) durchsuchbar, läuft vollständig lokal auf einem Mac im Büro ohne Cloud-Dienst, und lässt sich optional über eine MCP-Schnittstelle mit KI-Assistenten wie Claude verbinden.",
+    "applicationCategory": "BusinessApplication",
+    "applicationSubCategory": "Document Management",
+    "operatingSystem": "macOS",
+    "offers": {
+      "@type": "Offer",
+      "price": "0",
+      "priceCurrency": "CHF"
+    },
+    "author": {
+      "@type": "Person",
+      "name": "Fabio Indergand",
+      "jobTitle": "Architekt MSc ETH SIA",
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Winterthur",
+        "addressCountry": "CH"
+      }
+    },
+    "publisher": {
+      "@type": "Organization",
+      "name": "architools",
+      "url": "https://architools.ch/",
+      "founder": {
+        "@type": "Person",
+        "name": "Fabio Indergand"
+      },
+      "email": "info@architools.ch",
+      "contactPoint": {
+        "@type": "ContactPoint",
+        "contactType": "customer support",
+        "email": "info@architools.ch",
+        "url": "https://architools.ch/contact.html",
+        "availableLanguage": ["de"]
+      },
+      "address": {
+        "@type": "PostalAddress",
+        "addressLocality": "Winterthur",
+        "addressCountry": "CH"
+      }
+    },
+    "audience": {
+      "@type": "Audience",
+      "audienceType": "Architekturbüros"
+    }
+  }
+  </script>
+
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+      background: #fff;
+      color: #111;
+      line-height: 1.6;
+    }
+
+    /* ── Hero ── */
+    .hero {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 80px 24px 70px;
+      text-align: center;
+    }
+    .hero-logo {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 16px;
+      margin-bottom: 20px;
+    }
+    .hero-logo svg { width: 52px; height: 52px; }
+    .hero h1 {
+      font-size: clamp(40px, 7vw, 64px);
+      font-weight: 700;
+      letter-spacing: -1.5px;
+      line-height: 1.1;
+      margin-bottom: 22px;
+    }
+    .hero-slogan {
+      font-size: clamp(20px, 3.5vw, 26px);
+      font-weight: 600;
+      letter-spacing: -0.4px;
+      line-height: 1.3;
+      color: #111;
+    }
+    .hero-trust-line {
+      margin-top: 22px;
+      font-size: 14px;
+      color: #999;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+    }
+    .hero-trust-line svg { width: 14px; height: 14px; flex-shrink: 0; stroke: #999; }
+
+    /* ── Buttons (auch im CTA-Block unten verwendet) ── */
+    .btn-download {
+      display: inline-block;
+      background: #111;
+      color: #fff;
+      font-size: 16px;
+      font-weight: 500;
+      padding: 14px 32px;
+      border-radius: 6px;
+      text-decoration: none;
+      border: none;
+      cursor: pointer;
+      transition: background 0.15s;
+    }
+    .btn-download:hover { background: #333; }
+    .btn-download:disabled { background: #888; cursor: default; }
+    .hero-meta {
+      margin-top: 16px;
+      font-size: 13px;
+      color: #999;
+    }
+
+    /* ── Feature-Sektionen (Zigzag) ── */
+    .feature-section {
+      display: grid;
+      grid-template-columns: 45% 55%;
+      gap: 56px;
+      align-items: center;
+      max-width: 1100px;
+      margin: 110px auto;
+      padding: 0 24px;
+    }
+    .hero + .feature-section { margin-top: 55px; }
+    .feature-section.reverse { grid-template-columns: 55% 45%; }
+    .feature-section.reverse .feature-text { order: 2; }
+    .feature-section.reverse .feature-visual { order: 1; }
+    .feature-text h2 {
+      font-size: clamp(26px, 3vw, 34px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      margin-bottom: 16px;
+    }
+    .feature-badge {
+      display: inline-block;
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: #666;
+      background: #f2f2f2;
+      border-radius: 4px;
+      padding: 3px 8px;
+      margin-left: 10px;
+      vertical-align: middle;
+    }
+    .feature-text p {
+      font-size: 16px;
+      color: #333;
+      max-width: 460px;
+    }
+    .feature-text ul.feature-list {
+      list-style: disc;
+      margin: 12px 0 0;
+      padding: 0 0 0 1.2em;
+      font-size: 16px;
+      color: #333;
+    }
+    .feature-text ul.feature-list li { margin: 0; padding: 0; }
+    .feature-visual { min-width: 0; }
+    .scale-wrap {
+      position: relative;
+      width: 100%;
+      overflow: hidden;
+    }
+    .scale-wrap iframe {
+      position: absolute;
+      top: 0; left: 0;
+      border: 0;
+      transform-origin: top left;
+      pointer-events: none;
+    }
+
+    .linkflow {
+      max-width: 460px; margin-top: 28px;
+    }
+        .linkflow-steps { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
+    .linkflow-step { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; min-width: 0; }
+    .linkflow-ico {
+      width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid #111827; color: #111827;
+      display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+    }
+    .linkflow-lbl { font-size: 12px; color: #6b7280; text-align: center; line-height: 1.45; }
+    .linkflow-arrow { color: #111827; font-size: 16px; padding-top: 8px; flex-shrink: 0; }
+    @media (max-width: 767px) {
+      .linkflow { max-width: none; }
+      .linkflow-steps { flex-direction: column; align-items: stretch; gap: 4px; }
+      .linkflow-step { flex-direction: row; text-align: left; gap: 14px; }
+      .linkflow-lbl { text-align: left; font-size: 14px; }
+      .linkflow-arrow { transform: rotate(90deg); padding: 0 0 0 20px; align-self: flex-start; }
+    }
+
+    @media (max-width: 767px) {
+      .feature-section,
+      .feature-section.reverse {
+        grid-template-columns: 1fr;
+        gap: 28px;
+        margin: 72px auto;
+      }
+      .feature-section .feature-text,
+      .feature-section.reverse .feature-text { order: -1; }
+      .feature-section .feature-visual,
+      .feature-section.reverse .feature-visual { order: 1; }
+      .feature-text p { max-width: none; }
+    }
+
+    /* ── So funktioniert's ── */
+    .steps-section {
+      max-width: 1100px;
+      margin: 110px auto;
+      padding: 0 24px;
+    }
+    .section-title {
+      font-size: clamp(26px, 3vw, 34px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
+      text-align: center;
+      margin-bottom: 40px;
+    }
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 40px;
+      list-style: none;
+    }
+    .step-num {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+      background: #f2f2f2;
+      color: #111;
+      font-size: 14px;
+      font-weight: 700;
+      margin-bottom: 14px;
+    }
+    .steps h3 {
+      font-size: 18px;
+      font-weight: 700;
+      letter-spacing: -0.2px;
+      margin-bottom: 6px;
+    }
+    .steps p { font-size: 15px; color: #333; }
+    @media (max-width: 767px) {
+      .steps { grid-template-columns: 1fr; gap: 28px; }
+      .steps-section { margin: 72px auto; }
+    }
+
+    /* ── FAQ ── */
+    .faq-section {
+      max-width: 680px;
+      margin: 0 auto 90px;
+      padding: 0 24px;
+    }
+    .faq-section details {
+      border-top: 1px solid #e8e8e8;
+      padding: 18px 0;
+    }
+    .faq-section details:last-of-type { border-bottom: 1px solid #e8e8e8; }
+    .faq-more { margin-top: 24px; font-size: 15px; }
+    .faq-more a { color: #111; text-decoration: none; font-weight: 600; }
+    .faq-more a:hover { text-decoration: underline; }
+    .faq-section summary {
+      font-size: 16px;
+      font-weight: 600;
+      cursor: pointer;
+      list-style: none;
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    .faq-section summary::-webkit-details-marker { display: none; }
+    .faq-section summary::after {
+      content: "+";
+      color: #999;
+      font-weight: 400;
+      font-size: 20px;
+      line-height: 1;
+    }
+    .faq-section details[open] summary::after { content: "–"; }
+    .faq-section details p {
+      margin-top: 10px;
+      font-size: 15px;
+      color: #333;
+    }
+
+    /* ── Abschluss & CTA ── */
+    .cta-section {
+      max-width: 680px;
+      margin: 0 auto;
+      padding: 40px 24px 90px;
+      text-align: center;
+    }
+    .cta-section h2 {
+      font-size: clamp(24px, 3vw, 30px);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      margin-bottom: 24px;
+    }
+    .cta-merkblatt {
+      margin-top: 14px;
+      font-size: 13px;
+    }
+    .cta-merkblatt a { color: #666; }
+    .cta-merkblatt a:hover { color: #111; }
+
+    .dl-form { display: none; }
+    .dl-form.open { display: block; }
+    .dl-form-hint {
+      font-size: 13px;
+      color: #999;
+      max-width: 360px;
+      margin: 0 auto 16px;
+    }
+    .dl-email-input {
+      display: block;
+      width: 100%;
+      max-width: 320px;
+      margin: 0 auto 12px;
+      font-size: 15px;
+      padding: 12px 16px;
+      border: 1.5px solid #d0d0d0;
+      border-radius: 6px;
+      outline: none;
+      text-align: center;
+      transition: border-color 0.15s;
+    }
+    .dl-email-input:focus { border-color: #111; }
+
+    /* ── Footer ── */
+
+    @media (max-width: 600px) {
+    }
+  </style>
+  <style>
+    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
+    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
+    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
+    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+    .site-footer ul { list-style: none; display: grid; gap: 7px; }
+    .site-footer a { color: #777; text-decoration: none; }
+    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
+    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+    .sf-brand { display: grid; gap: 4px; align-content: start; }
+    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
+    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
+    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
+    @media (max-width: 760px) {
+      .site-footer { padding: 36px 24px 24px; }
+      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
+      .sf-brand { grid-column: 1 / -1; }
+    }
+    @media print { .site-footer { display: none; } }
+  </style>
+</head>
+<body>
+
+  <main>
+    <section class="hero">
+      <div class="hero-logo">
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="1.5"/>
+          <path d="m8 13 4-7 4 7" stroke-width="1.5"/>
+          <path d="M9.1 11h5.7" stroke-width="1.5"/>
+        </svg>
+      </div>
+      <h1>Archivio</h1>
+      <p class="hero-slogan">Jedes Dokument. Jede Mail. Jeder Plan.<br>Sofort gefunden.</p>
+      <p class="hero-trust-line">
+        <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
+        Läuft vollständig lokal im Büro, ohne Abo, Cloud und KI.
+      </p>
+    </section>
+
+    <section class="feature-section">
+      <div class="feature-text">
+        <h2>Alle Dateien in einer Suche</h2>
+        <p>PDFs, Pläne, Mails, Tabellen, Bilder — alles an einem Ort durchsuchbar. Kein Ordner durchklicken, kein Dateiname raten: einmal tippen, und der Treffer ist da, egal in welchem Format oder Projektjahr er steckt. Alle Dateien werden einmal täglich indexiert. Auch eingescannte PDFs werden per Texterkennung (OCR) durchsuchbar.</p>
+        <ul class="feature-list">
+          <li>Datei direkt öffnen</li>
+          <li>Treffer filtern</li>
+          <li>PDF zusammenfügen</li>
+          <li>Tags zuweisen</li>
+        </ul>
+        <p class="cta-merkblatt"><a href="merkblatt.html">→ Merkblatt: Was mit Ihren Daten passiert</a></p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/595;">
+          <iframe src="animations/search.html" data-w="680" style="width:680px;height:595px;" scrolling="no" loading="lazy" title="Volltextsuche – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section reverse">
+      <div class="feature-text">
+        <h2>Fotos, sofort sortiert</h2>
+        <p>Alle Projektfotos in einer Galerie — unabhängig von Ordner und Format. Filterbar nach Projekt und Zeitpunkt, mit Sterne-Bewertung und Tags klassifizierbar. Auswahl direkt zu einem Kontaktbogen zusammenstellen oder als Bild-Kopien in einen Ordner für den Versand speichern.</p>
+        <ul class="feature-list">
+          <li>Filtern</li>
+          <li>Bewerten</li>
+          <li>Kontaktbogen</li>
+          <li>Ordner zusammenstellen</li>
+        </ul>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/438;">
+          <iframe src="animations/gallery.html" data-w="680" style="width:680px;height:438px;" scrolling="no" loading="lazy" title="Bildgalerie – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section">
+      <div class="feature-text">
+        <h2>Teilen ohne Kopien zu senden</h2>
+        <p>Statt Dateikopien im Büro herumzusenden: direkt einen klickbaren Link versenden, der die Originaldatei auf dem Server öffnet. Jeder, der den Archivio Helper installiert hat, kann das Original direkt öffnen.</p>
+      <div class="linkflow">
+                <div class="linkflow-steps">
+          <div class="linkflow-step"><span class="linkflow-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="3" width="16" height="18" rx="2"></rect><path d="M9 3v18"></path></svg></span><span class="linkflow-lbl">Rechtsklick auf die Datei im Finder</span></div>
+          <span class="linkflow-arrow" aria-hidden="true">→</span>
+          <div class="linkflow-step"><span class="linkflow-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="4" y1="7" x2="20" y2="7"></line><line x1="4" y1="12" x2="20" y2="12"></line><line x1="4" y1="17" x2="14" y2="17"></line></svg></span><span class="linkflow-lbl">Schnellaktion / Dienste „Archivio-Link kopieren“</span></div>
+          <span class="linkflow-arrow" aria-hidden="true">→</span>
+          <div class="linkflow-step"><span class="linkflow-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-1 1"></path><path d="M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l1-1"></path></svg></span><span class="linkflow-lbl">Link einfügen,<br>z.&nbsp;B.&nbsp;in&nbsp;Mail</span></div>
+          <span class="linkflow-arrow" aria-hidden="true">→</span>
+          <div class="linkflow-step"><span class="linkflow-ico"><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"></circle><path d="M4 21c0-4 4-6 8-6s8 2 8 6"></path></svg></span><span class="linkflow-lbl">Empfänger klickt — Original-Datei öffnet sich</span></div>
+        </div>
+      </div>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/400;">
+          <iframe src="animations/link-share.html" data-w="680" style="width:680px;height:400px;" scrolling="no" loading="lazy" title="Archivio-Link – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section reverse">
+      <div class="feature-text">
+        <h2>Automatische Normenerkennung</h2>
+        <p>Archivio erkennt SIA-, VSS-, EN-, DIN- und ISO-Normen beim Scan automatisch, egal in welchem Projektordner sie liegen. Mit einem Klick prüft es, ob die abgelegte Ausgabe einer SIA- oder VSS-Norm noch gültig ist oder ob es eine neuere gibt. Dafür vergleicht Archivio sie mit den Normenverzeichnissen von SIA und VSS. Normen sind urheberrechtlich geschützt, deshalb liefert Archivio keine Normen über MCP an KI-Anwendungen.</p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/420;">
+          <iframe src="animations/norms.html" data-w="680" style="width:680px;height:420px;" scrolling="no" loading="lazy" title="Automatische Normenerkennung – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="feature-section">
+      <div class="feature-text">
+        <h2>Fragen statt suchen<span class="feature-badge">Optional</span></h2>
+        <p>Archivio selbst enthält bewusst keine KI. Über eine optionale Schnittstelle (MCP) lässt es sich mit einem externen KI-Assistenten verbinden, als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Bei einer KI-Suche ruft die KI die Schnittstelle automatisch auf und sucht dann selbstständig in Archivio. Die Verbindung ist pro Projekt einzeln manuell aktivierbar. Die Schnittstelle bindet alle Serverdaten über eine geschützte Schnittstelle an die KI an, ohne dass man manuell Dateien hochladen muss. Die Schnittstelle erlaubt es den KI-Anbietern, Suchanfragen an Archivio zu stellen. Sie haben keinen kompletten Zugriff auf den Server. Normen und andere Dateien mit Copyright werden automatisch von Archivio blockiert.</p>
+        <p class="cta-merkblatt"><a href="mcp.html">→ MCP-Schnittstelle: Werkzeuge und Einrichtung</a></p>
+      </div>
+      <div class="feature-visual">
+        <div class="scale-wrap" style="aspect-ratio:680/440;">
+          <iframe src="animations/mcp.html" data-w="680" style="width:680px;height:440px;" scrolling="no" loading="lazy" title="KI-Schnittstelle (MCP) – Animation"></iframe>
+        </div>
+      </div>
+    </section>
+
+    <section class="steps-section" id="so-funktionierts">
+      <h2 class="section-title">So funktioniert’s</h2>
+      <ol class="steps">
+        <li>
+          <span class="step-num">1</span>
+          <h3>Installieren</h3>
+          <p>Paket herunterladen und auf einem Mac im Büro installieren, idealerweise einem, der dauerhaft läuft. Die Einrichtung führt durch die nötigen Freigaben.</p>
+        </li>
+        <li>
+          <span class="step-num">2</span>
+          <h3>Ordner freigeben</h3>
+          <p>Festlegen, welche Projektordner und Postfächer durchsucht werden. Archivio liest nur, was ihr freigebt, und indexiert täglich neu.</p>
+        </li>
+        <li>
+          <span class="step-num">3</span>
+          <h3>Suchen</h3>
+          <p>Alle im Büronetz öffnen Archivio im Browser und suchen über sämtliche Projekte, Pläne, Mails und Fotos. Treffer öffnen sich direkt als Originaldatei.</p>
+        </li>
+      </ol>
+    </section>
+
+    <section class="cta-section">
+      <h2>Starte jetzt und finde all deine Dateien:</h2>
+
+      <div id="dl-initial">
+        <button class="btn-download" onclick="showEmailForm()">Herunterladen</button>
+      </div>
+
+      <form id="dl-form" class="dl-form" onsubmit="return submitEmailForm(event)">
+        <p class="dl-form-hint">Für Update-Benachrichtigungen bei grösseren Versionen. Kein Newsletter, jederzeit mit einem Klick abmeldbar.</p>
+        <input type="email" id="dl-email" class="dl-email-input" placeholder="E-Mail-Adresse" required>
+        <button type="submit" class="btn-download" id="btn-dl">Herunterladen</button>
+      </form>
+
+      <p class="hero-meta">macOS&nbsp;(Apple&nbsp;Silicon&nbsp;und&nbsp;Intel) &nbsp;·&nbsp; Kostenlos &nbsp;·&nbsp; Von&nbsp;Apple&nbsp;notarisiert</p>
+    </section>
+
+    <section class="faq-section" id="faq">
+      <h2 class="section-title">Häufige Fragen</h2>
+      <details>
+        <summary>Muss jeder Mitarbeiter im Büro Archivio installieren?</summary>
+        <p>Nein. Archivio wird nur auf einem einzigen Mac im Büro installiert. Dieser Mac ist der Archivio-Server: Er ist mit dem Datei-Server oder NAS verbunden, liest die freigegebenen Ordner und baut den Suchindex auf. Alle anderen im Büro öffnen Archivio einfach im Browser, wie eine Website, und suchen dort. Mitarbeiter können den Archivio Helper installieren. Damit öffnen sie Suchergebnisse direkt lokal im passenden Programm und können den Archivio-Link für den bürointernen Versand sowie die MCP-Schnittstelle zu KI-Anwendungen nutzen.</p>
+      </details>
+      <details>
+        <summary>Was braucht der Server-Mac?</summary>
+        <p>Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft und per Kabel am Netz hängt: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst.</p>
+      </details>
+      <details>
+        <summary>Muss ich meine Ablage auf dem Server neu organisieren?</summary>
+        <p>Nein. Archivio liest eure bestehende Ablage so, wie sie ist, egal ob sauber strukturiert oder über die Jahre gewachsen. Ihr müsst keine Ordner umbenennen, verschieben oder neu sortieren. Archivio verändert an der Ablage auch nichts, sondern baut nur einen eigenen Suchindex auf. Welche Ordner durchsucht werden, legt ihr bei der Einrichtung fest.</p>
+      </details>
+      <details>
+        <summary>Findet Archivio auch Text in eingescannten Dokumenten?</summary>
+        <p>Ja. PDFs ohne Textebene, etwa gescannte Verträge, unterschriebene Protokolle oder Scans, liest Archivio per Texterkennung (OCR) ein und macht sie durchsuchbar, auf Deutsch, Französisch, Italienisch und Englisch. Das läuft lokal auf dem Server-Mac, nichts wird dafür an einen Online-Dienst geschickt. Grossformatige Pläne (ab A1) werden nicht erkannt, sie bleiben über den Dateinamen auffindbar. Handschrift wird je nach Qualität des Scans nur teilweise erkannt.</p>
+      </details>
+      <details>
+        <summary>Verlassen unsere Daten das Büro?</summary>
+        <p>Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt.</p>
+      </details>
+      <details>
+        <summary>Kann ich Archivio von überall im Internet öffnen?</summary>
+        <p>Nein. Archivio sieht aus wie eine Website und wird im Browser geöffnet, ist aber keine Website im Internet. Die Suche läuft auf dem Archivio-Mac in eurem Büro und ist nur von Geräten erreichbar, die im selben Büronetzwerk sind: per Netzwerkkabel oder über das Büro-WLAN, nicht über ein Gäste-WLAN. Von zu Hause oder unterwegs geht es nur, wenn euer Büro einen VPN-Zugang ins Büronetz hat. Das ist gewollt: So kommt niemand von aussen an eure Daten.</p>
+      </details>
+      <details>
+        <summary>Kann Archivio Dateien verändern oder löschen?</summary>
+        <p>Nein. Archivio greift ausschliesslich lesend auf freigegebene Ordner und Postfächer zu. Es verändert, verschiebt, benennt oder löscht keine Dateien, sondern baut nur einen eigenen Suchindex auf.</p>
+      </details>
+      <details>
+        <summary>Wer im Büro sieht was?</summary>
+        <p>Die Oberfläche ist nur im internen Netzwerk erreichbar und hat keine eigene Benutzerverwaltung: Alle im Büronetz sehen, was indexiert ist. Deshalb legt ihr pro Ordner fest, was Archivio sehen darf, und schliesst Bereiche wie Personaldossiers oder Verträge vollständig aus.</p>
+      </details>
+      <details>
+        <summary>Wie werden Mail-Zugangsdaten gespeichert?</summary>
+        <p>Die Mail-Anbindung ist optional. Wenn ihr sie nutzt, speichert Archivio Server und Benutzername in der Konfiguration auf dem Server-Mac, das Passwort im macOS-Schlüsselbund. Nichts davon wird übermittelt, und Sicherungen enthalten keine Passwörter. Für einen ersten Test könnt ihr Archivio auch ganz ohne Mail betreiben und Postfächer später hinzufügen.</p>
+      </details>
+      <details>
+        <summary>Ist die Software vertrauenswürdig signiert?</summary>
+        <p>Ja. Archivio ist mit einer Apple Developer ID signiert und von Apple notarisiert. macOS prüft das Installationspaket und lässt die Installation deshalb ohne zusätzliche Sperren zu.</p>
+      </details>
+      <details>
+        <summary>Wie kommen Updates?</summary>
+        <p>Archivio prüft einmal täglich, ob eine neue Version verfügbar ist, und zeigt sie im Menü an. Installiert wird das Update erst, wenn ihr es bestätigt. Das Update startet ihr direkt in der Menüleiste.</p>
+      </details>
+      <details>
+        <summary>Können wir Archivio zuerst im Kleinen testen?</summary>
+        <p>Ja. Am einfachsten startet ihr mit ein oder zwei Projektordnern und ohne Mail-Anbindung. Wenn die Suche im Alltag überzeugt, gebt ihr weitere Ordner frei.</p>
+      </details>
+      <details>
+        <summary>Was kostet Archivio?</summary>
+        <p>Archivio ist zurzeit kostenlos. Fragen beantworten wir gerne per E-Mail an info@architools.ch.</p>
+      </details>
+      <details>
+        <summary>Warum nicht einfach im Finder suchen?</summary>
+        <p>Im Finder lässt sich auch auf dem Server suchen. Auf Netzlaufwerken gibt es dafür aber meist keinen Index: Jede Suche geht die Ordner neu durch, das dauert, und Filter nach Projekt, Dateityp oder Datum fehlen weitgehend. Archivio baut einen Index über alle freigegebenen Projektordner und Postfächer, und alle im Büro nutzen denselben.</p>
+      </details>
+      <details>
+        <summary>Kann eine KI nicht direkt auf den Server zugreifen?</summary>
+        <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst.</p>
+      </details>
+      <p class="faq-more"><a href="faq.html">Alle Fragen ansehen →</a></p>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/">Archivio</a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@architools.ch">info@architools.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Über</p>
+        <ul>
+          <li><a href="/about.html">Über Archivio</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 architools, Winterthur</p>
+  </footer>
+
+  <script>
+    var _TRACKING_URL = 'https://script.google.com/macros/s/AKfycby3IWoq8oU-gZPvwclyks_AubvfkMmxrJvQ1P2P1zplYEBfxbVr8oo31AUc1JTnvhlnQg/exec';
+    var _latestVersion = '';
+
+    // Version beim Seitenload im Hintergrund holen
+    fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
+      .then(function(r) { return r.json(); })
+      .then(function(d) { _latestVersion = d.tag_name || ''; })
+      .catch(function() {});
+
+    function _track(payload) {
+      fetch(_TRACKING_URL, {
+        method: 'POST',
+        mode: 'no-cors',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(payload)
+      }).catch(function() {});
+    }
+
+    function showEmailForm() {
+      document.getElementById('dl-initial').style.display = 'none';
+      document.getElementById('dl-form').classList.add('open');
+      document.getElementById('dl-email').focus();
+    }
+
+    function submitEmailForm(evt) {
+      evt.preventDefault();
+      var emailInput = document.getElementById('dl-email');
+      var email = emailInput.value.trim();
+      var emailRe = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+      if (!emailRe.test(email)) {
+        emailInput.reportValidity();
+        return false;
+      }
+
+      // Speichern läuft parallel und darf den Download nie blockieren oder verzögern
+      _track({ type: 'email-signup', email: email });
+
+      downloadLatest();
+      return false;
+    }
+
+    function downloadLatest() {
+      var btn = document.getElementById('btn-dl');
+      btn.textContent = 'Wird geladen…';
+      btn.disabled = true;
+
+      // Tracking parallel feuern — Download nicht blockieren
+      _track({ type: 'download', version: _latestVersion });
+
+      fetch('https://api.github.com/repos/inderfab/archivio/releases/latest')
+        .then(function(r) { return r.json(); })
+        .then(function(data) {
+          _latestVersion = data.tag_name || _latestVersion;
+          var asset = data.assets.find(function(a) {
+            return a.name.indexOf('archivio-server') !== -1 && a.name.endsWith('.pkg');
+          });
+          var downloadUrl = asset
+            ? asset.browser_download_url
+            : 'https://github.com/inderfab/archivio/releases/latest';
+          // Download in verstecktem iframe starten (kein Seitenwechsel)
+          var dlFrame = document.createElement('iframe');
+          dlFrame.style.display = 'none';
+          dlFrame.src = downloadUrl;
+          document.body.appendChild(dlFrame);
+          // Zur Erstinstallation weiterleiten
+          setTimeout(function() {
+            window.location.href = 'installation.html';
+          }, 1500);
+        })
+        .catch(function() {
+          window.location.href = 'installation.html';
+        });
+    }
+
+    // Feature-Animationen: feste 680px-Breite responsiv in ihre Spalte skalieren
+    // (iframes passen ihren Inhalt nicht selbst an, nur die eigene Box).
+    document.querySelectorAll('.scale-wrap').forEach(function (wrap) {
+      var iframe = wrap.querySelector('iframe');
+      var nativeWidth = parseInt(iframe.dataset.w, 10);
+      function resize() {
+        var scale = wrap.clientWidth / nativeWidth;
+        iframe.style.transform = 'scale(' + scale + ')';
+      }
+      new ResizeObserver(resize).observe(wrap);
+      resize();
+    });
+  </script>
+</body>
+</html>
