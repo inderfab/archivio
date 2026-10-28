@@ -507,7 +507,7 @@
         <li>
           <span class="step-num">1</span>
           <h3>Installieren</h3>
-          <p>Paket herunterladen und auf einem Mac im Büro installieren, idealerweise einem, der dauerhaft läuft. Die Einrichtung führt durch die nötigen Freigaben.</p>
+          <p>Paket herunterladen und auf einem Mac im Büro installieren, der während des Arbeitstags läuft. Die Einrichtung führt durch die nötigen Freigaben.</p>
         </li>
         <li>
           <span class="step-num">2</span>
@@ -547,7 +547,7 @@
       </details>
       <details>
         <summary>Was braucht der Server-Mac?</summary>
-        <p>Einen Mac mit Apple Silicon oder Intel, der mit dem Datei-Server oder NAS verbunden ist. Ideal ist ein Mac, der dauerhaft läuft und per Kabel am Netz hängt: Dann ist die Suche jederzeit erreichbar und Archivio indexiert neue Dateien über Nacht. Zwingend ist der Dauerbetrieb nicht. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst.</p>
+        <p>Einen Mac mit Apple Silicon oder Intel im Büro, der während des Arbeitstags läuft und per Kabel am Netz hängt. Nachts muss er nicht laufen: Der Scan ist schnell genug, um über Mittag alles Neue zu erfassen. Ist der Mac ausgeschaltet, ist die Suche in dieser Zeit nicht verfügbar, und neue Dateien werden beim nächsten Scan erfasst.</p>
       </details>
       <details>
         <summary>Muss ich meine Ablage auf dem Server neu organisieren?</summary>
@@ -696,7 +696,7 @@
         .then(function(r) { return r.json(); })
         .then(function(data) {
           _latestVersion = data.tag_name || _latestVersion;
-          var asset = data.assets.find(function(a) {
+          var asset = (data.assets || []).find(function(a) {
             return a.name.indexOf('archivio-server') !== -1 && a.name.endsWith('.pkg');
           });
           var downloadUrl = asset
@@ -713,7 +713,10 @@
           }, 1500);
         })
         .catch(function() {
-          window.location.href = 'installation.html';
+          // GitHub nicht erreichbar oder Abfragelimit erreicht (60 pro Stunde und
+          // Netzwerk -- in einem Büro schnell erreicht): zur Release-Seite, dort
+          // liegt der Download. Vorher landete man ohne Download auf der Anleitung.
+          window.location.href = 'https://github.com/inderfab/archivio/releases/latest';
         });
     }
 
