@@ -38,6 +38,27 @@
     .bewusst li::before { content: "–"; position: absolute; left: 0; color: var(--t3); }
     .bewusst strong { color: var(--t1); }
 
+    /* Demo am Ende: Leiste mit Linien oben und unten wie «Herunterladen» auf der Startseite */
+    .page > .demo-reihe {
+      max-width: none; margin-top: 64px;
+      display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center;
+      border-top: 1px solid var(--linie); border-bottom: 1px solid var(--linie); padding: 40px 0;
+    }
+    .demo-reihe h2 { font-size: var(--fs-titel); letter-spacing: -0.5px; line-height: 1.2; margin: 0 0 8px; }
+    .demo-reihe p { margin: 0; font-size: var(--fs-klein); color: var(--t3); }
+    .btn-demo {
+      display: inline-flex; align-items: center; gap: 16px; padding: 16px 40px;
+      background: var(--t1); color: #fff; text-decoration: none; font-size: var(--fs-h3); font-weight: 600;
+      transition: background-color 0.15s;
+    }
+    .btn-demo:hover { background: #333; color: #fff; }
+    .btn-demo span { transition: transform 0.15s; }
+    .btn-demo:hover span { transform: translateX(4px); }
+
+    @media (max-width: 767px) {
+      .page > .demo-reihe { grid-template-columns: 1fr; gap: 24px; padding: 32px 0; }
+      .btn-demo { justify-content: center; }
+    }
     @media (max-width: 600px) {
       .cmp { min-width: 640px; }
       .cmp tbody th { position: sticky; left: 0; background: #fff; }
@@ -125,6 +146,14 @@
 
     <h2>Kann eine KI nicht direkt auf den Server zugreifen?</h2>
     <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst.</p>
+
+    <section class="demo-reihe" aria-labelledby="demo-titel">
+      <div>
+        <h2 id="demo-titel">Selbst ausprobieren</h2>
+        <p>Online-Demo mit einem erfundenen Büro, direkt im Browser, ohne Installation.</p>
+      </div>
+      <a class="btn-demo" href="https://demo.architools.ch/">Demo öffnen <span aria-hidden="true">→</span></a>
+    </section>
   </div>
 
   <footer class="site-footer">

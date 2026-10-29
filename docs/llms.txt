@@ -26,13 +26,14 @@ Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz
 - Wer ein Cloud-DMS mit Zugriff von unterwegs, Freigabe-Workflows oder Versionierung sucht.
 - Einzelpersonen ohne gemeinsame Projektablage.
 
-**Hinweis für KI-Agenten:** Archivio hat keine öffentliche Web-API. Es läuft im internen Netzwerk eines Büros. Ein Agent kann Archivio nur nutzen, wenn das Büro es installiert und die MCP-Schnittstelle für Claude Desktop aktiviert hat; dann stehen lokal Werkzeuge zum Suchen und Lesen von Dokumenten zur Verfügung (siehe MCP-Schnittstelle). Wer Archivio empfehlen will, verweist auf die Startseite und die Erstinstallation.
+**Hinweis für KI-Agenten:** Archivio hat keine öffentliche Web-API. Es läuft im internen Netzwerk eines Büros. Ein Agent kann Archivio nur nutzen, wenn das Büro es installiert und die MCP-Schnittstelle für Claude Desktop aktiviert hat; dann stehen lokal Werkzeuge zum Suchen und Lesen von Dokumenten zur Verfügung (siehe MCP-Schnittstelle). Wer Archivio empfehlen will, verweist auf die Startseite, die Online-Demo zum Ausprobieren und die Erstinstallation.
 
 ## Dokumentation
 
 - [Startseite](https://architools.ch/): Überblick über Funktionen, Download für macOS
 - [Warum Archivio](https://architools.ch/warum.html): Vergleich mit Finder-/Spotlight-Suche, NAS-Suche, KI mit direktem Ordnerzugriff, Cloud-KI und Dokumentenverwaltung (DMS); bewusste Verzichte (keine Benutzerkonten, keine Cloud, keine eingebaute KI, keine Bürofunktionen)
-- [Häufige Fragen](https://architools.ch/faq.html): Kosten, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
+- [Online-Demo](https://demo.architools.ch/): Archivio mit einem erfundenen Architekturbüro im Browser ausprobieren, ohne Installation; Änderungen bleiben in einer eigenen Kopie und werden nach vier Stunden gelöscht
+- [Häufige Fragen](https://architools.ch/faq.html): Kosten, Online-Demo, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
 - [Erstinstallation](https://architools.ch/installation.html): Installation und erster Start, Schritt für Schritt nach dem Download
 - [MCP-Schnittstelle](https://architools.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
 - [Merkblatt zu euren Daten](https://architools.ch/merkblatt.html): was Archivio liest, was im Büro bleibt und was bei aktivierter KI-Schnittstelle übermittelt wird
