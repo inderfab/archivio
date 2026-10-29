@@ -1,0 +1,74 @@
+/* Gemeinsame Grundlage aller Seiten (docs/*.html), nach Swiss-Design-Regeln:
+   vier Textstufen, eine Linie, eine Fläche, kein Akzent ausser Schwarz;
+   sieben Schriftgrössen; Abstände in Vielfachen von 8 px; eckige Ecken.
+   Seiteneigene Stile stehen weiterhin im <style> der jeweiligen Seite. */
+:root {
+  --t1: #111;      /* Haupttext, Titel, Knöpfe */
+  --t2: #4a4a4a;   /* Fliesstext (9:1) */
+  --t3: #737373;   /* Nebentext, Nummern, Fussleiste (4.7:1, reicht auch für kleine Schrift) */
+  --t4: #949494;   /* nur grosse Schrift und Zeichen ohne Inhalt (3:1) */
+  --linie: #e5e5e5;
+  --flaeche: #f2f2f2;
+
+  --fs-display: clamp(42px, 6vw, 80px);  /* Titel der Startseite */
+  --fs-titel: clamp(26px, 3vw, 34px);    /* Seitentitel, Abschnittstitel */
+  --fs-lead: 20px;                       /* Unterzeile, Zeichen */
+  --fs-h3: 18px;                         /* Zwischentitel, Knöpfe, Wortmarke */
+  --fs-text: 16px;                       /* Fliesstext */
+  --fs-klein: 14px;                      /* Navigation, Hinweise, Fussleiste */
+  --fs-mini: 12px;                       /* Etiketten in Grossbuchstaben, Tabellenköpfe */
+}
+
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
+  background: #fff; color: var(--t1); line-height: 1.6;
+}
+h1, h2, h3, summary { text-wrap: balance; }
+p, li { text-wrap: pretty; }
+:focus-visible { outline: 2px solid var(--t1); outline-offset: 2px; }
+
+/* Links im Text: Farbe des umgebenden Texts, unterstrichen */
+a { color: inherit; text-decoration: underline; text-decoration-thickness: 1px; text-underline-offset: 3px; }
+a:hover { color: var(--t1); }
+
+/* ── Kopfzeile, auf allen Seiten gleich ── */
+.top {
+  max-width: 1100px; margin: 0 auto; padding: 24px 24px 0;
+  display: flex; align-items: center; justify-content: space-between;
+}
+.wordmark {
+  display: inline-flex; align-items: center; gap: 8px;
+  font-size: var(--fs-h3); font-weight: 600; letter-spacing: -0.3px; color: var(--t1); text-decoration: none;
+}
+.top-nav { display: flex; gap: 32px; font-size: var(--fs-klein); }
+.top-nav a { color: var(--t3); text-decoration: none; }
+.top-nav a:hover, .top-nav a[aria-current] { color: var(--t1); }
+@media (max-width: 767px) {
+  .top { padding-top: 16px; }
+  .top-nav { display: none; }
+}
+
+/* ── Fussleiste, auf allen Seiten gleich ── */
+.site-footer { border-top: 1px solid var(--linie); padding: 48px 24px 24px; font-size: var(--fs-klein); line-height: 1.6; color: var(--t3); }
+.site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: var(--t3); font-size: inherit; }
+.site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
+.site-footer ul { list-style: none; display: grid; gap: 8px; }
+.site-footer a { color: var(--t2); text-decoration: none; }
+.site-footer a:hover, .site-footer a:focus-visible { color: var(--t1); }
+.sf-grid { max-width: 1052px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
+.sf-brand { display: grid; gap: 4px; align-content: start; }
+.site-footer .sf-name { color: var(--t1); font-size: var(--fs-text); font-weight: 600; letter-spacing: -0.2px; }
+.site-footer .sf-title { font-size: var(--fs-mini); font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: var(--t3); margin-bottom: 16px !important; }
+.site-footer .sf-bottom { max-width: 1052px; margin: 40px auto 0 !important; padding-top: 16px !important; border-top: 1px solid var(--linie); color: var(--t3); }
+@media (max-width: 760px) {
+  .site-footer { padding: 40px 24px 24px; }
+  .sf-grid { grid-template-columns: 1fr 1fr; gap: 32px 24px; }
+  .sf-brand { grid-column: 1 / -1; }
+}
+@media print { .site-footer { display: none; } }
+
+/* Wer «Bewegung reduzieren» eingestellt hat: keine Übergänge */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; scroll-behavior: auto !important; }
+}

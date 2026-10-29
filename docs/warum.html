@@ -6,83 +6,48 @@
   <title>Warum Archivio</title>
   <meta name="description" content="Wie sich Archivio von der Suche im Finder, der Suche im NAS, KI mit Ordnerzugriff, Cloud-KI und Dokumentenverwaltung unterscheidet, und worauf es bewusst verzichtet.">
   <link rel="canonical" href="https://architools.ch/warum.html">
+  <link rel="stylesheet" href="/stil.css">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      background: #fff; color: #111; line-height: 1.7;
-    }
-    header {
-      padding: 28px 48px; border-bottom: 1px solid #e8e8e8;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .wordmark {
-      display: inline-flex; align-items: center; gap: 9px;
-      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
-    }
-    .back-link { font-size: 13px; color: #999; text-decoration: none; }
-    .back-link:hover { color: #111; }
 
-    .page { max-width: 720px; margin: 0 auto; padding: 60px 24px 100px; }
-    h1 { font-size: 30px; font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
-    h2 { font-size: 18px; font-weight: 700; margin: 44px 0 10px; letter-spacing: -0.2px; }
-    p { margin-bottom: 14px; color: #333; }
-    a { color: #111; }
+    .page { max-width: 1100px; margin: 0 auto; padding: 64px 24px 96px; }
+    .page > * { max-width: 720px; }
+    h1 { font-size: var(--fs-titel); font-weight: 700; letter-spacing: -0.6px; margin-bottom: 32px; }
+    h2 { font-size: var(--fs-h3); font-weight: 700; margin: 48px 0 12px; letter-spacing: -0.2px; }
+    p { margin-bottom: 16px; color: var(--t2); }
 
     /* Vergleichstabelle: schmal, auf dem Handy seitlich scrollbar mit fixer erster Spalte */
-    .cmp-wrap { margin: 28px 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
-    .cmp { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: 13px; line-height: 1.4; }
+    .cmp-wrap { margin: 32px 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+    .cmp { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--fs-klein); line-height: 1.4; }
     .cmp col.c-label { width: 34%; }
     .cmp col.c-val { width: 11%; }
-    .cmp th, .cmp td { padding: 9px 6px; border-bottom: 1px solid #eee; text-align: center; vertical-align: middle; }
-    .cmp thead th { font-size: 11px; font-weight: 600; color: #777; text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid #ccc; white-space: nowrap; }
-    .cmp tbody th { text-align: left; font-weight: 400; color: #333; padding-left: 0; }
-    .cmp .col-a { background: #f5f5f5; color: #111; font-weight: 700; }
-    .cmp thead .col-a { color: #111; border-radius: 6px 6px 0 0; }
-    .cmp td { color: #111; font-size: 15px; }
-    .cmp td.no { color: #ccc; }
-    .cmp td.part { color: #999; }
-    .cmp-legend { font-size: 12px; color: #999; margin-bottom: 26px; }
+    .cmp th, .cmp td { padding: 8px 8px; border-bottom: 1px solid var(--linie); text-align: center; vertical-align: middle; }
+    .cmp thead th { font-size: var(--fs-mini); font-weight: 600; color: var(--t3); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--linie); white-space: nowrap; }
+    .cmp tbody th { text-align: left; font-weight: 400; color: var(--t2); padding-left: 0; }
+    .cmp .col-a { background: var(--flaeche); color: var(--t1); font-weight: 700; }
+    .cmp thead .col-a { color: var(--t1); border-radius: 0; }
+    .cmp td { color: var(--t1); font-size: var(--fs-text); }
+    .cmp td.no { color: var(--t4); }
+    .cmp td.part { color: var(--t3); }
+    .cmp-legend { font-size: var(--fs-mini); color: var(--t3); margin-bottom: 24px; }
 
-    .cats { list-style: none; display: grid; gap: 8px; font-size: 14px; color: #444; margin-bottom: 14px; }
-    .cats strong { color: #111; }
+    .cats { list-style: none; display: grid; gap: 8px; font-size: var(--fs-klein); color: var(--t2); margin-bottom: 16px; }
+    .cats strong { color: var(--t1); }
 
-    .bewusst { list-style: none; display: grid; gap: 14px; margin-top: 16px; }
-    .bewusst li { color: #333; padding-left: 18px; position: relative; }
-    .bewusst li::before { content: "–"; position: absolute; left: 0; color: #999; }
-    .bewusst strong { color: #111; }
+    .bewusst { list-style: none; display: grid; gap: 16px; margin-top: 16px; }
+    .bewusst li { color: var(--t2); padding-left: 16px; position: relative; }
+    .bewusst li::before { content: "–"; position: absolute; left: 0; color: var(--t3); }
+    .bewusst strong { color: var(--t1); }
 
     @media (max-width: 600px) {
-      header { padding: 20px 24px; }
-      .cmp { min-width: 560px; }
+      .cmp { min-width: 640px; }
       .cmp tbody th { position: sticky; left: 0; background: #fff; }
     }
-  </style>
-  <style>
-    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
-    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
-    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
-    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
-    .site-footer ul { list-style: none; display: grid; gap: 7px; }
-    .site-footer a { color: #777; text-decoration: none; }
-    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
-    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
-    .sf-brand { display: grid; gap: 4px; align-content: start; }
-    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
-    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
-    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
-    @media (max-width: 760px) {
-      .site-footer { padding: 36px 24px 24px; }
-      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
-      .sf-brand { grid-column: 1 / -1; }
-    }
-    @media print { .site-footer { display: none; } }
   </style>
 </head>
 <body>
 
-  <header>
-    <a class="wordmark" href="index.html">
+  <header class="top">
+    <a class="wordmark" href="/">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
         <path d="m8 13 4-7 4 7" stroke-width="2"/>
@@ -90,7 +55,11 @@
       </svg>
       Archivio
     </a>
-    <a class="back-link" href="index.html">← Zurück</a>
+    <nav class="top-nav" aria-label="Hauptnavigation">
+      <a href="/warum.html" aria-current="page">Warum Archivio</a>
+      <a href="/faq.html">Fragen</a>
+      <a href="/index.html#herunterladen">Herunterladen</a>
+    </nav>
   </header>
 
   <div class="page">

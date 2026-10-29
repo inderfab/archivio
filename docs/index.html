@@ -79,119 +79,82 @@
   }
   </script>
 
+  <link rel="stylesheet" href="/stil.css">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+    /* Startseite; Farben, Schriftgrössen, Kopf- und Fussleiste in stil.css */
+    :root { --dock: 90px; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      background: #fff;
-      color: #111;
-      line-height: 1.6;
-    }
-
-    /* ── Kopfzeile wie auf den Unterseiten ── */
-    .top {
-      max-width: 1100px; margin: 0 auto; padding: 28px 24px 0;
-      display: flex; align-items: center; justify-content: space-between;
-    }
-    .wordmark {
-      display: inline-flex; align-items: center; gap: 9px;
-      font-size: 18px; font-weight: 600; letter-spacing: -0.3px; color: #111; text-decoration: none;
-    }
-    .top-nav { display: flex; gap: 28px; font-size: 14px; }
-    .top-nav a { color: #777; text-decoration: none; }
-    .top-nav a:hover { color: #111; }
-
-    /* ── Hero: linksbündig auf dem Raster der Zickzack-Abschnitte (1100px) ──
-       Eine Hauptsache (Satz), Abstufung über Farbe statt Grösse, Fakten in einer Leiste */
+    /* ── Hero ── */
     .hero { max-width: 1100px; margin: 0 auto; padding: 64px 24px 0; }
     .hero h1 {
-      font-size: clamp(42px, 6vw, 80px);
+      font-size: var(--fs-display);
       font-weight: 700;
       letter-spacing: -0.035em;
       line-height: 1.02;
+      color: var(--t4);
+      text-wrap: wrap;
     }
-    .hero h1 { color: #b5b5b5; }
-    .hero h1 b { color: #111; font-weight: inherit; }
+    .hero h1 b { color: var(--t1); font-weight: inherit; }
     .hero-unterzeile {
-      margin-top: 28px; display: flex; align-items: center; gap: 10px;
-      font-size: clamp(17px, 1.6vw, 20px); color: #555;
+      margin-top: 24px; display: flex; align-items: center; gap: 8px;
+      font-size: var(--fs-lead); color: var(--t2);
     }
-    .hero-unterzeile svg { width: 20px; height: 20px; flex-shrink: 0; stroke: #555; }
+    .hero-unterzeile svg { width: 20px; height: 20px; flex-shrink: 0; stroke: var(--t2); }
+
+    /* ── Knöpfe: schwarz, eckig ── */
+    .btn-demo, .btn-download {
+      background: var(--t1); color: #fff; text-decoration: none;
+      font-size: var(--fs-h3); font-weight: 600; border: none; border-radius: 0; cursor: pointer;
+      transition: background-color 0.15s;
+    }
+    .btn-demo:hover, .btn-download:hover { background: #333; color: #fff; }
     .btn-demo {
       display: flex; justify-content: space-between; align-items: center; gap: 16px;
-      flex: 0 0 auto;
-      background: #111; color: #fff; text-decoration: none;
-      font-size: 17px; font-weight: 600; padding: 11px 20px; border-radius: 6px;
-      transition: background 0.15s;
+      flex: 0 0 auto; padding: 12px 24px;
     }
-    .btn-demo:hover { background: #333; }
     .btn-demo span { transition: transform 0.15s; }
     .btn-demo:hover span { transform: translateX(4px); }
+    .btn-download { display: inline-block; padding: 16px 40px; }
+    .btn-download:disabled { background: var(--t4); cursor: default; }
+
     /* ── Scroll-Dock: Leiste 01–05 schliesst den Kopf ab, bleibt beim Scrollen oben stehen
-       und zeigt, welche Funktion gerade im Bild ist (nur ab Tablet-Breite). Kein Einrasten:
-       die Funktionen scrollen durchgehend wie bisher. ── */
-    :root { --dock: 98px; }
+       und zeigt, welche Funktion gerade im Bild ist (nur ab Tablet-Breite) ── */
     .dock { position: sticky; top: 0; z-index: 20; background: #fff; margin-top: 56px; }
     .dock-inner { max-width: 1100px; margin: 0 auto; padding: 0 24px; }
     .dock-reihe {
       display: flex; justify-content: space-between; align-items: center; gap: 24px;
-      border-top: 1px solid #e5e5e5; border-bottom: 1px solid #e5e5e5;
+      border-top: 1px solid var(--linie); border-bottom: 1px solid var(--linie);
       padding: 16px 0;
     }
     .dock a:not(.btn-demo) {
-      flex: 1 1 0; min-width: 0; text-decoration: none; color: #111;
-      display: flex; align-items: baseline; gap: 10px; white-space: nowrap;
-      font-size: 16px; font-weight: 500; letter-spacing: -0.1px; line-height: 1.3;
-      transition: opacity 0.2s, color 0.2s;
+      flex: 1 1 0; min-width: 0; text-decoration: none; color: var(--t1);
+      display: flex; align-items: baseline; gap: 8px; white-space: nowrap;
+      font-size: var(--fs-text); font-weight: 500; letter-spacing: -0.1px; line-height: 1.3;
+      transition: color 0.2s;
     }
     .dock a i {
-      display: inline-flex; gap: 6px; font-style: normal;
-      font-size: 14px; color: #777; font-variant-numeric: tabular-nums;
+      display: inline-flex; gap: 8px; font-style: normal;
+      font-size: var(--fs-klein); color: var(--t3); font-variant-numeric: tabular-nums;
     }
     /* Pfeil vor jeder Nummer; bei der Funktion im Bild wird er zum Punkt (Standortanzeige) */
     .dock a i span { display: inline-block; width: 0.8em; text-align: center; }
     .dock a i span::before { content: "↓"; }
     .dock a.aktiv i span::before { content: "•"; }
-    .dock.hat-aktiv a:not(.btn-demo) { opacity: 0.6; color: #999; }
-    .dock.hat-aktiv a i { color: #999; }
-    .dock.hat-aktiv a.aktiv, .dock a.aktiv, .dock a:not(.btn-demo):hover { opacity: 1; color: #111; font-weight: 600; }
-    .dock.hat-aktiv a.aktiv i { color: #111; }
+    .dock.hat-aktiv a:not(.btn-demo), .dock.hat-aktiv a i { color: var(--t4); }
+    .dock.hat-aktiv a.aktiv, .dock a.aktiv, .dock a:not(.btn-demo):hover { color: var(--t1); font-weight: 600; }
+    .dock.hat-aktiv a.aktiv i, .dock a.aktiv i { color: var(--t1); }
     .fluss .feature-section { scroll-margin-top: calc(var(--dock) + 48px); }
-    .dock + .feature-section { margin-top: 100px; }
+    .dock + .feature-section { margin-top: 96px; }
     @media (max-width: 767px) {
-      .dock { position: static; margin-top: 36px; }
+      .dock { position: static; margin-top: 40px; }
       .dock-reihe { border: 0; padding: 0; }
       .dock-reihe > a:not(.btn-demo) { display: none; }
-      .btn-demo { flex: 1 1 auto; padding: 15px 20px; }
-      .top { padding-top: 20px; }
-      .top-nav a:not(.top-demo) { display: none; }
+      .btn-demo { flex: 1 1 auto; padding: 16px 24px; }
       .hero { padding-top: 56px; }
-      .hero-unterzeile { align-items: flex-start; }
-      .hero-unterzeile svg { margin-top: 3px; }
+      .hero-unterzeile { align-items: flex-start; font-size: var(--fs-h3); }
+      .hero-unterzeile svg { margin-top: 4px; }
     }
-
-    /* ── Buttons (auch im CTA-Block unten verwendet) ── */
-    .btn-download {
-      display: inline-block;
-      background: #111;
-      color: #fff;
-      font-size: 18px;
-      font-weight: 600;
-      padding: 15px 40px;
-      border-radius: 6px;
-      text-decoration: none;
-      border: none;
-      cursor: pointer;
-      transition: background 0.15s;
-    }
-    .btn-download:hover { background: #333; }
-    .btn-download:disabled { background: #888; cursor: default; }
-    .hero-meta {
-      margin-top: 16px;
-      font-size: 13px;
-      color: #999;
-    }
+    .hero-meta { margin-top: 16px; font-size: var(--fs-klein); color: var(--t3); }
 
     /* ── Feature-Sektionen (Zigzag) ── */
     .feature-section {
@@ -200,14 +163,14 @@
       gap: 56px;
       align-items: center;
       max-width: 1100px;
-      margin: 110px auto;
+      margin: 112px auto;
       padding: 0 24px;
     }
-        .feature-section.reverse { grid-template-columns: 55% 45%; }
+    .feature-section.reverse { grid-template-columns: 55% 45%; }
     .feature-section.reverse .feature-text { order: 2; }
     .feature-section.reverse .feature-visual { order: 1; }
     .feature-text h2 {
-      font-size: clamp(26px, 3vw, 34px);
+      font-size: var(--fs-titel);
       font-weight: 700;
       letter-spacing: -0.5px;
       line-height: 1.2;
@@ -215,70 +178,44 @@
     }
     .feature-badge {
       display: inline-block;
-      font-size: 11px;
-      font-weight: 700;
-      text-transform: uppercase;
-      letter-spacing: 0.04em;
-      color: #666;
-      background: #f2f2f2;
-      border-radius: 4px;
-      padding: 3px 8px;
-      margin-left: 10px;
-      vertical-align: middle;
+      font-size: var(--fs-mini); font-weight: 700; text-transform: uppercase; letter-spacing: 0.04em;
+      color: var(--t2); background: var(--flaeche);
+      padding: 4px 8px; margin-left: 8px; vertical-align: middle;
     }
-    .feature-text p {
-      font-size: 16px;
-      color: #333;
-      max-width: 460px;
-    }
+    .feature-text p { font-size: var(--fs-text); color: var(--t2); max-width: 460px; }
     .feature-text ul.feature-list {
-      list-style: disc;
-      margin: 12px 0 0;
-      padding: 0 0 0 1.2em;
-      font-size: 16px;
-      color: #333;
+      list-style: disc; margin: 16px 0 0; padding: 0 0 0 1.2em;
+      font-size: var(--fs-text); color: var(--t2);
     }
     .feature-text ul.feature-list li { margin: 0; padding: 0; }
+    .feature-text p.cta-merkblatt { margin-top: 16px; font-size: var(--fs-klein); }
     .feature-visual { min-width: 0; }
-    .scale-wrap {
-      position: relative;
-      width: 100%;
-      overflow: hidden;
-    }
+    .scale-wrap { position: relative; width: 100%; overflow: hidden; }
     .scale-wrap iframe {
-      position: absolute;
-      top: 0; left: 0;
-      border: 0;
-      transform-origin: top left;
-      pointer-events: none;
+      position: absolute; top: 0; left: 0; border: 0;
+      transform-origin: top left; pointer-events: none;
     }
 
-    .linkflow {
-      max-width: 460px; margin-top: 28px;
-    }
-        .linkflow-steps { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
+    .linkflow { max-width: 460px; margin-top: 24px; }
+    .linkflow-steps { display: flex; align-items: flex-start; justify-content: space-between; gap: 4px; }
     .linkflow-step { display: flex; flex-direction: column; align-items: center; gap: 8px; flex: 1; min-width: 0; }
     .linkflow-ico {
-      width: 40px; height: 40px; border-radius: 50%; border: 1.5px solid #111827; color: #111827;
+      width: 40px; height: 40px; border: 1.5px solid var(--t1); color: var(--t1);
       display: flex; align-items: center; justify-content: center; flex-shrink: 0;
     }
-    .linkflow-lbl { font-size: 12px; color: #6b7280; text-align: center; line-height: 1.45; }
-    .linkflow-arrow { color: #111827; font-size: 16px; padding-top: 8px; flex-shrink: 0; }
+    .linkflow-lbl { font-size: var(--fs-mini); color: var(--t3); text-align: center; line-height: 1.5; }
+    .linkflow-arrow { color: var(--t1); font-size: var(--fs-text); padding-top: 8px; flex-shrink: 0; }
     @media (max-width: 767px) {
       .linkflow { max-width: none; }
       .linkflow-steps { flex-direction: column; align-items: stretch; gap: 4px; }
-      .linkflow-step { flex-direction: row; text-align: left; gap: 14px; }
-      .linkflow-lbl { text-align: left; font-size: 14px; }
-      .linkflow-arrow { transform: rotate(90deg); padding: 0 0 0 20px; align-self: flex-start; }
+      .linkflow-step { flex-direction: row; text-align: left; gap: 16px; }
+      .linkflow-lbl { text-align: left; font-size: var(--fs-klein); }
+      .linkflow-arrow { transform: rotate(90deg); padding: 0 0 0 16px; align-self: flex-start; }
     }
 
     @media (max-width: 767px) {
       .feature-section,
-      .feature-section.reverse {
-        grid-template-columns: 1fr;
-        gap: 28px;
-        margin: 72px auto;
-      }
+      .feature-section.reverse { grid-template-columns: 1fr; gap: 32px; margin: 72px auto; }
       .feature-section .feature-text,
       .feature-section.reverse .feature-text { order: -1; }
       .feature-section .feature-visual,
@@ -286,160 +223,85 @@
       .feature-text p { max-width: none; }
     }
 
-    /* ── So funktioniert's ── */
-    .steps-section {
-      max-width: 1100px;
-      margin: 110px auto;
-      padding: 0 24px;
-    }
+    /* ── Abschnittstitel linksbündig auf dem Raster ── */
     .section-title {
-      font-size: clamp(26px, 3vw, 34px);
+      font-size: var(--fs-titel);
       font-weight: 700;
       letter-spacing: -0.5px;
       line-height: 1.2;
-      text-align: center;
       margin-bottom: 40px;
     }
-    .steps {
-      display: grid;
-      grid-template-columns: repeat(3, 1fr);
-      gap: 40px;
-      list-style: none;
-    }
+
+    /* ── So funktioniert's: Nummern wie in der Leiste ── */
+    .steps-section { max-width: 1100px; margin: 112px auto; padding: 0 24px; }
+    .steps { display: grid; grid-template-columns: repeat(3, 1fr); gap: 40px; list-style: none; }
+    .steps li { border-top: 1px solid var(--linie); padding-top: 16px; }
     .step-num {
-      display: inline-flex;
-      align-items: center;
-      justify-content: center;
-      width: 30px;
-      height: 30px;
-      border-radius: 50%;
-      background: #f2f2f2;
-      color: #111;
-      font-size: 14px;
-      font-weight: 700;
-      margin-bottom: 14px;
+      display: block; margin-bottom: 8px;
+      font-size: var(--fs-klein); font-weight: 600; color: var(--t3); font-variant-numeric: tabular-nums;
     }
-    .steps h3 {
-      font-size: 18px;
-      font-weight: 700;
-      letter-spacing: -0.2px;
-      margin-bottom: 6px;
-    }
-    .steps p { font-size: 15px; color: #333; }
+    .steps h3 { font-size: var(--fs-h3); font-weight: 700; letter-spacing: -0.2px; margin-bottom: 8px; }
+    .steps p { font-size: var(--fs-text); color: var(--t2); }
     @media (max-width: 767px) {
-      .steps { grid-template-columns: 1fr; gap: 28px; }
+      .steps { grid-template-columns: 1fr; gap: 32px; }
       .steps-section { margin: 72px auto; }
     }
 
-    /* ── FAQ ── */
-    .faq-section {
-      max-width: 680px;
-      margin: 0 auto 90px;
-      padding: 0 24px;
+    /* ── Herunterladen: Leiste mit Linien oben und unten wie das Inhaltsverzeichnis ── */
+    .cta-section { max-width: 1100px; margin: 0 auto 112px; padding: 0 24px; }
+    .cta-reihe {
+      display: grid; grid-template-columns: 1fr auto; gap: 32px; align-items: center;
+      border-top: 1px solid var(--linie); border-bottom: 1px solid var(--linie);
+      padding: 40px 0;
     }
-    .faq-section details {
-      border-top: 1px solid #e8e8e8;
-      padding: 18px 0;
+    .cta-section h2 {
+      font-size: var(--fs-titel);
+      font-weight: 700;
+      letter-spacing: -0.5px;
+      line-height: 1.2;
     }
-    .faq-section details:last-of-type { border-bottom: 1px solid #e8e8e8; }
-    .faq-more { margin-top: 24px; font-size: 15px; }
-    .faq-more a { color: #111; text-decoration: none; font-weight: 600; }
+    .cta-section .hero-meta { margin-top: 8px; }
+    .cta-aktion { justify-self: end; }
+    .dl-form { display: none; }
+    .dl-form.open { display: grid; gap: 8px; max-width: 360px; }
+    .dl-form-hint { font-size: var(--fs-klein); color: var(--t3); margin-bottom: 8px; }
+    .dl-email-input {
+      display: block; width: 100%;
+      font-size: var(--fs-text); padding: 12px 16px;
+      border: 1px solid var(--t4); border-radius: 0;
+      outline: none; transition: border-color 0.15s;
+    }
+    .dl-email-input:focus { border-color: var(--t1); }
+    @media (max-width: 767px) {
+      .cta-section { margin-bottom: 72px; }
+      .cta-reihe { grid-template-columns: 1fr; gap: 24px; padding: 32px 0; }
+      .cta-aktion { justify-self: stretch; }
+      .cta-aktion .btn-download { width: 100%; }
+      .dl-form.open { max-width: none; }
+    }
+
+    /* ── FAQ: Linien über die ganze Breite wie beim Herunterladen, Antworten in Lesebreite ── */
+    .faq-section { max-width: 1100px; margin: 0 auto 96px; padding: 0 24px; }
+    .faq-section details { border-top: 1px solid var(--linie); padding: 16px 0; }
+    .faq-section details:last-of-type { border-bottom: 1px solid var(--linie); }
+    .faq-more { margin-top: 24px; font-size: var(--fs-text); }
+    .faq-more a { color: var(--t1); text-decoration: none; font-weight: 600; }
     .faq-more a:hover { text-decoration: underline; }
     .faq-section summary {
-      font-size: 16px;
-      font-weight: 600;
-      cursor: pointer;
-      list-style: none;
-      display: flex;
-      justify-content: space-between;
-      gap: 16px;
+      font-size: var(--fs-text); font-weight: 600; cursor: pointer; list-style: none;
+      display: flex; justify-content: space-between; gap: 16px;
     }
     .faq-section summary::-webkit-details-marker { display: none; }
     .faq-section summary::after {
-      content: "+";
-      color: #999;
-      font-weight: 400;
-      font-size: 20px;
-      line-height: 1;
+      content: "+"; color: var(--t3); font-weight: 400; font-size: var(--fs-lead); line-height: 1;
     }
     .faq-section details[open] summary::after { content: "–"; }
-    .faq-section details p {
-      margin-top: 10px;
-      font-size: 15px;
-      color: #333;
-    }
-
-    /* ── Abschluss & CTA ── */
-    .cta-section {
-      max-width: 680px;
-      margin: 0 auto;
-      padding: 40px 24px 90px;
-      text-align: center;
-    }
-    .cta-section h2 {
-      font-size: clamp(24px, 3vw, 30px);
-      font-weight: 700;
-      letter-spacing: -0.5px;
-      margin-bottom: 24px;
-    }
-    .cta-merkblatt {
-      margin-top: 14px;
-      font-size: 13px;
-    }
-    .cta-merkblatt a { color: #666; }
-    .cta-merkblatt a:hover { color: #111; }
-
-    .dl-form { display: none; }
-    .dl-form.open { display: block; }
-    .dl-form-hint {
-      font-size: 13px;
-      color: #999;
-      max-width: 360px;
-      margin: 0 auto 16px;
-    }
-    .dl-email-input {
-      display: block;
-      width: 100%;
-      max-width: 320px;
-      margin: 0 auto 12px;
-      font-size: 15px;
-      padding: 12px 16px;
-      border: 1.5px solid #d0d0d0;
-      border-radius: 6px;
-      outline: none;
-      text-align: center;
-      transition: border-color 0.15s;
-    }
-    .dl-email-input:focus { border-color: #111; }
-
-    /* ── Footer ── */
+    .faq-section details p { margin-top: 8px; font-size: var(--fs-text); color: var(--t2); max-width: 64ch; }
 
     .br-handy { display: none; }
     @media (max-width: 600px) {
       .br-handy { display: inline; }
-      .hero-trust-line { display: block; }
-      .hero-trust-line svg { display: inline; vertical-align: -2px; margin-right: 6px; }
     }
-  </style>
-  <style>
-    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
-    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
-    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
-    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
-    .site-footer ul { list-style: none; display: grid; gap: 7px; }
-    .site-footer a { color: #777; text-decoration: none; }
-    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
-    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
-    .sf-brand { display: grid; gap: 4px; align-content: start; }
-    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
-    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
-    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
-    @media (max-width: 760px) {
-      .site-footer { padding: 36px 24px 24px; }
-      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
-      .sf-brand { grid-column: 1 / -1; }
-    }
-    @media print { .site-footer { display: none; } }
   </style>
 </head>
 <body>
@@ -571,17 +433,17 @@
       <h2 class="section-title">So funktioniert’s</h2>
       <ol class="steps">
         <li>
-          <span class="step-num">1</span>
+          <span class="step-num">01</span>
           <h3>Installieren</h3>
           <p>Paket herunterladen und auf einem Mac im Büro installieren, der während des Arbeitstags läuft. Die Einrichtung führt durch die nötigen Freigaben.</p>
         </li>
         <li>
-          <span class="step-num">2</span>
+          <span class="step-num">02</span>
           <h3>Ordner freigeben</h3>
           <p>Festlegen, welche Projektordner und Postfächer durchsucht werden. Archivio liest nur, was ihr freigebt, und indexiert täglich neu.</p>
         </li>
         <li>
-          <span class="step-num">3</span>
+          <span class="step-num">03</span>
           <h3>Suchen</h3>
           <p>Alle im Büronetz öffnen Archivio im Browser und suchen über sämtliche Projekte, Pläne, Mails und Fotos. Treffer öffnen sich direkt als Originaldatei.</p>
         </li>
@@ -589,8 +451,12 @@
     </section>
 
     <section class="cta-section" id="herunterladen">
-      <h2>Starte jetzt und finde all deine Dateien:</h2>
-
+      <div class="cta-reihe">
+      <div class="cta-text">
+        <h2>Starte jetzt und finde all deine Dateien</h2>
+        <p class="hero-meta">macOS&nbsp;(Apple&nbsp;Silicon&nbsp;und&nbsp;Intel) &nbsp;·&nbsp; Kostenlos &nbsp;·&nbsp; Von&nbsp;Apple&nbsp;notarisiert</p>
+      </div>
+      <div class="cta-aktion">
       <div id="dl-initial">
         <button class="btn-download" onclick="showEmailForm()">Herunterladen</button>
       </div>
@@ -601,8 +467,8 @@
         <input type="text" id="dl-website" tabindex="-1" autocomplete="off" aria-hidden="true" style="position:absolute;left:-9999px;width:1px;height:1px;opacity:0">
         <button type="submit" class="btn-download" id="btn-dl">Herunterladen</button>
       </form>
-
-      <p class="hero-meta">macOS&nbsp;(Apple&nbsp;Silicon&nbsp;und&nbsp;Intel) &nbsp;·&nbsp; Kostenlos &nbsp;·&nbsp; Von&nbsp;Apple&nbsp;notarisiert</p>
+      </div>
+      </div>
     </section>
 
     <section class="faq-section" id="faq">

@@ -6,53 +6,24 @@
   <title>Erstinstallation – Archivio</title>
   <meta name="description" content="Schritt-für-Schritt-Anleitung zur Installation von Archivio Server auf macOS — Download, Erlaubnis-Dialoge und erster Scan.">
   <link rel="canonical" href="https://architools.ch/installation.html">
+  <link rel="stylesheet" href="/stil.css">
   <style>
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Helvetica, Arial, sans-serif;
-      background: #fff;
-      color: #111;
-      line-height: 1.7;
-    }
 
     /* ── Header ── */
-    header {
-      padding: 28px 48px;
-      border-bottom: 1px solid #e8e8e8;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-    }
-    .wordmark {
-      display: inline-flex;
-      align-items: center;
-      gap: 9px;
-      font-size: 18px;
-      font-weight: 600;
-      letter-spacing: -0.3px;
-      color: #111;
-      text-decoration: none;
-    }
-    .wordmark svg { display: block; }
-    .back-link {
-      font-size: 13px;
-      color: #999;
-      text-decoration: none;
-    }
-    .back-link:hover { color: #111; }
 
     /* ── Layout ── */
     .page {
-      max-width: 680px;
+      max-width: 1100px;
       margin: 0 auto;
-      padding: 60px 24px 120px;
+      padding: 64px 24px 96px;
     }
+    .page > * { max-width: 680px; }
 
     .doc-section {
-      padding-bottom: 60px;
-      margin-bottom: 60px;
-      border-bottom: 1px solid #e8e8e8;
+      padding-bottom: 64px;
+      margin-bottom: 64px;
+      border-bottom: 1px solid var(--linie);
     }
     .doc-section:last-child {
       border-bottom: none;
@@ -61,25 +32,25 @@
     }
 
     h2 {
-      font-size: 24px;
+      font-size: var(--fs-titel);
       font-weight: 700;
       letter-spacing: -0.5px;
-      margin-bottom: 20px;
+      margin-bottom: 24px;
     }
     h3 {
-      font-size: 16px;
+      font-size: var(--fs-text);
       font-weight: 600;
-      margin: 32px 0 10px;
+      margin: 32px 0 12px;
     }
-    p { margin-bottom: 14px; color: #333; }
+    p { margin-bottom: 16px; color: var(--t2); }
     p:last-child { margin-bottom: 0; }
 
     ol, ul {
-      padding-left: 20px;
-      margin-bottom: 14px;
-      color: #333;
+      padding-left: 24px;
+      margin-bottom: 16px;
+      color: var(--t2);
     }
-    li { margin-bottom: 6px; }
+    li { margin-bottom: 8px; }
 
     .step-list {
       list-style: none;
@@ -98,11 +69,11 @@
       flex-shrink: 0;
       width: 26px;
       height: 26px;
-      background: #111;
+      background: var(--t1);
       color: #fff;
-      font-size: 12px;
+      font-size: var(--fs-mini);
       font-weight: 600;
-      border-radius: 50%;
+      border-radius: 0;
       display: flex;
       align-items: center;
       justify-content: center;
@@ -110,16 +81,16 @@
     }
 
     code {
-      background: #f0f0f0;
-      padding: 2px 6px;
-      border-radius: 4px;
-      font-size: 13px;
+      background: var(--flaeche);
+      padding: 2px 8px;
+      border-radius: 0;
+      font-size: var(--fs-klein);
       font-family: "SF Mono", Menlo, Monaco, monospace;
     }
 
     .install-screenshots {
       display: flex;
-      gap: 20px;
+      gap: 24px;
       margin: 24px 0 0;
       flex-wrap: wrap;
     }
@@ -130,13 +101,13 @@
     }
     .install-screenshots img {
       width: 100%;
-      border-radius: 10px;
-      border: 1px solid #e0e0e0;
+      border-radius: 0;
+      border: 1px solid var(--linie);
       box-shadow: 0 2px 12px rgba(0,0,0,0.08);
     }
     .install-screenshots figcaption {
-      font-size: 12px;
-      color: #888;
+      font-size: var(--fs-mini);
+      color: var(--t3);
       margin-top: 8px;
       text-align: center;
     }
@@ -144,35 +115,14 @@
     /* ── Footer ── */
 
     @media (max-width: 740px) {
-      header { padding: 20px 24px; }
-      .page { padding: 40px 20px 80px; }
+      .page { padding: 40px 24px 80px; }
     }
-  </style>
-  <style>
-    /* Einheitlicher Footer, auf allen Seiten gleich (docs/*.html) */
-    .site-footer { border-top: 1px solid #e8e8e8; padding: 44px 48px 28px; font-size: 13px; line-height: 1.6; color: #999; }
-    .site-footer p, .site-footer ul, .site-footer li { margin: 0; padding: 0; color: #999; font-size: inherit; }
-    .site-footer ul a { display: inline; border: 0; padding: 0; background: none; border-radius: 0; font-weight: 400; }
-    .site-footer ul { list-style: none; display: grid; gap: 7px; }
-    .site-footer a { color: #777; text-decoration: none; }
-    .site-footer a:hover, .site-footer a:focus-visible { color: #111; }
-    .sf-grid { max-width: 1100px; margin: 0 auto; display: grid; grid-template-columns: 1.5fr 1fr 1fr 1fr; gap: 32px; }
-    .sf-brand { display: grid; gap: 4px; align-content: start; }
-    .site-footer .sf-name { color: #111; font-size: 15px; font-weight: 600; letter-spacing: -0.2px; }
-    .site-footer .sf-title { font-size: 11px; font-weight: 600; text-transform: uppercase; letter-spacing: 0.06em; color: #aaa; margin-bottom: 12px !important; }
-    .site-footer .sf-bottom { max-width: 1100px; margin: 36px auto 0 !important; padding-top: 16px !important; border-top: 1px solid #f0f0f0; color: #aaa; }
-    @media (max-width: 760px) {
-      .site-footer { padding: 36px 24px 24px; }
-      .sf-grid { grid-template-columns: 1fr 1fr; gap: 28px 24px; }
-      .sf-brand { grid-column: 1 / -1; }
-    }
-    @media print { .site-footer { display: none; } }
   </style>
 </head>
 <body>
 
-  <header>
-    <a class="wordmark" href="index.html">
+  <header class="top">
+    <a class="wordmark" href="/">
       <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="#000" stroke-linecap="round" stroke-linejoin="round" width="22" height="22">
         <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20" stroke-width="2"/>
         <path d="m8 13 4-7 4 7" stroke-width="2"/>
@@ -180,7 +130,11 @@
       </svg>
       Archivio
     </a>
-    <a class="back-link" href="index.html">← Zurück</a>
+    <nav class="top-nav" aria-label="Hauptnavigation">
+      <a href="/warum.html">Warum Archivio</a>
+      <a href="/faq.html">Fragen</a>
+      <a href="/index.html#herunterladen">Herunterladen</a>
+    </nav>
   </header>
 
   <div class="page">
@@ -189,7 +143,7 @@
       <div class="doc-section" id="setup">
         <h2>Installation</h2>
         <p>Archivio besteht aus zwei Teilen: dem <strong>Server</strong>, der auf einem fixen Mac läuft, und dem optionalen <strong>Helper</strong> auf jedem Mitarbeiter-Mac. Optimal läuft der Mac mit Archivio Server während des Arbeitstags (über Nacht umso besser, aber nicht zwingend), ist per Kabel mit dem Netzwerk und Server verbunden und hat mindestens 32&nbsp;GB RAM.</p>
-        <p style="font-size:13px;color:#888;">Mit der Installation gelten der <a href="haftungsausschluss.html">Haftungsausschluss</a> und das <a href="merkblatt.html">Merkblatt zum Umgang mit euren Daten</a>.</p>
+        <p style="font-size:var(--fs-klein);color:var(--t3)">Mit der Installation gelten der <a href="haftungsausschluss.html">Haftungsausschluss</a> und das <a href="merkblatt.html">Merkblatt zum Umgang mit euren Daten</a>.</p>
 
         <h3>Schritt 1 — Archivio Server installieren</h3>
         <ol class="step-list">
