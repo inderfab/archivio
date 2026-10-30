@@ -40,7 +40,7 @@ Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz
 
 ## Anbieter
 
-- [Über Archivio](https://modulario.ch/about.html): wer Archivio entwickelt und nach welchen Grundsätzen
+- [Über Modulario](https://modulario.ch/about.html): wer hinter Modulario und Archivio steht und nach welchen Grundsätzen
 - [Kontakt](https://modulario.ch/contact.html): E-Mail info@modulario.ch, Winterthur
 - [Datenschutz](https://modulario.ch/privacy.html): Datenschutzerklärung der Website und des Downloads
 - [Haftungsausschluss](https://modulario.ch/haftungsausschluss.html): Nutzungsbedingungen
