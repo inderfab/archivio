@@ -83,7 +83,7 @@
     // Die Abmeldung läuft über den Server von Archivio. Alte Links dieser Seite werden weitergeleitet.
     var token = new URLSearchParams(window.location.search).get('token');
     if (token) {
-      window.location.replace('https://anmeldung.architools.ch/abmelden?token=' + encodeURIComponent(token));
+      window.location.replace('https://anmeldung.modulario.ch/abmelden?token=' + encodeURIComponent(token));
     } else {
       document.getElementById('content').innerHTML =
         '<h1>Kein gültiger Abmelde-Link</h1>' +

@@ -32,7 +32,7 @@ Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz
 
 - [Startseite](https://modulario.ch/): Überblick über Funktionen, Download für macOS
 - [Warum Archivio](https://modulario.ch/warum.html): Vergleich mit Finder-/Spotlight-Suche, NAS-Suche, KI mit direktem Ordnerzugriff, Cloud-KI und Dokumentenverwaltung (DMS); bewusste Verzichte (keine Benutzerkonten, keine Cloud, keine eingebaute KI, keine Bürofunktionen)
-- [Online-Demo](https://demo.architools.ch/): Archivio mit einem erfundenen Architekturbüro im Browser ausprobieren, ohne Installation; Änderungen bleiben in einer eigenen Kopie und werden nach vier Stunden gelöscht
+- [Online-Demo](https://demo.modulario.ch/): Archivio mit einem erfundenen Architekturbüro im Browser ausprobieren, ohne Installation; Änderungen bleiben in einer eigenen Kopie und werden nach vier Stunden gelöscht
 - [Häufige Fragen](https://modulario.ch/faq.html): Kosten, Online-Demo, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
 - [Erstinstallation](https://modulario.ch/installation.html): Installation und erster Start, Schritt für Schritt nach dem Download
 - [MCP-Schnittstelle](https://modulario.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
