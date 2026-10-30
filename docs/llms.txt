@@ -2,7 +2,7 @@
 
 > Archivio ist eine lokale Dokumentensuche für Architekturbüros und bringt alle Projektdaten an einen Ort. Sie durchsucht Pläne, Mails, Dokumente, Tabellen und Fotos aus allen Projekten in einer einzigen Suche. Archivio läuft vollständig lokal auf einem Mac im Büro, ohne Cloud-Dienst und ohne eigene KI — Daten verlassen das Büro nicht.
 
-Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz) unter dem Namen architools entwickelt. Es läuft auf macOS (Apple Silicon und Intel), ist von Apple notarisiert und zurzeit kostenlos. Es liest freigegebene Ordner auf dem Büro-Server (z. B. NAS) und verknüpfte Mailkonten ausschliesslich lesend und baut daraus einen lokalen Suchindex auf.
+Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz) unter dem Namen Modulario entwickelt. Es läuft auf macOS (Apple Silicon und Intel), ist von Apple notarisiert und zurzeit kostenlos. Es liest freigegebene Ordner auf dem Büro-Server (z. B. NAS) und verknüpfte Mailkonten ausschliesslich lesend und baut daraus einen lokalen Suchindex auf.
 
 **Was Archivio macht:**
 
@@ -30,21 +30,21 @@ Archivio wird von Fabio Indergand, Architekt MSc ETH SIA, in Winterthur (Schweiz
 
 ## Dokumentation
 
-- [Startseite](https://architools.ch/): Überblick über Funktionen, Download für macOS
-- [Warum Archivio](https://architools.ch/warum.html): Vergleich mit Finder-/Spotlight-Suche, NAS-Suche, KI mit direktem Ordnerzugriff, Cloud-KI und Dokumentenverwaltung (DMS); bewusste Verzichte (keine Benutzerkonten, keine Cloud, keine eingebaute KI, keine Bürofunktionen)
+- [Startseite](https://modulario.ch/): Überblick über Funktionen, Download für macOS
+- [Warum Archivio](https://modulario.ch/warum.html): Vergleich mit Finder-/Spotlight-Suche, NAS-Suche, KI mit direktem Ordnerzugriff, Cloud-KI und Dokumentenverwaltung (DMS); bewusste Verzichte (keine Benutzerkonten, keine Cloud, keine eingebaute KI, keine Bürofunktionen)
 - [Online-Demo](https://demo.architools.ch/): Archivio mit einem erfundenen Architekturbüro im Browser ausprobieren, ohne Installation; Änderungen bleiben in einer eigenen Kopie und werden nach vier Stunden gelöscht
-- [Häufige Fragen](https://architools.ch/faq.html): Kosten, Online-Demo, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
-- [Erstinstallation](https://architools.ch/installation.html): Installation und erster Start, Schritt für Schritt nach dem Download
-- [MCP-Schnittstelle](https://architools.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
-- [Merkblatt zu euren Daten](https://architools.ch/merkblatt.html): was Archivio liest, was im Büro bleibt und was bei aktivierter KI-Schnittstelle übermittelt wird
+- [Häufige Fragen](https://modulario.ch/faq.html): Kosten, Online-Demo, Testbetrieb, bestehende Ablage, Server-Mac, Updates, Datensicherung, eingescannte Dokumente (OCR), Datei-Links, Datenschutz, Zugriffsrechte, Mail-Zugangsdaten, KI-Schnittstelle und Normen
+- [Erstinstallation](https://modulario.ch/installation.html): Installation und erster Start, Schritt für Schritt nach dem Download
+- [MCP-Schnittstelle](https://modulario.ch/mcp.html): MCP-Server für Claude Desktop, Werkzeuge (search, read_document, list_folder, open_file, reveal_file, merge_documents_to_pdf, copy_documents_to_folder), Einrichtung und Datenschutz
+- [Merkblatt zu euren Daten](https://modulario.ch/merkblatt.html): was Archivio liest, was im Büro bleibt und was bei aktivierter KI-Schnittstelle übermittelt wird
 
 ## Anbieter
 
-- [Über Archivio](https://architools.ch/about.html): wer Archivio entwickelt und nach welchen Grundsätzen
-- [Kontakt](https://architools.ch/contact.html): E-Mail info@architools.ch, Winterthur
-- [Datenschutz](https://architools.ch/privacy.html): Datenschutzerklärung der Website und des Downloads
-- [Haftungsausschluss](https://architools.ch/haftungsausschluss.html): Nutzungsbedingungen
+- [Über Archivio](https://modulario.ch/about.html): wer Archivio entwickelt und nach welchen Grundsätzen
+- [Kontakt](https://modulario.ch/contact.html): E-Mail info@architools.ch, Winterthur
+- [Datenschutz](https://modulario.ch/privacy.html): Datenschutzerklärung der Website und des Downloads
+- [Haftungsausschluss](https://modulario.ch/haftungsausschluss.html): Nutzungsbedingungen
 
 ## Optional
 
-- [Sitemap](https://architools.ch/sitemap.xml): alle Seiten der Website
+- [Sitemap](https://modulario.ch/sitemap.xml): alle Seiten der Website
