@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Danke – Modulario</title>
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="stylesheet" href="/stil.css">
+  <style>
+    .page { max-width: 1100px; margin: 0 auto; padding: 64px 24px 112px; }
+    .page > * { max-width: 720px; }
+    h1 { font-size: var(--fs-display); font-weight: 700; letter-spacing: -1.6px; line-height: 1.02; margin-bottom: 32px; }
+    .lead { font-size: var(--fs-lead); color: var(--t2); margin-bottom: 16px; }
+    p { margin-bottom: 16px; color: var(--t2); }
+    .zurueck { display: inline-block; margin-top: 24px; background: var(--t1); color: #fff; text-decoration: none; font-size: var(--fs-h3); font-weight: 600; padding: 16px 40px; }
+    .zurueck:hover { background: #333; color: #fff; }
+  </style>
+</head>
+<body>
+
+  <header class="top">
+    <a class="wordmark" href="/"><img class="wordmark-logo" src="/img/logo/modulario-archivio-schwarz.svg" alt="Modulario Archivio" height="20"></a>
+    <nav class="top-nav" aria-label="Hauptnavigation">
+      <a href="/warum.html">Warum Archivio</a>
+      <a href="/faq.html">Fragen</a>
+      <a href="/index.html#herunterladen">Herunterladen</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <h1>Danke.</h1>
+    <p class="lead">Euer Beitrag hilft, dass Archivio kostenlos bleibt. Damit ermöglicht ihr euch und allen anderen Büros weiterhin die Nutzung und unterstützt die Schweizer Baukultur.</p>
+    <p>Die Quittung kommt in den nächsten Minuten per Mail. Wenn ihr zugestimmt habt, nennen wir euer Büro auf der Seite <a href="/unterstuetzen.html">Unterstützen</a>, ohne Betrag.</p>
+    <p id="regelmaessig" hidden>Euren Beitrag könnt ihr jederzeit über den Link in der Quittung beenden.</p>
+    <a class="zurueck" href="/">Zurück zu Archivio</a>
+  </main>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/"><img class="wordmark-logo" src="/img/logo/modulario-archivio-schwarz.svg" alt="Modulario Archivio" height="16"></a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@modulario.ch">info@modulario.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Modulario</p>
+        <ul>
+          <li><a href="/about.html">Über uns</a></li>
+          <li><a href="/unterstuetzen.html">Unterstützen</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/impressum.html">Impressum</a></li>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 Modulario, Winterthur</p>
+  </footer>
+
+  <script>
+    if (/[?&]art=(monat|jahr)\b/.test(location.search)) { document.getElementById("regelmaessig").hidden = false; }
+  </script>
+</body>
+</html>

@@ -1,0 +1,239 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Archivio unterstützen – Modulario</title>
+  <meta name="description" content="Archivio ist kostenlos, für alle Büros. Mit einem freiwilligen Beitrag ermöglicht ihr euch und allen anderen Büros weiterhin die Nutzung und unterstützt die Schweizer Baukultur.">
+  <!-- Bis zur Freischaltung nicht in Suchmaschinen und nicht in sitemap.xml. Beim Freischalten entfernen. -->
+  <meta name="robots" content="noindex, nofollow">
+  <link rel="canonical" href="https://modulario.ch/unterstuetzen.html">
+  <link rel="stylesheet" href="/stil.css">
+  <style>
+    .page { max-width: 1100px; margin: 0 auto; padding: 64px 24px 96px; }
+    .lese { max-width: 720px; }
+    h1 { font-size: var(--fs-display); font-weight: 700; letter-spacing: -1.6px; line-height: 1.02; margin-bottom: 32px; }
+    h2 { font-size: var(--fs-titel); font-weight: 700; letter-spacing: -0.5px; line-height: 1.2; margin: 0 0 24px; }
+    .lead { font-size: var(--fs-lead); color: var(--t2); margin-bottom: 16px; }
+    .lead strong { color: var(--t1); }
+    p { margin-bottom: 16px; color: var(--t2); }
+
+    .wahl { margin: 64px 0 112px; border-top: 1px solid var(--linie); border-bottom: 1px solid var(--linie); padding: 40px 0; }
+    .reiter { display: inline-flex; border: 1px solid var(--t1); margin-bottom: 32px; }
+    .reiter button {
+      font: inherit; font-size: var(--fs-klein); font-weight: 600; padding: 8px 24px; border: 0; cursor: pointer;
+      background: #fff; color: var(--t1);
+    }
+    .reiter button[aria-selected="true"] { background: var(--t1); color: #fff; }
+    .feld { display: none; }
+    .feld.offen { display: block; }
+    .betraege { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 8px; max-width: 720px; }
+    .betrag, .weiter {
+      display: block; text-align: center; text-decoration: none; cursor: pointer;
+      background: var(--t1); color: #fff; border: 0; border-radius: 0; font: inherit;
+      font-size: var(--fs-h3); font-weight: 600; padding: 24px 16px; transition: background-color 0.15s;
+    }
+    .betrag small { display: block; font-size: var(--fs-klein); font-weight: 400; color: #fff; margin-top: 4px; }
+    .betrag:hover, .weiter:hover { background: #333; color: #fff; }
+    /* Inaktiv (Link fehlt noch): weisse Fläche, Linie, Text in --t3 (4.7:1). Nie weisse Schrift auf Grau. */
+    .betrag[aria-disabled="true"], .weiter[aria-disabled="true"], .weiter:disabled {
+      background: #fff; color: var(--t3); box-shadow: inset 0 0 0 1px var(--linie); cursor: default; pointer-events: none;
+    }
+    .betrag[aria-disabled="true"] small { color: var(--t3); }
+    a[data-link][aria-disabled="true"]:not(.betrag):not(.weiter) { text-decoration: none; color: inherit; }
+    .weiter { display: inline-block; padding: 16px 40px; }
+    .zeile { display: flex; gap: 8px; align-items: stretch; flex-wrap: wrap; margin-bottom: 16px; }
+    .vorschlag {
+      font: inherit; font-size: var(--fs-text); padding: 12px 16px; background: #fff; color: var(--t1);
+      border: 1px solid var(--t4); border-radius: 0; cursor: pointer;
+    }
+    .vorschlag[aria-pressed="true"] { border-color: var(--t1); box-shadow: inset 0 0 0 1px var(--t1); }
+    .eingabe { display: flex; align-items: center; border: 1px solid var(--t4); padding: 0 16px; font-size: var(--fs-text); }
+    .eingabe:focus-within { border-color: var(--t1); }
+    .eingabe input { border: 0; outline: none; font: inherit; width: 96px; padding: 12px 8px; }
+    .hinweis { font-size: var(--fs-klein); color: var(--t3); margin: 24px 0 0; max-width: 720px; }
+    .hinweis a { color: var(--t2); }
+
+    .liste { list-style: none; columns: 3; column-gap: 32px; font-size: var(--fs-text); color: var(--t1); }
+    .liste li { break-inside: avoid; padding: 8px 0; border-top: 1px solid var(--linie); }
+
+    .fragen { margin-top: 112px; }
+    section[hidden] + .fragen { margin-top: 0; }  /* solange «Unterstützt von» ausgeblendet ist */
+    .fragen details { border-top: 1px solid var(--linie); padding: 16px 0; max-width: 720px; }
+    .fragen details:last-child { border-bottom: 1px solid var(--linie); }
+    .fragen summary { cursor: pointer; font-weight: 600; font-size: var(--fs-h3); }
+    .fragen details p { margin: 12px 0 0; }
+
+    @media (max-width: 767px) {
+      .page { padding-top: 40px; }
+      .wahl { margin: 40px 0 72px; padding: 32px 0; }
+      .betraege { grid-template-columns: 1fr 1fr; }
+      .liste { columns: 1; }
+      .weiter { width: 100%; text-align: center; }
+      .fragen { margin-top: 72px; }
+    }
+  </style>
+</head>
+<body>
+
+  <header class="top">
+    <a class="wordmark" href="/"><img class="wordmark-logo" src="/img/logo/modulario-archivio-schwarz.svg" alt="Modulario Archivio" height="20"></a>
+    <nav class="top-nav" aria-label="Hauptnavigation">
+      <a href="/warum.html">Warum Archivio</a>
+      <a href="/faq.html">Fragen</a>
+      <a href="/index.html#herunterladen">Herunterladen</a>
+    </nav>
+  </header>
+
+  <main class="page">
+    <div class="lese">
+      <h1>Archivio unterstützen</h1>
+      <p class="lead"><strong>Archivio ist kostenlos, für alle Büros.</strong> Jedes Büro soll es nutzen können, ob gross oder klein.</p>
+      <p class="lead">Wer das Projekt unterstützen möchte, kann freiwillig einen Beitrag leisten. Damit ermöglicht ihr euch und allen anderen Büros weiterhin die Nutzung und unterstützt die Schweizer Baukultur.</p>
+    </div>
+
+    <section class="wahl" aria-label="Beitrag wählen">
+      <div class="reiter" role="tablist">
+        <button type="button" role="tab" aria-selected="true" data-feld="monat">Monatlich</button>
+        <button type="button" role="tab" aria-selected="false" data-feld="einmalig">Einmalig</button>
+        <button type="button" role="tab" aria-selected="false" data-feld="jahr">Jährlich</button>
+      </div>
+
+      <div class="feld offen" id="feld-monat" role="tabpanel">
+        <div class="betraege">
+          <a class="betrag" data-link="monat5" href="#">CHF 5<small>pro Monat</small></a>
+          <a class="betrag" data-link="monat10" href="#">CHF 10<small>pro Monat</small></a>
+          <a class="betrag" data-link="monat20" href="#">CHF 20<small>pro Monat</small></a>
+          <a class="betrag" data-link="monat50" href="#">CHF 50<small>pro Monat</small></a>
+        </div>
+      </div>
+
+      <div class="feld" id="feld-einmalig" role="tabpanel">
+        <p>Den Betrag wählt ihr im nächsten Schritt, vorgeschlagen sind CHF 100.</p>
+        <a class="weiter" data-link="einmalig" href="#">Weiter</a>
+      </div>
+
+      <div class="feld" id="feld-jahr" role="tabpanel">
+        <form method="post" id="form-jahr" action="https://anmeldung.modulario.ch/beitrag/jaehrlich">
+          <div class="zeile">
+            <button type="button" class="vorschlag" data-betrag="50" aria-pressed="false">CHF 50</button>
+            <button type="button" class="vorschlag" data-betrag="100" aria-pressed="true">CHF 100</button>
+            <button type="button" class="vorschlag" data-betrag="250" aria-pressed="false">CHF 250</button>
+            <button type="button" class="vorschlag" data-betrag="500" aria-pressed="false">CHF 500</button>
+            <label class="eingabe">CHF <input type="number" name="betrag" id="betrag-jahr" value="100" min="20" max="5000" step="1" inputmode="numeric" aria-label="Betrag pro Jahr in Franken" required> pro Jahr</label>
+          </div>
+          <button type="submit" class="weiter" id="weiter-jahr">Weiter</button>
+        </form>
+      </div>
+
+      <p class="hinweis">Bezahlt wird über Stripe mit Karte, TWINT, Apple Pay oder Google Pay. Ihr bekommt eine Quittung per Mail. Monatliche und jährliche Beiträge lassen sich jederzeit <a href="#" data-link="portal">beenden</a>. Beim Bezahlen fragen wir, ob wir euer Büro auf dieser Seite nennen dürfen. Den Betrag nennen wir nie.</p>
+    </section>
+
+    <section aria-labelledby="titel-liste" id="unterstuetzt-von" hidden>
+      <h2 id="titel-liste">Unterstützt von</h2>
+      <ul class="liste" id="liste"></ul>
+    </section>
+
+    <section class="fragen" aria-labelledby="titel-fragen">
+      <h2 id="titel-fragen">Fragen</h2>
+      <details>
+        <summary>Bekommen wir mit einem Beitrag mehr?</summary>
+        <p>Nein. Archivio ist für alle gleich und bleibt kostenlos. Wenn ihr wollt, nennen wir euer Büro auf dieser Seite, ohne Betrag.</p>
+      </details>
+      <details>
+        <summary>Ist das eine Spende?</summary>
+        <p>Nein, es ist ein freiwilliger Beitrag an die Entwicklung von Archivio. Modulario ist keine gemeinnützige Organisation, der Beitrag ist darum keine steuerlich abziehbare Spende. Wie ihr ihn verbucht, klärt ihr am besten mit eurer Treuhand. Die Quittung kommt als PDF per Mail.</p>
+      </details>
+      <details>
+        <summary>Wie beenden oder ändern wir einen monatlichen oder jährlichen Beitrag?</summary>
+        <p>Über den Link in jeder Quittung oder hier: <a href="#" data-link="portal">Beitrag verwalten</a>. Ihr meldet euch mit eurer Mail-Adresse an und bekommt einen Code. Dort könnt ihr den Beitrag beenden, die Karte ändern und Quittungen herunterladen. Der Beitrag läuft bis zum Ende des bezahlten Monats oder Jahres, es gibt keine Kündigungsfrist. Für einen anderen Betrag beendet ihr den bisherigen Beitrag und wählt hier einen neuen.</p>
+      </details>
+      <details>
+        <summary>Wofür wird das Geld verwendet?</summary>
+        <p>Für den Betrieb (Server, Domain, Apple-Entwicklerkonto) und für die Zeit, die in die Weiterentwicklung von Archivio fliesst.</p>
+      </details>
+    </section>
+  </main>
+
+  <footer class="site-footer">
+    <div class="sf-grid">
+      <div class="sf-brand">
+        <a class="sf-name" href="/"><img class="wordmark-logo" src="/img/logo/modulario-archivio-schwarz.svg" alt="Modulario Archivio" height="16"></a>
+        <p>Lokale Dokumentensuche für Architekturbüros</p>
+        <p><a href="mailto:info@modulario.ch">info@modulario.ch</a></p>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Archivio</p>
+        <ul>
+          <li><a href="/warum.html">Warum Archivio</a></li>
+          <li><a href="/faq.html">Häufige Fragen</a></li>
+          <li><a href="/installation.html">Erstinstallation</a></li>
+          <li><a href="/mcp.html">MCP-Schnittstelle</a></li>
+          <li><a href="/merkblatt.html">Merkblatt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Modulario</p>
+        <ul>
+          <li><a href="/about.html">Über uns</a></li>
+          <li><a href="/unterstuetzen.html">Unterstützen</a></li>
+          <li><a href="/contact.html">Kontakt</a></li>
+        </ul>
+      </div>
+      <div class="sf-col">
+        <p class="sf-title">Rechtliches</p>
+        <ul>
+          <li><a href="/impressum.html">Impressum</a></li>
+          <li><a href="/privacy.html">Datenschutz</a></li>
+          <li><a href="/haftungsausschluss.html">Haftungsausschluss</a></li>
+        </ul>
+      </div>
+    </div>
+    <p class="sf-bottom">© 2026 Modulario, Winterthur</p>
+  </footer>
+
+  <script>
+    // Stripe-Zahlungslinks: im Stripe-Dashboard anlegen und hier eintragen. Leer = Knopf noch inaktiv.
+    // Testmodus (31.10.). Für live die Links aus dem Live-Modus eintragen.
+    var LINKS = {
+      monat5: "https://buy.stripe.com/test_bJe7sL4V0cRF7pE3pC4Rq02",
+      monat10: "https://buy.stripe.com/test_28EdR9drw7xl25k2ly4Rq00",
+      monat20: "https://buy.stripe.com/test_cNieVdcnsdVJ9xM8JW4Rq01",
+      monat50: "https://buy.stripe.com/test_4gM5kD5Z4cRFdO28JW4Rq03",
+      einmalig: "https://buy.stripe.com/test_6oU28rfzEg3R4ds0dq4Rq04",
+      portal: "https://billing.stripe.com/p/login/test_28EdR9drw7xl25k2ly4Rq00"
+    };
+    var LISTE_URL = "https://anmeldung.modulario.ch/unterstuetzer.json";
+    var LISTE_AB = 5;  // «Unterstützt von» erst zeigen, wenn so viele Büros genannt werden dürfen
+
+    document.querySelectorAll("[data-link]").forEach(function (a) {
+      var url = LINKS[a.dataset.link];
+      if (url) { a.href = url; } else { a.setAttribute("aria-disabled", "true"); a.removeAttribute("href"); }
+    });
+
+    document.querySelectorAll(".reiter button").forEach(function (b) {
+      b.addEventListener("click", function () {
+        document.querySelectorAll(".reiter button").forEach(function (x) { x.setAttribute("aria-selected", x === b ? "true" : "false"); });
+        document.querySelectorAll(".feld").forEach(function (f) { f.classList.toggle("offen", f.id === "feld-" + b.dataset.feld); });
+      });
+    });
+
+    var eingabe = document.getElementById("betrag-jahr");
+    function markiere() {
+      document.querySelectorAll(".vorschlag").forEach(function (v) { v.setAttribute("aria-pressed", v.dataset.betrag === eingabe.value ? "true" : "false"); });
+    }
+    document.querySelectorAll(".vorschlag").forEach(function (v) {
+      v.addEventListener("click", function () { eingabe.value = v.dataset.betrag; markiere(); });
+    });
+    eingabe.addEventListener("input", markiere);
+
+    fetch(LISTE_URL).then(function (r) { return r.ok ? r.json() : []; }).catch(function () { return []; }).then(function (liste) {
+      var ul = document.getElementById("liste");
+      liste = liste || [];
+      if (liste.length < LISTE_AB) { return; }
+      liste.forEach(function (u) { var li = document.createElement("li"); li.textContent = u.name; ul.appendChild(li); });
+      document.getElementById("unterstuetzt-von").hidden = false;
+    });
+  </script>
+</body>
+</html>
