@@ -115,6 +115,17 @@
     .btn-demo span { transition: transform 0.15s; }
     .btn-demo:hover span { transform: translateX(4px); }
     .btn-download { display: inline-block; padding: 16px 40px; }
+    /* Hero: Herunterladen ist das Ziel (schwarz), die Demo in der Leiste darunter der Zwischenschritt (Linie) */
+    .hero-aktion { margin-top: 40px; }
+    /* Ab Tablet: Titel, Knopf, dann die Zeile «Kostenlos …»; auf dem Handy Zeile vor dem Knopf */
+    @media (min-width: 768px) {
+      .hero { display: flex; flex-direction: column; align-items: flex-start; }
+      .hero .hero-aktion { order: 1; }
+      .hero .hero-unterzeile { order: 2; }
+    }
+    .btn-hero { text-align: center; }
+    .dock .btn-demo { background: #fff; color: var(--t1); box-shadow: inset 0 0 0 1px var(--t1); }
+    .dock .btn-demo:hover { background: var(--flaeche); color: var(--t1); }
     /* Inaktiv: weisse Fläche, Linie, Text in --t3 (nie weisse Schrift auf Grau) */
     .btn-download:disabled { background: #fff; color: var(--t3); box-shadow: inset 0 0 0 1px var(--linie); cursor: default; }
 
@@ -159,6 +170,9 @@
       .dock-reihe > a:not(.btn-demo) { display: none; }
       .btn-demo { flex: 1 1 auto; padding: 16px 24px; }
       .hero { padding-top: 56px; }
+      .hero-aktion { margin-top: 32px; }
+      .btn-hero { display: block; padding: 16px 24px; }
+      .dock { margin-top: 8px; }
       .hero-unterzeile { align-items: flex-start; font-size: var(--fs-h3); }
       .hero-unterzeile svg { margin-top: 4px; }
     }
@@ -328,8 +342,11 @@
       <h1>Jedes Dokument.<br>Jede Mail.<br>Jeder Plan.<br><b>Sofort gefunden.</b></h1>
       <p class="hero-unterzeile">
         <svg viewBox="0 0 24 24" fill="none" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 0 1 8 0v3"/></svg>
-        <span>Läuft vollständig lokal im Büro,<br class="br-handy"> ohne Abo, Cloud und KI</span>
+        <span>Kostenlos für alle Büros.<br class="br-handy"> Läuft vollständig lokal, ohne Cloud und KI.</span>
       </p>
+      <div class="hero-aktion">
+        <a class="btn-download btn-hero" href="#herunterladen" onclick="showEmailForm()">Kostenlos herunterladen</a>
+      </div>
     </section>
 
     <div class="fluss">
