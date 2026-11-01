@@ -1,6 +1,6 @@
 /* Gemeinsame Grundlage aller Seiten (docs/*.html), nach Swiss-Design-Regeln:
    vier Textstufen, eine Linie, eine Fläche, kein Akzent ausser Schwarz;
-   sieben Schriftgrössen; Abstände in Vielfachen von 8 px; eckige Ecken.
+   sieben Schriftgrössen; Abstände in Vielfachen von 8 px; Ecken ganz leicht gerundet (--radius).
    Seiteneigene Stile stehen weiterhin im <style> der jeweiligen Seite. */
 :root {
   --t1: #111;      /* Haupttext, Titel, Knöpfe */
@@ -8,6 +8,7 @@
   --t3: #737373;   /* Nebentext, Nummern, Fussleiste (4.7:1, reicht auch für kleine Schrift) */
   --t4: #949494;   /* nur grosse Schrift und Zeichen ohne Inhalt (3:1) */
   --linie: #e5e5e5;
+  --radius: 3px;   /* Knöpfe, Felder, Kästen: kaum sichtbar gerundet, damit es nicht zu hart wirkt */
   --flaeche: #f2f2f2;
 
   --fs-display: clamp(42px, 6vw, 80px);  /* Titel der Startseite */
