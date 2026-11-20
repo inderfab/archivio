@@ -66,7 +66,7 @@
     </div>
 
     <h2>So funktioniert es</h2>
-    <p>Die KI-Anwendung (am Beispiel Claude Desktop) startet den Archivio-MCP-Server als lokales Programm (stdio) auf dem eigenen Mac. Bei einer KI-Suche wird die Schnittstelle automatisch aufgerufen: Stellt jemand im Chat eine Frage, sucht das KI-Programm selbstständig in Archivio, bei Bedarf mehrfach, und liest die passenden Dokumente. Der MCP-Server leitet die Anfragen an den Archivio-Server im Büronetz weiter und gibt die Treffer an die KI zurück. Was dabei an die KI übermittelt wird, sind die Ausschnitte der Dokumente, die für die Frage abgerufen werden, und nur aus Projekten, die dafür freigegeben sind.</p>
+    <p>Die KI-Anwendung (am Beispiel Claude Desktop) startet den Archivio-MCP-Server als lokales Programm (stdio) auf dem eigenen Mac. Bei einer KI-Suche wird die Schnittstelle automatisch aufgerufen: Stellt jemand im Chat eine Frage, sucht das KI-Programm selbstständig in Archivio, bei Bedarf mehrfach, und liest die passenden Dokumente. Der MCP-Server leitet die Anfragen an den Archivio-Server im Büronetz weiter und gibt die Treffer an die KI zurück. Was dabei an die KI übermittelt wird, sind die Suchtreffer (Dateiname, Pfad, Projekt, kurzer Ausschnitt) und der Text der Dokumente, die sie liest, und nur aus Projekten, die dafür freigegeben sind. Gelesen wird in Blöcken von 8000 Zeichen; die KI kann ein Dokument so auch ganz lesen.</p>
 
     <h2>Voraussetzungen</h2>
     <ul>
@@ -80,7 +80,7 @@
     <ol>
       <li>Archivio im Browser öffnen und auf der Seite <strong>Helper</strong> den Archivio Helper installieren.</li>
       <li>Auf derselben Seite unter «KI-Schnittstelle (MCP) einrichten» <strong>Claude Desktop</strong> wählen und auf <strong>MCP-Schnittstelle installieren</strong> klicken. Der Helper trägt Archivio in die Konfiguration von Claude Desktop ein, andere Einträge bleiben unverändert.</li>
-      <li><strong>Claude Desktop neu starten.</strong> Danach erscheint Archivio in Claude unter den verbundenen Werkzeugen.</li>
+      <li><strong>Claude Desktop neu starten.</strong> Danach erscheint Archivio in Claude links in der Seitenleiste unter «Plugins» (auch über Einstellungen → Plugins) und lässt sich dort aktivieren.</li>
       <li>In Archivio unter <strong>Projekte</strong> die gewünschten Projekte mit dem Roboter-Symbol freigeben. Ohne Freigabe liefert die Schnittstelle keine Treffer.</li>
     </ol>
 
@@ -91,8 +91,8 @@
         <thead><tr><th>Werkzeug</th><th>Was es tut</th><th>Wirkung</th></tr></thead>
         <tbody>
           <tr><td><code>search</code></td><td>Volltextsuche in Dokumenten, Mails, Datei- und Ordnernamen, optional auf ein Projekt eingeschränkt. Jeder Treffer hat eine ID.</td><td>nur lesend</td></tr>
-          <tr><td><code>read_document</code></td><td>Lädt den Text eines gefundenen Dokuments blockweise in die Unterhaltung, zum Lesen, Zusammenfassen oder Beantworten von Fragen.</td><td>nur lesend</td></tr>
-          <tr><td><code>list_folder</code></td><td>Listet den Inhalt eines Ordners innerhalb der Archivio-Projektordner.</td><td>nur lesend</td></tr>
+          <tr><td><code>read_document</code></td><td>Lädt den Text eines gefundenen Dokuments in Blöcken von 8000 Zeichen in die Unterhaltung, auf Wunsch Block für Block bis zum ganzen Dokument, zum Lesen, Zusammenfassen oder Beantworten von Fragen.</td><td>nur lesend</td></tr>
+          <tr><td><code>list_folder</code></td><td>Listet den Inhalt eines Ordners in einem freigegebenen Projekt. Gesperrte, vom Scan ausgeschlossene und ignorierte Einträge sowie Normen erscheinen nicht.</td><td>nur lesend</td></tr>
           <tr><td><code>open_file</code></td><td>Öffnet eine Datei in der zugehörigen App auf dem eigenen Mac.</td><td>nur lesend</td></tr>
           <tr><td><code>reveal_file</code></td><td>Zeigt eine Datei im Finder.</td><td>nur lesend</td></tr>
           <tr><td><code>merge_documents_to_pdf</code></td><td>Fügt mehrere gefundene PDFs zu einer neuen PDF-Datei im Downloads-Ordner zusammen.</td><td>legt neue Datei an</td></tr>
@@ -100,7 +100,7 @@
         </tbody>
       </table>
     </div>
-    <p>Die lesenden Werkzeuge sind gegenüber der KI als «nur lesend» gekennzeichnet. Dateien öffnen, im Finder zeigen und Ordner auflisten funktioniert nur innerhalb der Projektordner, die in Archivio konfiguriert sind.</p>
+    <p>Die lesenden Werkzeuge sind gegenüber der KI als «nur lesend» gekennzeichnet. Dateien öffnen, im Finder zeigen und Ordner auflisten funktioniert nur in Projekten, die für KI-Anwendungen freigegeben sind, und nicht für Einträge auf der Sperrliste. Die Prüfung macht der Archivio-Server.</p>
 
     <h2>Beispiele für Fragen</h2>
     <ul>
@@ -113,11 +113,14 @@
     <h2>Datenschutz und Kontrolle</h2>
     <ul>
       <li><strong>Freigabe pro Projekt:</strong> Neue Projekte sind nie automatisch für KI-Anwendungen sichtbar.</li>
-      <li><strong>Sperrliste:</strong> Unter «Verwaltung → Sperrliste» lassen sich zusätzlich Ordner oder Dateien für die Schnittstelle sperren.</li>
-      <li><strong>Normen:</strong> Als Norm erkannte Dokumente (SIA und weitere) werden nie übermittelt.</li>
-      <li><strong>Protokoll:</strong> Jeder Zugriff und jede Blockierung wird unter «Verwaltung → Verlauf» festgehalten.</li>
+      <li><strong>Sperrliste:</strong> Unter «Verwaltung → Sperrliste» lassen sich zusätzlich Ordner oder Dateien sperren. Gesperrtes ist für die KI unsichtbar, auch Dateiname und Pfad. Nicht freigegebene Projekte werden nicht mit Namen genannt.</li>
+      <li><strong>Normen:</strong> Standardmässig wird vom Inhalt als Norm erkannter Dokumente (SIA, VSS und weitere) nichts übermittelt, nur Dateiname, Pfad und Gültigkeit. Das Büro kann die Normsuche freigeben: Dann liefert die Suche kurze Ausschnitte, ganze Normen werden weiterhin nicht ausgelesen, zusammengeführt oder kopiert. Die Erkennung ist nicht lückenlos, siehe <a href="merkblatt.html">Merkblatt</a>.</li>
+      <li><strong>Personendaten:</strong> Namen, Mailadressen und Telefonnummern werden nicht ersetzt, sie gehen so an die KI, wie sie in den Dokumenten stehen.</li>
+      <li><strong>Protokoll:</strong> Jeder Aufruf jedes Werkzeugs und jede Blockierung wird unter «Verwaltung → Verlauf» festgehalten, mit der Zahl der übermittelten Zeichen und ohne Bezug zu Person oder Gerät.</li>
+      <li><strong>USA:</strong> Der Anbieter von Claude verarbeitet die Daten in der Regel in den USA. Auftragsverarbeitungsvertrag (AVV/DPA) und Datenschutzerklärung des Büros prüfen.</li>
+      <li><strong>Ergebnisse:</strong> KI-Antworten sind nur vorbereitend; verbindlich sind die geprüften Originaldokumente.</li>
     </ul>
-    <p>Für die Nutzung von Claude empfehlen wir ein Team- oder Enterprise-Konto. Details dazu im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
+    <p>Für die Nutzung von Claude empfehlen wir ein Konto des Büros ohne Modelltraining (Team, Enterprise oder Pro mit ausgeschaltetem Training), kein privates Konto. Details dazu im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
 
     <h2>Andere KI-Anwendungen</h2>
     <p>Als Erstes ist Claude Desktop eingerichtet, weitere Anbieter folgen. Unterstützt werden Anwendungen, die MCP-Server lokal über eine Konfigurationsdatei einbinden. ChatGPT bindet MCP-Server über die Cloud von OpenAI an und bräuchte dafür einen Zugang zum Archivio-Server aus dem Internet. Das ist aus Datenschutzgründen zurzeit nicht vorgesehen. Bei Interesse freuen wir uns über eine Nachricht an <a href="mailto:info@modulario.ch">info@modulario.ch</a>.</p>

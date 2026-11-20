@@ -128,7 +128,7 @@
       "name": "Verlassen unsere Daten das Büro?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt. Details im Merkblatt zu euren Daten."
+        "text": "Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, gehen die Suchtreffer und der Text der Dokumente, die der KI-Dienst liest, an diesen Dienst, bei Claude in der Regel in die USA. Details im Merkblatt zu euren Daten."
       }
     },
     {
@@ -176,7 +176,7 @@
       "name": "Was bekommt die KI zu sehen?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Nur Ausschnitte der Dokumente, die sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt. Neue Projekte sind nie automatisch freigegeben. Zusätzlich lassen sich Ordner und Dateien über die Sperrliste ausschliessen. Jeder Zugriff und jede Blockierung steht unter «Verwaltung → Verlauf»."
+        "text": "Was sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt: Suchtreffer mit Dateiname, Pfad und kurzem Ausschnitt, und den Text der Dokumente, die sie liest, in Blöcken von 8000 Zeichen bis zum ganzen Dokument. Personendaten darin werden nicht ersetzt. Neue Projekte sind nie automatisch freigegeben. Was auf der Sperrliste steht, sieht die KI gar nicht, auch nicht Dateiname oder Pfad. Jeder Zugriff und jede Blockierung steht ohne Bezug zu Person oder Gerät unter «Verwaltung → Verlauf»."
       }
     },
     {
@@ -184,7 +184,7 @@
       "name": "Werden Normen an die KI übermittelt?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Nein. Normen sind urheberrechtlich geschützt. Dokumente, die Archivio als Norm erkennt (SIA, VSS und weitere), werden nie über die MCP-Schnittstelle übermittelt, auch nicht aus freigegebenen Projekten."
+        "text": "Standardmässig nein, sofern Archivio sie als Norm erkennt. Normen sind urheberrechtlich geschützt. Vom Inhalt erkannter Normen (SIA, VSS und weitere) geht dann nichts an die KI, auch nicht aus freigegebenen Projekten; sie sieht nur Dateiname, Pfad und Gültigkeit. Das Büro kann die Normsuche bewusst freigeben, mit einem Konto ohne Training: Dann erhält die KI bei einer Suche kurze Ausschnitte, ganze Normen werden weiterhin nicht ausgelesen. Die Erkennung ist nicht lückenlos: Auszüge ohne Titelblatt, Normen mitten in einem Sammel-PDF oder in ein Protokoll kopierter Normtext werden nicht erkannt und wie andere Dokumente behandelt."
       }
     },
     {
@@ -200,7 +200,7 @@
       "name": "Kann eine KI nicht direkt auf den Server zugreifen?",
       "acceptedAnswer": {
         "@type": "Answer",
-        "text": "Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst."
+        "text": "Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt standardmässig keine erkannten Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor den meisten Lizenzverletzungen; ganz lückenlos ist die Erkennung von Normen nicht."
       }
     }
   ]
@@ -313,7 +313,7 @@
     <h2>Daten und Sicherheit</h2>
     <details>
       <summary>Verlassen unsere Daten das Büro?</summary>
-      <p>Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, werden Ausschnitte der abgerufenen Dokumente an den gewählten KI-Dienst übermittelt. Details im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
+      <p>Nein. Suche, Index und Datenbank laufen vollständig auf dem Mac im Büro, ohne Cloud und ohne Benutzerkonto. Nur wenn ihr die optionale KI-Schnittstelle aktiviert und einzelne Projekte freigebt, gehen die Suchtreffer und der Text der Dokumente, die der KI-Dienst liest, an diesen Dienst, bei Claude in der Regel in die USA. Details im <a href="merkblatt.html">Merkblatt zu euren Daten</a>.</p>
     </details>
     <details>
       <summary>Kann Archivio Dateien verändern oder löschen?</summary>
@@ -339,11 +339,11 @@
     </details>
     <details>
       <summary>Was bekommt die KI zu sehen?</summary>
-      <p>Nur Ausschnitte der Dokumente, die sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt. Neue Projekte sind nie automatisch freigegeben. Zusätzlich lassen sich Ordner und Dateien über die Sperrliste ausschliessen. Jeder Zugriff und jede Blockierung steht unter «Verwaltung → Verlauf».</p>
+      <p>Was sie für eine konkrete Frage abruft, und nur aus Projekten, die ihr mit dem Roboter-Symbol freigegeben habt: Suchtreffer mit Dateiname, Pfad und kurzem Ausschnitt, und den Text der Dokumente, die sie liest, in Blöcken von 8000 Zeichen bis zum ganzen Dokument. Personendaten darin werden nicht ersetzt. Neue Projekte sind nie automatisch freigegeben. Was auf der Sperrliste steht, sieht die KI gar nicht, auch nicht Dateiname oder Pfad. Jeder Zugriff und jede Blockierung steht ohne Bezug zu Person oder Gerät unter «Verwaltung → Verlauf».</p>
     </details>
     <details>
       <summary>Werden Normen an die KI übermittelt?</summary>
-      <p>Nein. Normen sind urheberrechtlich geschützt. Dokumente, die Archivio als Norm erkennt (SIA, VSS und weitere), werden nie über die MCP-Schnittstelle übermittelt, auch nicht aus freigegebenen Projekten.</p>
+      <p>Standardmässig nein, sofern Archivio sie als Norm erkennt. Normen sind urheberrechtlich geschützt. Vom Inhalt erkannter Normen (SIA, VSS und weitere) geht dann nichts an die KI, auch nicht aus freigegebenen Projekten; sie sieht nur Dateiname, Pfad und Gültigkeit. Das Büro kann die Normsuche bewusst freigeben, mit einem Konto ohne Training: Dann erhält die KI bei einer Suche kurze Ausschnitte, ganze Normen werden weiterhin nicht ausgelesen. Die Erkennung ist nicht lückenlos: Auszüge ohne Titelblatt, Normen mitten in einem Sammel-PDF oder in ein Protokoll kopierter Normtext werden nicht erkannt und wie andere Dokumente behandelt.</p>
     </details>
     <details>
       <summary>Kann die KI über Archivio Dateien verändern?</summary>
@@ -351,7 +351,7 @@
     </details>
     <details>
       <summary>Kann eine KI nicht direkt auf den Server zugreifen?</summary>
-      <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt nie Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor Lizenzverletzungen, ohne dass ihr etwas tun müsst.</p>
+      <p>Doch, aber ohne Index muss sie sich Ordner für Ordner durchklicken und Datei für Datei öffnen. Das ist langsam, und es geht leicht etwas vergessen. Zudem kann sie so auch Normen öffnen und an den KI-Dienst im Internet übermitteln, was mit den Lizenzbedingungen der Normen nicht vereinbar ist. Über Archivio sucht die KI mit einer einzigen Anfrage in der ganzen Archivio-Datenbank. Sie sieht nur freigegebene Projekte, bekommt standardmässig keine erkannten Normen und verändert nichts. Jeder Zugriff steht im Verlauf. So schützt Archivio euch vor den meisten Lizenzverletzungen; ganz lückenlos ist die Erkennung von Normen nicht.</p>
     </details>
   </div>
 
