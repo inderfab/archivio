@@ -18,8 +18,8 @@
     /* Vergleichstabelle: schmal, auf dem Handy seitlich scrollbar mit fixer erster Spalte */
     .cmp-wrap { margin: 32px 0 12px; overflow-x: auto; -webkit-overflow-scrolling: touch; }
     .cmp { width: 100%; border-collapse: collapse; table-layout: fixed; font-size: var(--fs-klein); line-height: 1.4; }
-    .cmp col.c-label { width: 34%; }
-    .cmp col.c-val { width: 11%; }
+    .cmp col.c-label { width: 30%; }
+    .cmp col.c-val { width: 10%; }
     .cmp th, .cmp td { padding: 8px 8px; border-bottom: 1px solid var(--linie); text-align: center; vertical-align: middle; }
     .cmp thead th { font-size: var(--fs-mini); font-weight: 600; color: var(--t3); text-transform: uppercase; letter-spacing: 0.04em; border-bottom: 1px solid var(--linie); white-space: nowrap; }
     .cmp tbody th { text-align: left; font-weight: 400; color: var(--t2); padding-left: 0; }
@@ -60,7 +60,7 @@
       .btn-demo { justify-content: center; }
     }
     @media (max-width: 600px) {
-      .cmp { min-width: 640px; }
+      .cmp { min-width: 720px; }
       .cmp tbody th { position: sticky; left: 0; background: #fff; }
     }
   </style>
@@ -83,7 +83,7 @@
 
     <div class="cmp-wrap">
       <table class="cmp">
-        <colgroup><col class="c-label"><col class="c-val" span="6"></colgroup>
+        <colgroup><col class="c-label"><col class="c-val" span="7"></colgroup>
         <thead>
           <tr>
             <th></th>
@@ -92,26 +92,29 @@
             <th>NAS</th>
             <th>KI direkt</th>
             <th>Cloud-KI</th>
+            <th>KI-DMS</th>
             <th>DMS</th>
           </tr>
         </thead>
         <tbody>
           <tr><th>Alle Projekte in einer Suche</th>
-            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="part">◐</td><td>✓</td><td>✓</td></tr>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="part">◐</td><td>✓</td><td>✓</td><td>✓</td></tr>
           <tr><th>Schnell dank Index über den ganzen Server</th>
-            <td class="col-a">✓</td><td class="no">–</td><td>✓</td><td class="no">–</td><td>✓</td><td>✓</td></tr>
+            <td class="col-a">✓</td><td class="no">–</td><td>✓</td><td class="no">–</td><td>✓</td><td>✓</td><td>✓</td></tr>
           <tr><th>Bestehende Ablage bleibt, wie sie ist</th>
-            <td class="col-a">✓</td><td>✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td></tr>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="part">◐</td><td class="no">–</td></tr>
           <tr><th>Mails, Scans und Fotos zusammen</th>
-            <td class="col-a">✓</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td></tr>
+            <td class="col-a">✓</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td><td class="part">◐</td></tr>
           <tr><th>Suche läuft im Büro, ohne Cloud</th>
-            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
+          <tr><th>Fragen zu Dokumenten per KI beantworten</th>
+            <td class="col-a part">◐</td><td class="no">–</td><td class="no">–</td><td>✓</td><td>✓</td><td>✓</td><td class="part">◐</td></tr>
           <tr><th>Normen erkannt und standardmässig für KI gesperrt</th>
-            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
+            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="no">–</td></tr>
           <tr><th>KI-Freigabe pro Projekt, mit Protokoll</th>
-            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td><td class="no">–</td></tr>
+            <td class="col-a">✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td><td class="part">◐</td><td class="no">–</td></tr>
           <tr><th>Kostenlos, ohne Abo</th>
-            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
+            <td class="col-a">✓</td><td>✓</td><td>✓</td><td class="no">–</td><td class="no">–</td><td class="no">–</td><td class="part">◐</td></tr>
         </tbody>
       </table>
     </div>
@@ -122,6 +125,7 @@
       <li><strong>NAS (Dateiserver):</strong> die Suchfunktion des Dateiservers, z.&nbsp;B. Synology Universal Search oder QNAP Qsirch. Mails nur, wenn sie als Dateien auf dem Server liegen, Texterkennung über Zusatz-Apps.</li>
       <li><strong>KI direkt:</strong> ein KI-Programm mit Zugriff auf die Ordner, z.&nbsp;B. Claude Desktop mit Dateizugriff. Ohne Index liest es Ordner für Ordner und Datei für Datei, und je nach Einstellung kann es Dateien verändern oder verschieben.</li>
       <li><strong>Cloud-KI:</strong> KI im Büro-Abo eines Cloud-Anbieters, z.&nbsp;B. ChatGPT oder Microsoft Copilot. Die Ablage muss dafür in die Cloud, Freigaben und Protokoll laufen über den Administrator.</li>
+      <li><strong>KI-DMS:</strong> Plattformen, die Projekt- und Bauunterlagen mit eingebauter KI durchsuchbar machen und Fragen dazu beantworten. Die Dokumente werden dafür beim Anbieter hochgeladen oder über Konnektoren synchronisiert, die Suche läuft in der Cloud, meist im Abo pro Nutzer.</li>
       <li><strong>DMS:</strong> Dokumentenverwaltung, z.&nbsp;B. ecoDMS oder Paperless. Die Dateien werden in das System abgelegt, statt in der bestehenden Ordnerstruktur zu bleiben.</li>
     </ul>
 
